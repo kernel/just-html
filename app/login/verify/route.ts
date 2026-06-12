@@ -60,10 +60,11 @@ function deadLinkPage(next?: string): string {
 export function GET(req: Request): Response {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
-  // Default landing is /login (the dashboard-lite), where an account-less
-  // session sees the "no account yet — tell your agent to sign up" message —
-  // not the homepage, which a fresh user would otherwise land on.
-  const next = sanitizeNext(url.searchParams.get("next") ?? "/login");
+  // Default landing is /docs (the docs listing). It lists owned + shared docs;
+  // an account-less session (no account yet) sees its shared docs plus the
+  // "no account yet — tell your agent to sign up" line. Not the homepage, which
+  // a fresh signed-in user would otherwise land on.
+  const next = sanitizeNext(url.searchParams.get("next") ?? "/docs");
   if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
   return htmlResponse(confirmPage(token, next));
 }
@@ -76,7 +77,7 @@ export async function POST(req: Request): Promise<Response> {
   }
   const form = await req.formData();
   const token = String(form.get("token") ?? "");
-  const next = sanitizeNext(String(form.get("next") ?? "/login"));
+  const next = sanitizeNext(String(form.get("next") ?? "/docs"));
   if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
 
   const { rows } = await query<{ email: string; id: number }>(

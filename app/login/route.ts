@@ -45,11 +45,11 @@ function dashboardPage(email: string, hasAccount: boolean): string {
   const body = hasAccount
     ? `<h1>SIGNED IN</h1>
 <section><pre>    You're signed in as <code>${esc(email)}</code>, and you have a justhtml.sh
-    account. Your documents live behind your API key.
+    account. See <a href="/docs">your documents</a> — owned and shared with you.
 
     Your agent publishes and manages docs with the key it received when
-    it signed you up. To view a private doc you own, open its share link
-    (the one carrying <code>?viewtoken=…</code>) — your agent has it.
+    it signed you up. Private docs you own (and any shared with your
+    email) render right in the browser while you're signed in.
 
     See <a href="/llms.txt">/llms.txt</a> and <a href="/api/spec.yaml">/api/spec.yaml</a> for the full API.</pre></section>`
     : `<h1>NO ACCOUNT YET</h1>
@@ -59,7 +59,9 @@ function dashboardPage(email: string, hasAccount: boolean): string {
     Sign-up is agent-only — tell your agent to sign up at
     <a href="/auth.md">justhtml.sh/auth.md</a>. It will register with this email, show you a
     6-digit code and a link, and you confirm right here. You'll end up
-    with an account and your agent will hold the API key.</pre></section>`;
+    with an account and your agent will hold the API key.
+
+    Anything shared with your email shows up under <a href="/docs">your documents</a>.</pre></section>`;
   return manPage({
     title: "justhtml.sh — account",
     center: "ACCOUNT",

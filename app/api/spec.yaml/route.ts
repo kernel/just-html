@@ -244,15 +244,29 @@ paths:
         "429": { $ref: "#/components/responses/RateLimited" }
     get:
       tags: [docs]
-      summary: List your documents
+      summary: List documents (owned, shared, or both)
+      description: |
+        Lists documents by scope. Every item carries an access role
+        (owner|editor|commenter|viewer). For a doc matched by both an email
+        grant and a domain grant, the email grant wins (precedence ladder).
+        Owned items additionally carry view_token; shared items do not (the
+        view token is an owner-only capability). The web equivalent for a
+        signed-in human is https://justhtml.sh/docs.
       operationId: listDocs
       parameters:
+        - name: scope
+          in: query
+          description: |
+            owned (default): docs the caller owns. shared: docs granted to the
+            caller's email or email-domain, excluding docs the caller owns.
+            all: owned then shared.
+          schema: { type: string, enum: [owned, shared, all], default: owned }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
       responses:
         "200":
-          description: The caller's documents
+          description: The matched documents
           content:
             application/json:
               schema:
@@ -260,7 +274,8 @@ paths:
                 properties:
                   docs:
                     type: array
-                    items: { $ref: "#/components/schemas/OwnerDoc" }
+                    items: { $ref: "#/components/schemas/DocListItem" }
+        "400": { $ref: "#/components/responses/ApiBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /api/v1/docs/{slug}:
@@ -587,6 +602,31 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         html: { type: string }
+    DocListItem:
+      type: object
+      description: |
+        A document as returned by GET /api/v1/docs (any scope). Carries access
+        (owner|editor|commenter|viewer). Owned items (access=owner) additionally
+        carry view_token; shared items omit it.
+      required: [slug, url, title, access, version, public, created_at, updated_at]
+      properties:
+        slug: { type: string }
+        url: { type: string, format: uri }
+        title: { type: [string, "null"] }
+        access:
+          type: string
+          enum: [owner, editor, commenter, viewer]
+          description: |
+            The caller's access to this doc. owner for docs you own; otherwise
+            the resolved grant role (an explicit email grant beats a domain
+            grant for the same email).
+        version: { type: integer }
+        public: { type: boolean }
+        view_token:
+          type: string
+          description: Present only when access=owner.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     DocWithHtml:
       type: object
       description: |

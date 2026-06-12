@@ -76,6 +76,31 @@ export function granteeView(doc: DocRow, includeHtml: boolean, role: string) {
   };
 }
 
+/**
+ * List-item shape for GET /api/v1/docs (birthday.md "GET /api/v1/docs" row).
+ * Every item carries `access`; owned items additionally carry `view_token`.
+ * Shared items omit view_token (it's an owner-only capability — same rule as
+ * granteeView). Used for scope=owned|shared|all so a single array can mix both.
+ */
+export function listItemView(
+  doc: DocRow,
+  access: "owner" | "editor" | "commenter" | "viewer"
+) {
+  return {
+    slug: doc.slug,
+    url: docUrl(doc.slug),
+    title: doc.title,
+    access,
+    version: doc.version,
+    public: doc.is_public,
+    created_at: doc.created_at,
+    updated_at: doc.updated_at,
+    // Owned docs carry the view_token (the owner's shareable capability); shared
+    // docs do not (an editor/viewer must not be able to mint shareable links).
+    ...(access === "owner" ? { view_token: doc.view_token } : {}),
+  };
+}
+
 /** Byte length of a UTF-8 string (what the size limits are measured in). */
 export function byteLen(s: string): number {
   return Buffer.byteLength(s, "utf8");
@@ -509,6 +534,57 @@ export async function listDocs(ownerId: number, limit: number): Promise<DocRow[]
     `SELECT * FROM documents WHERE owner_id = $1 AND deleted_at IS NULL
      ORDER BY created_at DESC LIMIT $2`,
     [ownerId, limit]
+  );
+  return rows;
+}
+
+/**
+ * A doc shared with an email (via an email grant or its domain grant), with the
+ * grantee's resolved access role. Used by GET /api/v1/docs?scope=shared|all and
+ * the /docs web page. The role here reflects the precedence ladder (email grant
+ * beats domain grant for the same email); see the SQL below.
+ */
+export type SharedDocRow = DocRow & { access: "editor" | "commenter" | "viewer" };
+
+/**
+ * List docs shared with `email` (an email grant for that exact address OR a
+ * domain grant for its email-domain), EXCLUDING docs the email owns. One query.
+ *
+ * Precedence: an explicit email grant beats a domain grant for the same email
+ * (birthday.md "explicit email grant beats domain grant"). The grants table can
+ * carry both an 'email' row and a 'domain' row that match this caller; we pick
+ * the email-grant role when present via DISTINCT ON ordered by grantee_type
+ * ('email' < 'domain' lexically, so 'email' wins the DISTINCT ON pick).
+ *
+ * Newest-updated first. `excludeOwnerId` is the caller's user_id when they have
+ * an account (so docs they own are not double-listed in the shared section); for
+ * an account-less grantee it is null and the email→owner anti-join still excludes
+ * docs whose owner email equals the caller (defensive; an owner always has an
+ * account, but this keeps the query correct regardless).
+ */
+export async function listSharedDocs(
+  email: string,
+  emailDomain: string,
+  excludeOwnerId: number | null,
+  limit: number
+): Promise<SharedDocRow[]> {
+  const lower = email.toLowerCase();
+  const { rows } = await query<SharedDocRow>(
+    `SELECT d.*, g.role AS access
+     FROM (
+       SELECT DISTINCT ON (doc_id) doc_id, role
+       FROM doc_grants
+       WHERE (grantee_type = 'email'  AND grantee = $1)
+          OR (grantee_type = 'domain' AND grantee = $2)
+       ORDER BY doc_id, grantee_type ASC  -- 'email' < 'domain': email grant wins
+     ) g
+     JOIN documents d ON d.id = g.doc_id
+     WHERE d.deleted_at IS NULL
+       AND ($3::int IS NULL OR d.owner_id <> $3)
+       AND d.owner_id <> (SELECT id FROM users WHERE email = $1)
+     ORDER BY d.updated_at DESC
+     LIMIT $4`,
+    [lower, emailDomain, excludeOwnerId, limit]
   );
   return rows;
 }

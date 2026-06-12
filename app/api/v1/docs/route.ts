@@ -9,7 +9,15 @@ import {
   rateLimit,
 } from "@/lib/docs/api";
 import { MAX_HTML_BYTES, MAX_TITLE_LEN } from "@/lib/docs/config";
-import { byteLen, createDoc, listDocs, ownerView } from "@/lib/docs/store";
+import {
+  byteLen,
+  createDoc,
+  listDocs,
+  listItemView,
+  listSharedDocs,
+  ownerView,
+} from "@/lib/docs/store";
+import { emailDomain } from "@/lib/docs/grants";
 
 export const dynamic = "force-dynamic";
 
@@ -85,7 +93,17 @@ export async function POST(req: Request): Promise<Response> {
   return json(ownerView(result.doc, false), 201);
 }
 
-// GET /api/v1/docs — list the caller's own docs. Scope: docs.read.
+// GET /api/v1/docs — list documents. Scope: docs.read.
+//
+// ?scope=owned (default) | shared | all (birthday.md "GET /api/v1/docs" row):
+//   - owned : docs the key's user owns. Backwards-consistent shape: every field
+//             ownerView returned (slug,url,title,version,public,view_token,
+//             created_at,updated_at) is still present; we add access:"owner"
+//             (the plan requires every item carry access — additive, not a break).
+//   - shared: docs granted to the key's email (email grant) or its email-domain
+//             (domain grant), EXCLUDING docs you own. access is the resolved role
+//             (email grant beats domain grant). No view_token (owner-only).
+//   - all   : owned ++ shared, owned first.
 export async function GET(req: Request): Promise<Response> {
   const principal = await authenticate(req);
   if (!principal) {
@@ -111,6 +129,24 @@ export async function GET(req: Request): Promise<Response> {
     limit = Math.min(n, MAX_LIST_LIMIT);
   }
 
-  const docs = await listDocs(principal.userId, limit);
-  return json({ docs: docs.map((d) => ownerView(d, false)) });
+  const scope = url.searchParams.get("scope") ?? "owned";
+  if (scope !== "owned" && scope !== "shared" && scope !== "all") {
+    return apiError(
+      400,
+      "invalid_request",
+      "Query 'scope' must be one of: owned, shared, all."
+    );
+  }
+
+  const items: ReturnType<typeof listItemView>[] = [];
+  if (scope === "owned" || scope === "all") {
+    const owned = await listDocs(principal.userId, limit);
+    for (const d of owned) items.push(listItemView(d, "owner"));
+  }
+  if (scope === "shared" || scope === "all") {
+    const domain = emailDomain(principal.email);
+    const shared = await listSharedDocs(principal.email, domain, principal.userId, limit);
+    for (const d of shared) items.push(listItemView(d, d.access));
+  }
+  return json({ docs: items });
 }

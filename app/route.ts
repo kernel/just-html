@@ -27,6 +27,7 @@ export function GET() {
 <section><pre>    POST   /agent/identity                  register (agent, via auth.md)
     POST   /api/v1/docs                      publish HTML        -> {slug,url,view_token}
     GET    /d/:slug[?viewtoken=…]            view a document
+    GET    <a href="/docs">/docs</a>                            your documents (signed-in, owned + shared)
     GET    <a href="/auth.md">/auth.md</a>  <a href="/llms.txt">/llms.txt</a>  <a href="/api/spec.yaml">/api/spec.yaml</a></pre></section>
 
 <h1>DESCRIPTION</h1>
@@ -84,7 +85,7 @@ export function GET() {
     Errors are JSON: {"error":"…","message":"…"}. OpenAPI: <a href="/api/spec.yaml">/api/spec.yaml</a>
 
     POST   /docs                       create      {html, title?, public?}
-    GET    /docs                       list your docs
+    GET    /docs?scope=owned|shared|all list docs (each carries access + title)
     GET    /docs/:slug                 fetch metadata + html
     PATCH  /docs/:slug                 update html / title / public
     DELETE /docs/:slug                 soft-delete
@@ -100,11 +101,14 @@ export function GET() {
     GET    /d/:slug                    viewer shell (chrome + sandboxed iframe)
     GET    /d/:slug/raw                zero-chrome HTML (CSP sandbox)
     GET    /d/:slug?viewtoken=…        private docs, via the view token
+    GET    <a href="/docs">/docs</a>                       signed-in listing of your owned + shared docs
 
     A private doc is viewable by: its owner (signed in), anyone signed in
     with an email/domain you granted, anyone holding the view token, or
     everyone if it's public. Grant someone by email and they get a one-click
-    email that signs them in and drops them on the doc — no account needed.</pre></section>
+    email that signs them in and drops them on the doc — no account needed.
+    Signed in, you can see and open everything you own or have access to at
+    <a href="/docs">/docs</a>.</pre></section>
 
 <h1>EXAMPLES</h1>
 <section><pre>    # Publish a private doc
@@ -159,6 +163,7 @@ export function GET() {
     <a href="/llms.txt">/llms.txt</a>          terse agent-facing usage, every endpoint + curl
     <a href="/api/spec.yaml">/api/spec.yaml</a>     OpenAPI 3.1
     <a href="/login">/login</a>             human sign-in (magic link)
+    <a href="/docs">/docs</a>              your documents (signed-in: owned + shared)
     <a href="/api/health">/api/health</a>        service + database health</pre></section>
 `;
   return htmlResponse(

@@ -71,8 +71,16 @@ Create a doc -> POST /docs   { html, title?, public? }
   # -> 201 { slug, url, view_token, version, public, ... }
   # Private doc share link: <url>?viewtoken=<view_token>
 
-List your docs -> GET /docs?limit=100
+List docs -> GET /docs?scope=owned|shared|all&limit=100
   curl -s https://justhtml.sh/api/v1/docs -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # scope=owned (default): docs you own. scope=shared: docs granted to your
+  # email or your email's domain (excludes docs you own). scope=all: both.
+  # Each item: { slug, url, title, access, version, public, created_at,
+  #              updated_at }. access is owner|editor|commenter|viewer (an
+  #              explicit email grant beats a domain grant). Owned items also
+  #              carry view_token; shared items do not.
+  curl -s 'https://justhtml.sh/api/v1/docs?scope=all' -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # The signed-in web equivalent (owned + shared sections) is https://justhtml.sh/docs
 
 Fetch one (metadata + html) -> GET /docs/:slug
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345 -H "Authorization: Bearer $JUSTHTML_API_KEY"
@@ -123,6 +131,7 @@ List / revoke grants -> GET /docs/:slug/grants ; DELETE /docs/:slug/grants/:id
   https://justhtml.sh/d/:slug                 viewer shell (chrome + sandboxed iframe)
   https://justhtml.sh/d/:slug/raw             zero-chrome HTML (CSP sandbox)
   https://justhtml.sh/d/:slug?viewtoken=...   private docs, via the view token
+  https://justhtml.sh/docs                    signed-in listing: owned + shared docs
 
 A private doc authorizes a viewer in order: owner session, then a session whose
 email matches an email/domain grant, then a matching ?viewtoken=, then public.
