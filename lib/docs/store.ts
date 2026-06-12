@@ -81,6 +81,13 @@ export function granteeView(doc: DocRow, includeHtml: boolean, role: string) {
  * Every item carries `access`; owned items additionally carry `view_token`.
  * Shared items omit view_token (it's an owner-only capability — same rule as
  * granteeView). Used for scope=owned|shared|all so a single array can mix both.
+ *
+ * SHAPE NOTE: this carries `access` ("owner"|"editor"|"commenter"|"viewer"),
+ * NOT `role`. granteeView (GET /api/v1/docs/:slug for a non-owner) carries
+ * `role` instead. Both name the same concept; the listing uses `access` because
+ * its rows can be owner OR grantee in one array (the plan's "GET /api/v1/docs"
+ * row asks for `access`), while granteeView is always a non-owner so it uses
+ * `role`. Two near-identical shapes coexist by design; don't conflate them.
  */
 export function listItemView(
   doc: DocRow,
@@ -557,10 +564,14 @@ export type SharedDocRow = DocRow & { access: "editor" | "commenter" | "viewer" 
  * DESC ('email' > 'domain' lexically, so 'email' is taken first per doc).
  *
  * Newest-updated first. `excludeOwnerId` is the caller's user_id when they have
- * an account (so docs they own are not double-listed in the shared section); for
- * an account-less grantee it is null and the email→owner anti-join still excludes
- * docs whose owner email equals the caller (defensive; an owner always has an
- * account, but this keeps the query correct regardless).
+ * an account (so docs they own are not double-listed in the shared section). For
+ * an account-less grantee it is null and the exclusion is skipped: an owner
+ * always has an account (you cannot own a doc without registering), so an
+ * account-less caller can never own any of the candidate rows — there is nothing
+ * to exclude. (A previous version had an extra `owner_id <> (SELECT id FROM users
+ * WHERE email = $1)` anti-join here; for an account-less email that subquery is
+ * NULL, making `owner_id <> NULL` NULL — which filtered out EVERY row and left
+ * account-less grantees with an empty shared section. Removed.)
  */
 export async function listSharedDocs(
   email: string,
@@ -581,7 +592,6 @@ export async function listSharedDocs(
      JOIN documents d ON d.id = g.doc_id
      WHERE d.deleted_at IS NULL
        AND ($3::int IS NULL OR d.owner_id <> $3)
-       AND d.owner_id <> (SELECT id FROM users WHERE email = $1)
      ORDER BY d.updated_at DESC
      LIMIT $4`,
     [lower, emailDomain, excludeOwnerId, limit]

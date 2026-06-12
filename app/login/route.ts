@@ -1,6 +1,6 @@
 import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
 import { getSession } from "@/lib/auth/session";
-import { sanitizeNext, isEmailish } from "@/lib/auth/url";
+import { sanitizeNext, loginLanding, isEmailish } from "@/lib/auth/url";
 import { originOk, clientIp } from "@/lib/auth/request";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { mintLoginToken, sha256Hex } from "@/lib/auth/tokens";
@@ -99,7 +99,11 @@ export async function GET(req: Request): Promise<Response> {
     if (next !== "/") return redirect(next);
     return htmlResponse(dashboardPage(session.email, session.user_id != null));
   }
-  return htmlResponse(loginForm(next));
+  // The form's hidden `next` defaults to /docs for a bare /login (no real
+  // destination), so the emailed link itself carries next=/docs and post-verify
+  // lands on the docs listing, not the homepage (birthday.md "post-verify (no
+  // next) → /docs"). A real next (claim form, /d/:slug share link) is preserved.
+  return htmlResponse(loginForm(loginLanding(next)));
 }
 
 // POST /login (form: email, next) — mint + send a magic link. Never creates a

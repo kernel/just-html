@@ -1,5 +1,5 @@
 import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
-import { sanitizeNext } from "@/lib/auth/url";
+import { loginLanding } from "@/lib/auth/url";
 import { originOk } from "@/lib/auth/request";
 import { sha256Hex } from "@/lib/auth/tokens";
 import { createSession, sessionCookieHeader } from "@/lib/auth/session";
@@ -62,9 +62,12 @@ export function GET(req: Request): Response {
   const token = url.searchParams.get("token") ?? "";
   // Default landing is /docs (the docs listing). It lists owned + shared docs;
   // an account-less session (no account yet) sees its shared docs plus the
-  // "no account yet — tell your agent to sign up" line. Not the homepage, which
-  // a fresh signed-in user would otherwise land on.
-  const next = sanitizeNext(url.searchParams.get("next") ?? "/docs");
+  // "no account yet — tell your agent to sign up" line. loginLanding() also maps
+  // a bare next of "/" to /docs — the real human flow (bare /login → form hidden
+  // next="/" → emailed link carries next=/) would otherwise land on the homepage,
+  // exactly the landing the spec says to avoid (birthday.md "post-verify (no
+  // next) → /docs").
+  const next = loginLanding(url.searchParams.get("next"));
   if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
   return htmlResponse(confirmPage(token, next));
 }
@@ -77,7 +80,9 @@ export async function POST(req: Request): Promise<Response> {
   }
   const form = await req.formData();
   const token = String(form.get("token") ?? "");
-  const next = sanitizeNext(String(form.get("next") ?? "/docs"));
+  // loginLanding maps a missing/"/" next to /docs (see GET above) so the bare
+  // /login human flow lands on /docs, never the homepage.
+  const next = loginLanding(form.get("next") as string | null);
   if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
 
   const { rows } = await query<{ email: string; id: number }>(

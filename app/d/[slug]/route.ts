@@ -1,5 +1,6 @@
 import { findBySlug } from "@/lib/docs/store";
 import { canViewSession } from "@/lib/docs/access";
+import { mintViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
 import { esc } from "@/lib/page";
 
@@ -88,20 +89,30 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   // Build the iframe src. The iframe loads /d/:slug/raw, which is sandboxed
   // (allow-scripts, no allow-same-origin) → opaque origin. Two consequences:
   //   - The /raw subframe load is NOT a top-level navigation, so SameSite=Lax
-  //     session cookies are NOT sent with it; /raw can only authorize via token
-  //     or public.
+  //     session cookies are NOT sent with it; /raw can only authorize via a
+  //     token/capability in the URL, or public.
   //   - Therefore a session-authorized viewer (owner / email-grant / domain-
   //     grant, no ?viewtoken= in the URL) needs the shell to hand the iframe a
-  //     token-bearing capability URL. The shell has already authorized this
-  //     viewer above, and it holds doc.view_token, so it mints that capability
-  //     for the iframe. Private user HTML still renders only origin-less, and
-  //     the token never appears in the address bar for session viewers.
-  // If the caller supplied a valid viewtoken, honor it; otherwise fall back to
-  // the doc's own token (session-authorized path). Public docs need no token.
-  const iframeToken = viewtoken ?? (doc.is_public ? null : doc.view_token);
-  const rawSrc =
-    `/d/${encodeURIComponent(slug)}/raw` +
-    (iframeToken ? `?viewtoken=${encodeURIComponent(iframeToken)}` : "");
+  //     URL-borne capability. We must NOT hand back doc.view_token: that is the
+  //     owner's MASTER un-share token, and leaking it to a viewer/editor grantee
+  //     lets them re-share the doc and survive grant revocation (only owner-only
+  //     rotation kills it) — breaking birthday.md's "rotation is the un-share
+  //     story" invariant. Instead, having already authorized this viewer above,
+  //     the shell mints a short-lived (5 min), slug-scoped, HMAC-signed
+  //     capability (lib/docs/viewcap.ts) that reveals nothing about the master
+  //     token and cannot be replayed elsewhere or re-minted after revocation.
+  // Precedence for the iframe src:
+  //   - caller supplied a real ?viewtoken= → pass it through (it is already in
+  //     the address bar; this is the deliberate capability-URL viewing path).
+  //   - public doc → no token needed.
+  //   - otherwise (session-authorized private viewer) → mint a grant-scoped cap.
+  let rawQuery = "";
+  if (viewtoken) {
+    rawQuery = `?viewtoken=${encodeURIComponent(viewtoken)}`;
+  } else if (!doc.is_public) {
+    rawQuery = `?cap=${encodeURIComponent(mintViewCap(slug))}`;
+  }
+  const rawSrc = `/d/${encodeURIComponent(slug)}/raw` + rawQuery;
   const title = doc.title || doc.slug;
   const titleEsc = esc(title);
 

@@ -1,5 +1,6 @@
 import { findBySlug } from "@/lib/docs/store";
 import { canViewSession } from "@/lib/docs/access";
+import { verifyViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
 import { clientIp } from "@/lib/auth/request";
 import { checkLimits } from "@/lib/auth/ratelimit";
@@ -50,19 +51,28 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const { slug } = await ctx.params;
   const url = new URL(req.url);
   const viewtoken = url.searchParams.get("viewtoken");
+  const cap = url.searchParams.get("cap");
 
   const doc = await findBySlug(slug);
   // No existence oracle for private docs: a missing doc and a private doc the
   // viewer can't access are both 404.
   if (!doc) return deny(404, "Not found.");
-  // Session-aware authorization (birthday.md "Viewer-route enforcement"): owner
-  // session → email grant → domain grant → view token → public. When /raw is
-  // loaded inside the sandboxed iframe the session cookie is NOT sent (opaque
-  // origin, Lax) so this resolves via the token the shell appended; when /raw
-  // is opened as a top-level link the session cookie IS sent and authorizes
-  // directly. Either path lands a grantee on their doc.
-  const session = await getSession(req);
-  if (!(await canViewSession(doc, session, viewtoken))) return deny(404, "Not found.");
+  // Authorization (birthday.md "Viewer-route enforcement"): owner session →
+  // email grant → domain grant → view token → public. When /raw is loaded inside
+  // the sandboxed iframe the session cookie is NOT sent (opaque origin, Lax), so
+  // the shell instead appends a short-lived, slug-scoped HMAC capability (?cap=);
+  // verifying it here is equivalent to the session re-authorizing this exact doc
+  // (the shell only mints a cap after canViewSession passed). This replaces the
+  // old approach of handing the iframe the doc's master view_token, which leaked
+  // the un-share token to grantees. When /raw is opened as a top-level link the
+  // session cookie IS sent and authorizes directly via canViewSession. A real
+  // ?viewtoken= (capability URL) still works on either path.
+  if (cap && verifyViewCap(cap, slug)) {
+    // cap authorized — fall through to serve (it proves a prior session check).
+  } else {
+    const session = await getSession(req);
+    if (!(await canViewSession(doc, session, viewtoken))) return deny(404, "Not found.");
+  }
 
   return new Response(doc.html, {
     status: 200,
