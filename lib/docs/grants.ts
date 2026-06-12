@@ -274,7 +274,9 @@ export type DocAccess =
  * one. (Plan: "explicit email grant beats domain grant".)
  */
 export async function resolveAccess(doc: DocRow, principalEmail: string, principalUserId: number): Promise<DocAccess> {
-  if (doc.owner_id === principalUserId) return { kind: "owner", role: null };
+  // pg returns bigint columns (doc.owner_id) as strings; coerce both sides so
+  // owner detection holds whether the caller passes a numeric or string id.
+  if (Number(doc.owner_id) === Number(principalUserId)) return { kind: "owner", role: null };
 
   const email = principalEmail.toLowerCase();
   const domain = emailDomain(email);

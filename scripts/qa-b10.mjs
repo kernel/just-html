@@ -121,7 +121,9 @@ async function main() {
   log("\n[3] GET all-threads view (grouping + order + reactions)");
   const all = await jget(`${base}/comments`, auth(ownerKey));
   ok(all.status === 200, "GET comments 200");
-  ok(all.json?.total === 4, "total counts comments + replies (4)", all.json?.total);
+  // 3 live: anchored root + doc-level + 1 reply (the nested/anchor-on-reply
+  // attempts were rejected, so they never persisted).
+  ok(all.json?.total === 3, "total counts comments + replies (3)", all.json?.total);
   ok(all.json?.can_comment === true, "owner can_comment true");
   const groups = (all.json?.threads || []).map((t) => t.group);
   ok(groups[0] === "anchored", "anchored thread first (doc order)", groups);

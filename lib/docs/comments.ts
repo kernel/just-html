@@ -44,7 +44,9 @@ export async function resolveCommentPrincipal(
   session: Session | null
 ): Promise<CommentPrincipal | null> {
   if (apiPrincipal) {
-    return { userId: apiPrincipal.userId, email: apiPrincipal.email, source: "api_key" };
+    // pg returns bigint as a string; normalize so === comparisons against
+    // Number(...)-coerced ids (author/owner checks) are reliable.
+    return { userId: Number(apiPrincipal.userId), email: apiPrincipal.email, source: "api_key" };
   }
   if (session) {
     let userId = session.user_id;
@@ -62,7 +64,7 @@ export async function resolveCommentPrincipal(
         session.id,
       ]).catch(() => {});
     }
-    return { userId, email: session.email, source: "session" };
+    return { userId: Number(userId), email: session.email, source: "session" };
   }
   return null;
 }
