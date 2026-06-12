@@ -12,8 +12,9 @@ import {
   unprocessableEdit,
 } from "@/lib/docs/api";
 import { MAX_HTML_BYTES } from "@/lib/docs/config";
-import { applyPatch, findBySlug, ownerView } from "@/lib/docs/store";
+import { applyPatch, findBySlug, granteeView, ownerView } from "@/lib/docs/store";
 import { EditApplyError, type Edit } from "@/lib/docs/edit-diff";
+import { accessRoleLabel, canEdit, resolveAccess } from "@/lib/docs/grants";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ function authFail(req: Request): Response {
 
 // POST /api/v1/docs/:slug/edits — apply deterministic patches (birthday.md
 // "Editing"). Body: { edits: [{ oldText, newText }, ...], base_version? }.
-// Scope: docs.write. Owner only (grant-based editing lands in B5).
+// Scope: docs.write. Owner OR editor grant (birthday.md "Permissions model").
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const principal = await authenticate(req);
   if (!principal) return authFail(req);
@@ -51,8 +52,11 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);
-  // No existence oracle: a non-owner gets 404 whether or not the slug exists.
-  if (!doc || doc.owner_id !== principal.userId) return notFoundDoc();
+  if (!doc) return notFoundDoc();
+  const access = await resolveAccess(doc, principal.email, principal.userId);
+  // No existence oracle: a principal without edit access (no grant, or a
+  // viewer/commenter grant) gets 404 whether or not the slug exists.
+  if (!canEdit(access)) return notFoundDoc();
 
   let body: unknown;
   try {
@@ -128,5 +132,6 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     return quotaExceeded(result.quota.kind, result.quota.limit, result.quota.current);
   }
 
-  return json(ownerView(result.doc, true));
+  if (access.kind === "owner") return json(ownerView(result.doc, true));
+  return json(granteeView(result.doc, true, accessRoleLabel(access)));
 }

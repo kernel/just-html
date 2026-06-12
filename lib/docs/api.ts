@@ -62,16 +62,37 @@ export function payloadTooLarge(limitBytes: number, gotBytes: number): Response 
   });
 }
 
+/** 403 — grant-management operation by a non-owner (owner-only surface). */
+export function ownerOnly(): Response {
+  return apiError(403, "owner_only", "Only the document owner can manage grants.");
+}
+
+/**
+ * 422 — a domain grant targets a consumer email provider (granting @gmail.com
+ * is granting the world). Suggests is_public or the view token instead
+ * (birthday.md "Permissions model"). Structured so the calling agent can pivot.
+ */
+export function consumerDomainRejected(domain: string): Response {
+  return apiError(
+    422,
+    "consumer_domain_not_allowed",
+    `Refusing to grant a whole consumer email provider ('${domain}') — anyone can get an address there, so this would share the document with the world. To share broadly, set the document public (PATCH { "public": true }) or hand out the view token. To share with a real organization, grant its own domain (e.g. 'kernel.sh') or specific email addresses.`,
+    { domain, suggestions: ["set_public", "view_token", "specific_email", "org_domain"] }
+  );
+}
+
 /** 403 quota_exceeded — count or storage cap hit. */
 export function quotaExceeded(
-  kind: "doc_count" | "storage",
+  kind: "doc_count" | "storage" | "grants",
   limit: number,
   current: number
 ): Response {
   const msg =
     kind === "doc_count"
       ? "You have reached the maximum number of documents."
-      : "You have reached your total storage limit.";
+      : kind === "grants"
+        ? "This document has reached the maximum number of grants. Revoke an existing grant before adding another."
+        : "You have reached your total storage limit.";
   return apiError(403, "quota_exceeded", msg, { limit: kind, limit_value: limit, current });
 }
 

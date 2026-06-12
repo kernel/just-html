@@ -56,6 +56,26 @@ export function ownerView(doc: DocRow, includeHtml: boolean) {
   };
 }
 
+/**
+ * Metadata shape returned to a non-owner grantee (editor/commenter/viewer).
+ * Identical to ownerView MINUS view_token: the view token is an owner-only
+ * capability (rotating it is the un-share story; an editor must not be able to
+ * mint shareable links). `role` tells the grantee what they can do.
+ */
+export function granteeView(doc: DocRow, includeHtml: boolean, role: string) {
+  return {
+    slug: doc.slug,
+    url: docUrl(doc.slug),
+    title: doc.title,
+    version: doc.version,
+    public: doc.is_public,
+    role,
+    created_at: doc.created_at,
+    updated_at: doc.updated_at,
+    ...(includeHtml ? { html: doc.html } : {}),
+  };
+}
+
 /** Byte length of a UTF-8 string (what the size limits are measured in). */
 export function byteLen(s: string): number {
   return Buffer.byteLength(s, "utf8");
