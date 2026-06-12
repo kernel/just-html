@@ -29,10 +29,18 @@ fi
 API="https://api.vercel.com"
 AUTH=(-H "Authorization: Bearer $VERCEL_TOKEN")
 
+PYFMT='
+import sys, json
+d = json.load(sys.stdin)
+print("verified:", d.get("verified"))
+for v in (d.get("verification") or []):
+    print("  {} {} = {}".format(v.get("type"), v.get("domain"), v.get("value")))
+'
+
 echo "== 1. required TXT record (what DNS must contain) =="
 curl -sS "${AUTH[@]}" \
   "$API/v9/projects/$VERCEL_PROJECT_ID/domains/$DOMAIN?teamId=$VERCEL_ORG_ID" \
-  | python3 -c 'import sys,json; d=json.load(sys.stdin); print("verified:",d.get("verified")); [print(f"  {v.get(\"type\")} {v.get(\"domain\")} = {v.get(\"value\")}") for v in (d.get("verification") or [])]'
+  | python3 -c "$PYFMT"
 
 echo
 echo "== 2. is the TXT record live in DNS? =="
