@@ -264,8 +264,10 @@ summary. (Kernel's production file at https://www.kernel.sh/auth.md is the
 style reference for our prose auth.md.)
 
 Implement the **`service_auth` (email-required) variant** of the user-claimed
-flow, **spec-pure** (decided 2026-06-12 — the earlier emailed-OTP-read-back-
-to-agent deviation is dropped):
+flow. **Re-decided 2026-06-12 after dogfooding: hybrid emailed-OTP is the
+primary ceremony** (the spec-pure form ceremony shipped first, was felt to be
+~6 human actions, and is retained for spec-compat; see "Claim delivery
+modes" below). The original spec-pure flow:
 
 1. Agent reads `justhtml.sh/auth.md` (prose) →
    `/.well-known/oauth-protected-resource` →
@@ -288,6 +290,34 @@ The claim ceremony doubles as account creation AND leaves the human with a
 logged-in browser session — one email click bootstraps both the agent's key
 and the human's session.
 
+### Claim delivery modes (2026-06-12, post-dogfood)
+
+`POST /agent/identity` takes `claim_delivery`:
+
+- **`email` (default, the recommended flow in our auth.md)**: the `user_code`
+  is NOT in the API response — we email it to the login_hint address
+  (man-page style). The email offers two equivalent completions:
+  (a) **click the approve link** → GET shows a confirm page ("Approve the
+  API key for raf@…?" — button POST, scanner-safe), one click approves the
+  claim AND logs the human in (session minted, lands on /docs); or
+  (b) **read the 6-digit code back to the agent**, which calls
+  `POST /agent/identity/claim/complete {claim_token, user_code}`.
+  Either way the agent's `/oauth2/token` poll then returns the key.
+  Binding proof = inbox possession. Minimum human effort: open email,
+  click approve. Registration triggers an email send → registration rate
+  caps align with email-send caps.
+- **`agent` (spec-pure)**: exactly the original ceremony — response carries
+  `user_code` + `verification_uri`, human signs in at the form and types the
+  code. Kept for agents that implement the auth.md spec literally.
+
+The two channels are mutually exclusive per registration (the binding proof
+differs); `claim_delivery` is fixed at registration time.
+
+**Copy rule (from dogfooding)**: when `/login` is reached with a claim
+`next=`, the page must say "your agent is registering a justhtml.sh account
+for <email> — sign in to confirm", not the generic "this never creates an
+account" line, which reads as a contradiction mid-signup.
+
 **Deliberate deviations from spec** (full list with reasoning in
 authmd-implementation.md §8):
 
@@ -301,10 +331,11 @@ authmd-implementation.md §8):
   for a docs product, and pre/post-claim key reuse is a hazard the reference
   README itself flags (worse with long-lived keys).
 
-(The claim ceremony itself is **spec-pure**: agent shows the code, human
-enters it at our hosted verification form after signing in. An earlier draft
-deviated by emailing the code for read-back to the agent — dropped
-2026-06-12.)
+(Ceremony history: first drafted as emailed-OTP, switched to spec-pure
+2026-06-12, then re-decided the same day after dogfooding to the **hybrid
+default** — emailed code + one-click approve — with spec-pure retained as
+`claim_delivery: "agent"`. The emailed default is a deliberate deviation;
+kernel.sh ships the same family of flow in production.)
 
 Key TTLs (from the reference implementation): claim window 24 h, user code
 10 min, poll interval 5 s.
@@ -631,9 +662,10 @@ main + prod — brand-new project, no backwards compatibility.)
   PlanetScale + Vercel via Projects; Resend manual signup (not in catalog);
   domain via Vercel Domains API.
 - ~~Anonymous-start registration?~~ No — service_auth only (see deviations).
-- ~~Claim ceremony: emailed OTP or spec-pure?~~ **Spec-pure** (2026-06-12):
-  agent shows code, human enters it at our hosted form after magic-link
-  sign-in. Resend now sends login links, not claim codes.
+- ~~Claim ceremony: emailed OTP or spec-pure?~~ Re-decided after dogfooding
+  (2026-06-12): **hybrid emailed-OTP default** (`claim_delivery: email` —
+  emailed code + scanner-safe one-click approve that also logs you in),
+  spec-pure form kept as `claim_delivery: agent`. See "Claim delivery modes".
 - ~~Session state?~~ DB-backed sessions table, opaque hashed token in
   HttpOnly cookie, keyed by verified email (user_id nullable). No
   JWT/NextAuth. Magic-link click = login. Sign-up remains agent-only.
