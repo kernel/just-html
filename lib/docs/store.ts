@@ -1,6 +1,7 @@
 import { getPool, query } from "@/lib/db";
 import { generateSlug, generateViewToken } from "@/lib/docs/slug";
 import { applyEdits, type Edit } from "@/lib/docs/edit-diff";
+import { reanchorComments } from "@/lib/docs/reanchor";
 import {
   MAX_DOCS_PER_USER,
   MAX_HTML_BYTES,
@@ -279,6 +280,15 @@ export async function rewriteDoc(opts: {
       [current.id, nextVersion, opts.html, opts.authorUserId]
     );
     await pruneVersions(client, current.id);
+    // Re-anchor comments in the SAME transaction (birthday.md "How anchors
+    // survive edits"). Full rewrite → tier 2 (quote re-find) only; no patch
+    // ranges to offset-map. Best-effort: a re-anchor failure must not fail the
+    // write (comments degrade to orphaned, the legible failure mode).
+    try {
+      await reanchorComments(client, current.id, current.html, opts.html, nextVersion);
+    } catch {
+      /* re-anchoring is best-effort; never block a doc write on it */
+    }
     await client.query("COMMIT");
     return { doc: updRows[0] as DocRow };
   } catch (e) {
@@ -394,6 +404,13 @@ export async function applyPatch(opts: {
       [current.id, nextVersion, newHtml, opts.authorUserId, JSON.stringify(opts.edits)]
     );
     await pruneVersions(client, current.id);
+    // Re-anchor comments in the SAME transaction. Patch write → tier 1 (offset
+    // map through these edits) then tier 2 fallthrough. Best-effort.
+    try {
+      await reanchorComments(client, current.id, current.html, newHtml, nextVersion, opts.edits);
+    } catch {
+      /* re-anchoring is best-effort; never block a doc write on it */
+    }
     await client.query("COMMIT");
     return { doc: updRows[0] as DocRow };
   } catch (e) {

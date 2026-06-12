@@ -5,6 +5,7 @@ import { getSession } from "@/lib/auth/session";
 import { clientIp } from "@/lib/auth/request";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { RL_VIEWER_PER_MIN } from "@/lib/docs/config";
+import { OVERLAY_SCRIPT } from "@/lib/docs/overlay";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,14 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const url = new URL(req.url);
   const viewtoken = url.searchParams.get("viewtoken");
   const cap = url.searchParams.get("cap");
+  // The comment overlay is injected ONLY for the shell-embedded variant
+  // (birthday.md "Production architecture": direct /raw fetches stay byte-
+  // pristine). The shell appends ?overlay=1 when it mounts the comment surface;
+  // a direct top-level /raw fetch never carries it, so the served bytes are
+  // identical to today. (Even if a caller adds overlay=1 by hand, the injected
+  // script only postMessages to a parent window — harmless without our shell,
+  // and the shell origin-checks inbound messages.)
+  const wantOverlay = url.searchParams.get("overlay") === "1";
 
   const doc = await findBySlug(slug);
   // No existence oracle for private docs: a missing doc and a private doc the
@@ -74,7 +83,17 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     if (!(await canViewSession(doc, session, viewtoken))) return deny(404, "Not found.");
   }
 
-  return new Response(doc.html, {
+  // Inject the comment overlay only for the shell-embedded variant. We append the
+  // script before </body> (or at the end if there's no body tag), leaving the
+  // user's HTML otherwise untouched. The CSP sandbox already permits scripts.
+  let html = doc.html;
+  if (wantOverlay) {
+    const tag = `<script data-jh-overlay="1">${OVERLAY_SCRIPT}</script>`;
+    const idx = html.toLowerCase().lastIndexOf("</body>");
+    html = idx === -1 ? html + tag : html.slice(0, idx) + tag + html.slice(idx);
+  }
+
+  return new Response(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",

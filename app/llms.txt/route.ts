@@ -141,6 +141,53 @@ Share (owner only) -> POST /docs/:slug/grants   { email|domain, role, notify? } 
 
 List / revoke grants -> GET /docs/:slug/grants ; DELETE /docs/:slug/grants/:id
 
+## Comments & reactions
+
+Humans and agents comment on the same documents. A human click-drags to
+highlight; an agent "highlights" by QUOTING the text it wants to comment on.
+Same payload, same endpoint. Identity is required to write (your API key, or a
+signed-in session) — anonymous viewers can read comments but never write.
+
+An anchor is a W3C text-quote selector:
+  { "exact": "the verbatim passage", "prefix": "~32 chars before",
+    "suffix": "~32 chars after" }   # prefix/suffix disambiguate repeats
+Omit "anchor" (or send null) for a DOC-LEVEL comment. "parent_id" makes a reply
+(1-level threads only). Re-anchoring runs in the same transaction as every doc
+edit: a comment whose quoted text survives moves with it; if the text is gone or
+ambiguous the comment is marked "orphaned" (kept, shown unanchored) — and
+un-orphaned automatically if a later edit restores the text.
+
+Comment on a quote -> POST /docs/:slug/comments   { body, anchor?, parent_id? }
+  curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/comments \\
+    -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
+    -d '{"body":"name the retention cap here?","anchor":{"exact":"full snapshot rather than a diff","prefix":"Each segment retains a ","suffix":", which makes"}}'
+  # -> 201 { comment: { id, author, body, anchor, orphaned, resolved, ... } }
+
+See the WHOLE picture (what humans see) -> GET /docs/:slug/comments
+  curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/comments \\
+    -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # -> { total, can_comment, can_react, threads:[ { id, author, body, anchor,
+  #      group:"anchored"|"doc"|"orphaned", resolved, orphaned, reactions:[...],
+  #      replies:[...] } ] }   # anchored threads in document order, then
+  #      doc-level, then orphaned. Resolved threads carry resolved:true.
+
+Reply / edit / resolve / delete -> PATCH|DELETE /docs/:slug/comments/:id
+  # Reply: POST /comments with {"body":"+1","parent_id": <root id>}
+  # Edit body (author only): PATCH /comments/:id {"body":"..."}
+  # Resolve/unresolve (anyone who can comment): PATCH /comments/:id {"resolved":true}
+  # Delete (author own, owner any; soft): DELETE /comments/:id
+
+React (attributed; re-post toggles off) -> POST /docs/:slug/reactions   { emoji, comment_id? }
+  curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/reactions \\
+    -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
+    -d '{"emoji":"👍","comment_id":42}'   # omit comment_id to react on the doc
+  # Remove a reaction: DELETE /docs/:slug/reactions/:id (your own), or re-POST to toggle.
+
+Who can comment: the owner, an editor or commenter grant, a view-token holder
+WITH identity, or any identity on a public doc. Who can react: anyone who can
+view, with identity. Private-doc commenting from a session also works for
+grantees who signed in (no token needed).
+
 ## Viewing
 
   https://justhtml.sh/d/:slug                 viewer shell (chrome + sandboxed iframe)
@@ -163,6 +210,8 @@ Resource quotas (per user):
   Versions retained per doc   100         oldest snapshots pruned beyond this
   Total storage per user      100 MB      current html + retained snapshots; 403
   Grants per doc              50          403 quota_exceeded
+  Comment body size           10 KB       413 payload_too_large
+  Comments per doc            1,000       403 quota_exceeded
   API keys per user           10
 
 API rate limits (per API key) -> 429 with Retry-After + { error: "rate_limited" }:

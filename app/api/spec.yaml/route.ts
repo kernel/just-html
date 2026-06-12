@@ -28,6 +28,8 @@ tags:
     description: Document CRUD, patch editing, versions
   - name: sharing
     description: Per-document grants (email or domain)
+  - name: collaboration
+    description: Comments (W3C text-quote anchors, 1-level threads) and reactions
 paths:
   /agent/identity:
     post:
@@ -654,6 +656,237 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /api/v1/docs/{slug}/comments:
+    parameters:
+      - $ref: "#/components/parameters/Slug"
+      - name: viewtoken
+        in: query
+        required: false
+        schema: { type: string }
+        description: >-
+          Present a doc's view token to comment/read as a token-holder (with
+          identity). Not needed for owner/grantee sessions or API keys.
+    get:
+      tags: [collaboration]
+      summary: List all comment threads (the complete all-threads view)
+      operationId: listComments
+      description: |
+        Returns every live thread the caller can see, exactly as the viewer
+        shell shows humans: anchored threads in document order, then doc-level
+        threads, then orphaned threads, each carrying resolved/orphaned flags,
+        1-level replies, and reactions. Read access required (owner/grant via
+        identity, a valid view token, or a public doc).
+      security:
+        - bearerApiKey: []
+        - {}
+      responses:
+        "200":
+          description: All threads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  version: { type: integer }
+                  total: { type: integer, description: Live comment + reply count. }
+                  can_comment: { type: boolean }
+                  can_react: { type: boolean }
+                  threads:
+                    type: array
+                    items: { $ref: "#/components/schemas/CommentThread" }
+                  doc_reactions:
+                    type: array
+                    description: Doc-level reactions (present only when any exist).
+                    items: { $ref: "#/components/schemas/ReactionGroup" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [collaboration]
+      summary: Post a comment (anchored to a quote, doc-level, or a reply)
+      operationId: createComment
+      description: |
+        Comment on a span by QUOTING it (anchor), at the doc level (omit
+        anchor), or reply to a root comment (parent_id). Identity required:
+        API key OR signed-in session — anonymous never writes. Permission to
+        comment: owner, editor or commenter grant, view-token holder with
+        identity, or any identity on a public doc.
+      security:
+        - bearerApiKey: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string, maxLength: 10240, description: "<= 10 KB." }
+                anchor:
+                  oneOf:
+                    - { $ref: "#/components/schemas/TextAnchor" }
+                    - { type: "null" }
+                  description: W3C text-quote selector; null/omitted = doc-level.
+                parent_id:
+                  type: [integer, "null"]
+                  description: Root comment id to reply to (1-level threads only).
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comment: { $ref: "#/components/schemas/Comment" }
+        "400": { $ref: "#/components/responses/ApiBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Can view but not comment (e.g. a viewer-only grant).
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { description: "Comment body exceeds 10 KB." }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/v1/docs/{slug}/comments/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Slug"
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    patch:
+      tags: [collaboration]
+      summary: Edit body (author) and/or resolve/unresolve (anyone who can comment)
+      operationId: updateComment
+      security:
+        - bearerApiKey: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: { type: string, maxLength: 10240, description: "Author only." }
+                resolved:
+                  type: boolean
+                  description: Resolve/unresolve. Anyone who can comment.
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  comment: { $ref: "#/components/schemas/Comment" }
+        "400": { $ref: "#/components/responses/ApiBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Editing another author's body, or resolving without comment rights." }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    delete:
+      tags: [collaboration]
+      summary: Soft-delete a comment (author own, owner any)
+      operationId: deleteComment
+      security:
+        - bearerApiKey: []
+        - {}
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  deleted: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Not the author and not the owner." }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/docs/{slug}/reactions:
+    parameters:
+      - $ref: "#/components/parameters/Slug"
+    post:
+      tags: [collaboration]
+      summary: React to a doc or comment (attributed; re-post toggles off)
+      operationId: addReaction
+      description: |
+        Add an emoji reaction on the doc (omit comment_id) or a comment.
+        Attributed-only (identity required); unique per (target, author, emoji)
+        — re-posting the same reaction removes it (toggle). React permission:
+        anyone who can view, with identity.
+      security:
+        - bearerApiKey: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [emoji]
+              properties:
+                emoji: { type: string, description: One of the supported emoji. }
+                comment_id:
+                  type: [integer, "null"]
+                  description: Target comment; omit/null = react on the document.
+      responses:
+        "201":
+          description: Reaction added
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reaction:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      comment_id: { type: [integer, "null"] }
+                      emoji: { type: string }
+                      author: { type: string }
+                      created_at: { type: string, format: date-time }
+        "200":
+          description: Reaction toggled off (the same reaction already existed).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  toggled: { type: boolean }
+                  removed: { type: boolean }
+        "400": { $ref: "#/components/responses/ApiBadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /api/v1/docs/{slug}/reactions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/Slug"
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    delete:
+      tags: [collaboration]
+      summary: Remove your own reaction
+      operationId: deleteReaction
+      security:
+        - bearerApiKey: []
+        - {}
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer }
+                  deleted: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     bearerApiKey:
@@ -754,6 +987,63 @@ components:
         grantee: { type: string }
         role: { type: string, enum: [editor, commenter, viewer] }
         created_at: { type: string, format: date-time }
+    TextAnchor:
+      type: object
+      description: |
+        W3C text-quote selector (TextQuoteSelector + position hint). exact is the
+        verbatim quoted passage; prefix/suffix (~32 chars) disambiguate repeated
+        text and survive surrounding shifts; start/end are offsets into the
+        document's text content (a fast-path hint, not authoritative).
+      required: [exact]
+      properties:
+        type: { type: string, enum: [text] }
+        exact: { type: string }
+        prefix: { type: string }
+        suffix: { type: string }
+        start: { type: integer }
+        end: { type: integer }
+    ReactionGroup:
+      type: object
+      description: Reactions collapsed by emoji, with the attributed authors.
+      properties:
+        emoji: { type: string }
+        count: { type: integer }
+        authors:
+          type: array
+          items: { type: string, description: Author email. }
+    Comment:
+      type: object
+      properties:
+        id: { type: integer }
+        parent_id: { type: [integer, "null"] }
+        author: { type: [string, "null"], description: Author email. }
+        author_avatar: { type: [string, "null"], format: uri, description: Gravatar URL. }
+        body: { type: string }
+        anchor:
+          oneOf:
+            - { $ref: "#/components/schemas/TextAnchor" }
+            - { type: "null" }
+        anchored_version: { type: [integer, "null"] }
+        orphaned: { type: boolean, description: "Anchor no longer resolves; kept, shown unanchored." }
+        resolved: { type: boolean }
+        resolved_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+        edited_at: { type: [string, "null"], format: date-time }
+        reactions:
+          type: array
+          items: { $ref: "#/components/schemas/ReactionGroup" }
+    CommentThread:
+      allOf:
+        - { $ref: "#/components/schemas/Comment" }
+        - type: object
+          properties:
+            group:
+              type: string
+              enum: [anchored, doc, orphaned]
+              description: Which group this thread sorts into in the all-threads view.
+            replies:
+              type: array
+              items: { $ref: "#/components/schemas/Comment" }
     ApiError:
       type: object
       required: [error, message]
