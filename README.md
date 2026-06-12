@@ -74,9 +74,14 @@ Agent / discovery (plain text or JSON, zero JS):
 
 Auth:
 
-- Agent: `POST /agent/identity`, `POST /agent/identity/claim` (re-mint),
-  `POST /oauth2/token` (claim grant), `POST /oauth2/revoke`.
-- Human (plain-HTML forms): `/login`, `/login/verify`, `/claim`.
+- Agent claim ceremony — **one flow** (no approve link, no hosted form, no
+  `claim_delivery` parameter): `POST /agent/identity` emails the human a 6-digit
+  code; the human reads it back to the agent; `POST /agent/identity/claim/complete`
+  confirms it; `POST /oauth2/token` (claim grant) issues the key once.
+  `POST /agent/identity/claim` re-mints a fresh code; `POST /oauth2/revoke`
+  revokes. The ceremony never mints a browser session.
+- Human (plain-HTML forms): `/login`, `/login/verify` (magic-link sign-in — the
+  only human sign-in; unrelated to the claim ceremony).
 - API 401s carry `WWW-Authenticate: Bearer resource_metadata="…"`.
 
 Documents (`/api/v1`, `Authorization: Bearer jh_live_…`): `docs` CRUD,

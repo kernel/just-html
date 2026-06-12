@@ -9,20 +9,16 @@ import { MAX_CODE_ATTEMPTS } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
-// POST /agent/identity/claim/complete (B9 hybrid claim, claim_delivery=email) —
-// the agent read-back completion. The human reads the 6-digit code from the
-// emailed claim message back to the agent, and the agent submits it here. This
-// confirms the claim WITHOUT a browser session (there is none — the proof here
-// is the code, which only reached the human via the email to their inbox).
+// POST /agent/identity/claim/complete — the agent read-back completion (the
+// ONE flow, founder directive 2026-06-12). The human reads the 6-digit code
+// from the emailed claim message back to the agent, and the agent submits it
+// here. This confirms the claim WITHOUT a browser session (there is none — the
+// proof is the code, which only reached the human via the email to their
+// inbox). On success the agent's /oauth2/token claim-grant poll returns the
+// jh_live_ key.
 //
-// Constant-time code compare; shares the code's 5-attempt budget with the
-// /claim form and the /claim/approve link (all touch claim_codes.attempts /
-// consumed_at on the same live attempt row). On success the agent's
-// /oauth2/token claim-grant poll returns the jh_live_ key (unchanged).
-//
-// Only valid for email-delivery registrations: an agent-delivery registration
-// never emailed the code, so the agent already had it for the /claim form and
-// has no business reading it back here.
+// Constant-time code compare; 5 wrong attempts kill the code (410 code_dead),
+// then re-mint via POST /agent/identity/claim sends a fresh email.
 export async function POST(req: Request): Promise<Response> {
   let body: unknown;
   try {
@@ -61,14 +57,6 @@ export async function POST(req: Request): Promise<Response> {
   const reg = await findByClaimToken(claimToken);
   if (!reg) {
     return agentError(401, "invalid_claim_token", "The claim token is invalid.");
-  }
-  if (reg.claim_delivery !== "email") {
-    // Spec-pure registrations confirm only at the hosted /claim form.
-    return agentError(
-      409,
-      "wrong_delivery_mode",
-      "This registration uses the hosted claim form (claim_delivery=agent). The human enters the code at the verification_uri; there is no agent read-back."
-    );
   }
   if (reg.claimed_at) {
     return agentError(
@@ -147,13 +135,13 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   // Success: confirm in one transaction — consume code, find-or-create user,
-  // bind registration. No session to backfill (no browser here). The agent's
-  // /oauth2/token poll then returns the key.
+  // bind registration. The ceremony does NOT mint a session (no browser here;
+  // humans sign in at /login). The agent's /oauth2/token poll then returns the
+  // key.
   const userId = await confirmClaim({
     claimCodeId: attempt.id,
     registrationId: reg.id,
     email: reg.email,
-    sessionId: null,
   });
 
   audit(req, "claim.confirmed", {

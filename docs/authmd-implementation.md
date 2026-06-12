@@ -6,6 +6,31 @@ code, human enters it at our hosted form after magic-link sign-in); the earlier
 emailed-OTP-read-back-to-agent variant is dropped. Sessions & human login are now
 specified here (§9).
 
+> **FINAL (B12, founder directive 2026-06-12 "simplify simplify"):** the claim
+> ceremony is now **exactly ONE flow**, superseding both the spec-pure form
+> (this doc's body) and the B9 hybrid (emailed approve link + spec-pure mode).
+> The single flow: `POST /agent/identity {type, login_hint}` →
+> `{claim_token, claim:{complete_url, expires_in, interval}}` and emails the
+> human a 6-digit code (the code and nothing else — no links, no buttons). The
+> human reads the code back to the agent → `POST /agent/identity/claim/complete
+> {claim_token, user_code}` (5 attempts, constant-time, then 410 code_dead) →
+> `/oauth2/token` claim grant issues the `jh_live_` key once.
+> `POST /agent/identity/claim` re-mints (fresh email).
+>
+> REMOVED: the `claim_delivery` parameter (registration **400s** on it,
+> error `invalid_request`), the emailed **approve link** + its `cva_` token and
+> the `GET|POST /claim/approve` pages, the **hosted `/claim` form** + its `cvt_`
+> attempt token and `verification_uri` (now 404 via the man-page catch-all), and
+> the **spec-pure variant** entirely. The `user_code`/`verification_uri` MUST
+> NEVER appear in any API response. The ceremony does **not** mint a browser
+> session (binding proof = inbox possession); `/login` magic-link is the only
+> human sign-in and carries no claim `next=` context anymore. §3.1, §3.2,
+> §3.2.1, §8 and the `agent` table row in §1 are all superseded by this note;
+> the prose below is retained as historical context only. Now-dead DB columns
+> (`agent_registrations.claim_delivery`, `claim_codes.view_token_hash` /
+> `view_expires_at` / `approve_token_hash` / `approved_at`) are kept (not
+> dropped) and marked UNUSED in `migrations/0011_one_claim_flow.sql`.
+
 ## 0. Sources
 
 All values in this document are cited to one of:

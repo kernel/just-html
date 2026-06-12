@@ -117,8 +117,9 @@ export async function GET(req: Request): Promise<Response> {
   const domain = emailDomain(email);
 
   // Resolve whether this session is backed by an account. user_id may be null on
-  // a session minted before the account existed (claim ceremony / grantee flow);
-  // re-resolve by email so a now-existing account is reflected without re-login.
+  // a session minted before the account existed (the grantee flow: a share-link
+  // sign-in for an email that has no account yet); re-resolve by email so a
+  // now-existing account is reflected without re-login.
   let hasAccount = session.user_id != null;
   let ownerId = session.user_id;
   if (!hasAccount) {

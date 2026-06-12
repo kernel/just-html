@@ -15,9 +15,9 @@ export const dynamic = "force-dynamic";
 // machine-facing files. Kept literal so a human can select-and-copy it.
 const AGENT_PROMPT = `I want to publish an HTML document to justhtml.sh.
 Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then get me
-an API key and publish the doc. To approve the key: check your email for a
-justhtml.sh message — click the approve link, or tell me the 6-digit code from
-it. Give me back the shareable URL when done.`;
+an API key and publish the doc. When you register, I'll get an email with a
+6-digit code — check your email and tell me the 6-digit code so you can finish.
+Give me back the shareable URL when done.`;
 
 export function GET() {
   const body = `
@@ -51,8 +51,8 @@ export function GET() {
 
 <h1>PASTE THIS TO YOUR AGENT</h1>
 <section><pre>    Drop this into your coding agent and it does the rest. The only
-    human step: check your email for a justhtml.sh message and click
-    the approve link (or read the 6-digit code back to your agent).
+    human step: check your email for a justhtml.sh message and read
+    the 6-digit code back to your agent.
 </pre>
 <pre style="background:#f3f3f3;border:1px solid #ccc;padding:0.8rem 1rem;border-radius:4px">${AGENT_PROMPT}</pre></section>
 
@@ -63,22 +63,19 @@ export function GET() {
     "service_auth" flow) is at <a href="/auth.md">/auth.md</a>; machine-readable discovery is
     at <a href="/.well-known/oauth-authorization-server">/.well-known/oauth-authorization-server</a>.
 
-    The flow (default — emailed approval):
+    The flow (exactly one — emailed code):
 
       1. Agent:  POST /agent/identity {"type":"service_auth",
                  "login_hint":"you@example.com"}
-                 -> claim_token (we email YOU a 6-digit code + approve link)
-      2. You:    check your email for a justhtml.sh message — click the
-                 approve link (confirms + signs you in), OR read the
-                 6-digit code back to your agent
-      3. Agent:  poll POST /oauth2/token (claim grant) until you finish
+                 -> claim_token (we email YOU a 6-digit code)
+      2. You:    check your email and tell your agent the 6-digit code
+      3. Agent:  POST /agent/identity/claim/complete {claim_token, user_code},
+                 then poll POST /oauth2/token (claim grant)
                  -> access_token "jh_live_…" (returned exactly once)
 
-    Spec-pure agents can register with "claim_delivery":"agent" to get the
-    code + link in the response and show it to you themselves (nothing
-    emailed); see <a href="/auth.md">/auth.md</a>.
+    No links to click, no forms — the human just reads the code back.
 
-    You end up logged in as a side effect. Use the key as a bearer token:
+    Use the key as a bearer token:
 
         Authorization: Bearer jh_live_…
 

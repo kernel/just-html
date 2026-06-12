@@ -3,7 +3,6 @@
 
 export const CLAIM_WINDOW_S = 86_400; // outer registration window, 24h
 export const USER_CODE_TTL_S = 600; // user_code, 10 min
-export const ATTEMPT_TOKEN_TTL_S = 600; // claim_attempt_token (cvt_), 10 min
 export const POLL_INTERVAL_S = 5; // token-endpoint poll interval
 export const MAX_CODE_ATTEMPTS = 5; // wrong user_code guesses, then code dead
 export const MAX_REMINTS = 10; // re-mints per registration, lifetime
@@ -24,6 +23,6 @@ export const SESSION_COOKIE = "jh_sess";
 
 export const RESEND_FROM = "justhtml.sh <login@notify.justhtml.sh>";
 export const LOGIN_SUBJECT = "justhtml.sh login";
-// B9 hybrid claim ceremony: the claim email (claim_delivery=email) carries both
-// completions — a scanner-safe approve link and the 6-digit code to read back.
-export const CLAIM_SUBJECT = "your agent wants a justhtml.sh API key";
+// The claim email carries the 6-digit code and nothing else actionable (no
+// links, no buttons) — the human reads it back to the agent (one flow).
+export const CLAIM_SUBJECT = "your justhtml.sh code";

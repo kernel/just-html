@@ -7,12 +7,11 @@ const AUTH_MD = `# justhtml.sh auth.md
 This file tells agents how to sign up for justhtml.sh and authenticate API requests.
 
 justhtml.sh hosts HTML documents at stable URLs. It supports the auth.md
-user-claimed flow (service_auth variant): you register with the human's email
-and the human confirms in their browser. By default we email the human a
-6-digit code and a one-click approve link — so the human just checks their
-inbox; you don't have to relay anything. (A spec-pure mode where you show the
-human the code is also available; see "Spec-pure variant" below.) It does not
-currently support agent-verified ID-JAG registration or anonymous accounts.
+user-claimed flow (service_auth variant) with exactly one ceremony: you
+register with the human's email, justhtml.sh emails them a 6-digit code, the
+human reads the code back to you, and you submit it to complete the claim. It
+does not currently support agent-verified ID-JAG registration or anonymous
+accounts.
 
 ## Before registering
 
@@ -52,109 +51,83 @@ The authorization server metadata contains:
 Do not hard-code endpoint paths from examples on other services. Use this file and
 the metadata.
 
-## Registration flow (default: email delivery)
+## Registration flow
 
-Ask the human for consent to create or recover justhtml.sh API credentials for
-their email address, and tell them the key will carry scopes \`docs.read docs.write\`
-(publish and edit HTML documents as them).
+There is exactly one flow. We email the human a 6-digit code; the human reads it
+back to you; you submit it. No links to click, no forms, no variants.
 
-Start registration:
+First, ask the human for consent to create or recover justhtml.sh API
+credentials for their email, and tell them the key will carry scopes
+\`docs.read docs.write\` (publish and edit HTML documents as them).
+
+### 1. Register
 
     POST https://justhtml.sh/agent/identity
     Content-Type: application/json
 
     { "type": "service_auth", "login_hint": "human@example.com" }
 
-By default \`claim_delivery\` is \`"email"\`: justhtml.sh emails the human a 6-digit
-code AND a one-click approve link. The response contains a \`claim_token\` (hold
-it in memory only; never show it to anyone except this service) and a \`claim\`
-block — but in email mode the \`user_code\` is **omitted** (the email is the
-binding proof; we don't hand you the code):
+This emails the human a 6-digit code and returns a \`claim_token\` (hold it in
+memory only; never show it to anyone except this service). The \`user_code\` is
+NOT in the response — it only reaches the human's inbox.
 
     {
       "claim_token": "clm_...",
+      "claim_token_expires": "2026-06-13T17:31:25Z",
       "claim": {
-        "delivery": "email",
-        "code_delivery": "We emailed the code and an approve link ...",
         "complete_url": "https://justhtml.sh/agent/identity/claim/complete",
         "expires_in": 600,
         "interval": 5
       }
     }
 
-Tell the human, in one message:
+### 2. Tell the human to check their email
 
-> Check your email for a justhtml.sh message — click the approve link to
-> confirm and sign in, OR tell me the 6-digit code from it and I'll finish.
+> I sent a 6-digit code to your email from justhtml.sh. Check your inbox and
+> tell me the code.
 
-There are two ways the claim completes; you support BOTH and just poll either way:
+### 3. Collect the code and complete the claim
 
-(a) The human clicks the approve link in the email. One click confirms the
-    key and signs them in. You do nothing but poll.
-
-(b) The human reads the 6-digit code back to you. Submit it:
+When the human gives you the code, submit it:
 
     POST https://justhtml.sh/agent/identity/claim/complete
     Content-Type: application/json
 
     { "claim_token": "clm_...", "user_code": "428117" }
 
-    -> 200 { "status": "claimed" } on a correct code. Wrong code -> 401
-       invalid_user_code with attempts remaining; after 5 wrong tries the code
-       is dead (410 code_dead) — re-mint (see below).
+A correct code returns \`200 { "status": "claimed" }\`. A wrong code returns
+\`401 invalid_user_code\` with the number of attempts remaining; after 5 wrong
+tries the code is dead (\`410 code_dead\`) — re-mint (see below).
 
-While the human does either, poll for completion:
+### 4. Get the API key
+
+After a successful complete, exchange the claim for the key:
 
     POST https://justhtml.sh/oauth2/token
     Content-Type: application/x-www-form-urlencoded
 
     grant_type=urn:workos:agent-auth:grant-type:claim&claim_token=clm_...
 
-While the human hasn't finished, this returns
-\`{ "error": "authorization_pending" }\` — wait \`claim.interval\` seconds (5) and
-retry. On \`slow_down\`, add at least 5 seconds to your interval. On success the
-response contains \`access_token\` — a long-lived API key starting with \`jh_live_\`,
-returned exactly once. There is no refresh ceremony; the key works until revoked.
+You may poll this from the moment you register: before the human completes the
+code it returns \`{ "error": "authorization_pending" }\` — wait \`claim.interval\`
+seconds (5) and retry; on \`slow_down\`, add at least 5 seconds. Once the code is
+accepted it returns \`access_token\` — a long-lived API key starting with
+\`jh_live_\`, returned exactly once. There is no refresh ceremony; the key works
+until revoked.
 
-If the code expires before the human acts (\`expired_token\` from the token
-endpoint while the registration is still active), mint a fresh one:
+### If the code expires
+
+If the code expires before the human reads it back (\`expired_token\` from the
+token endpoint while the registration is still active), mint a fresh one:
 
     POST https://justhtml.sh/agent/identity/claim
     Content-Type: application/json
 
     { "claim_token": "clm_...", "email": "human@example.com" }
 
-This sends a fresh email (new code + new approve link) and invalidates the old
-one. Resume polling. If it returns \`410 claim_expired\`, the registration itself
-has expired — restart registration.
-
-## Spec-pure variant (claim_delivery: agent)
-
-If you implement the auth.md spec literally — surface the code to the human
-yourself, nothing emailed — register with \`claim_delivery: "agent"\`:
-
-    POST https://justhtml.sh/agent/identity
-    Content-Type: application/json
-
-    { "type": "service_auth", "login_hint": "human@example.com",
-      "claim_delivery": "agent" }
-
-Now the \`claim\` block carries the \`user_code\` and a \`verification_uri\`:
-
-    { "claim": { "delivery": "agent", "user_code": "428117",
-                 "verification_uri": "https://justhtml.sh/login?next=...",
-                 "expires_in": 600, "interval": 5 } }
-
-Surface both to the human in one message ("open this link, sign in, enter this
-6-digit code: 428117"). The code goes into the page they land on — not back to
-you. There is no \`/agent/identity/claim/complete\` in this mode (the human enters
-the code at the hosted form). Poll \`/oauth2/token\` exactly as above. Re-mint via
-\`/agent/identity/claim\` re-surfaces a fresh code + link (no email).
-
-The delivery mode is fixed at registration time and the two are mutually
-exclusive (the binding proof differs: emailed-inbox possession vs. a code you
-relay). The email default needs the fewest human actions; prefer it unless you
-have a reason to relay the code yourself.
+This emails a fresh code and invalidates the old one — tell the human to check
+their email again. Resume from step 3. If it returns \`410 claim_expired\`, the
+registration itself has expired — restart from step 1.
 
 ## Use the credential
 

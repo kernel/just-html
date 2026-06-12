@@ -36,22 +36,17 @@ paths:
       tags: [auth]
       summary: Start a service_auth registration
       description: |
-        Creates a pending registration (no user account is created yet) and
-        returns a claim_token plus a claim ceremony block.
+        Creates a pending registration (no user account is created yet),
+        emails the human a 6-digit code, and returns a claim_token plus a
+        claim block.
 
-        claim_delivery (default "email") selects how the user_code reaches the
-        human:
-          - "email" (DEFAULT): justhtml.sh emails the login_hint a 6-digit code
-            AND a one-click approve link. The user_code is OMITTED from this
-            response (the email is the binding proof). The human either clicks
-            approve (confirms + signs in) or reads the code back to the agent,
-            which submits it to POST /agent/identity/claim/complete.
-          - "agent": the spec-pure flow. The response carries user_code +
-            verification_uri; the agent surfaces both and the human enters the
-            code at the hosted form. Nothing is emailed; there is no
-            /agent/identity/claim/complete.
-        Modes are mutually exclusive and fixed at registration time. Either way
-        the agent polls /oauth2/token for the key.
+        There is exactly one flow: justhtml.sh emails the login_hint the code
+        (the code and nothing else — no links). The user_code is NEVER returned
+        in the response (the email is the binding proof). The human reads the
+        code back to the agent, which submits it to
+        POST /agent/identity/claim/complete; the agent then polls /oauth2/token
+        for the key. There is no claim_delivery parameter, no approve link, and
+        no hosted claim form.
       operationId: startRegistration
       security: []
       requestBody:
@@ -69,17 +64,9 @@ paths:
                   type: string
                   format: email
                   example: you@example.com
-                claim_delivery:
-                  type: string
-                  enum: [email, agent]
-                  default: email
-                  description: |
-                    email (default): code + approve link emailed; user_code
-                    omitted from the response. agent: spec-pure, user_code +
-                    verification_uri in the response.
       responses:
         "200":
-          description: Pending registration created
+          description: Pending registration created; code emailed to the human
           content:
             application/json:
               schema:
@@ -96,15 +83,11 @@ paths:
                     type: array
                     items: { type: string }
                   claim:
-                    description: |
-                      Email mode (default) omits user_code/verification_uri and
-                      carries delivery:"email" + complete_url. Agent mode carries
-                      delivery:"agent" + user_code + verification_uri.
-                    oneOf:
-                      - $ref: "#/components/schemas/ClaimEmailMode"
-                      - $ref: "#/components/schemas/ClaimAgentMode"
+                    $ref: "#/components/schemas/ClaimBlock"
         "400":
-          description: Bad body, bad login_hint, unsupported type, or bad claim_delivery
+          description: |
+            Bad body, bad login_hint, unsupported type, or a now-removed
+            parameter (claim_delivery is rejected with invalid_request).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AgentError" }
@@ -112,19 +95,20 @@ paths:
           $ref: "#/components/responses/RateLimited"
         "503":
           description: |
-            email_send_failed — claim_delivery=email but the email could not be
-            sent; the registration is voided. Retry registration.
+            email_send_failed — the code email could not be sent; the
+            registration is voided. Retry registration.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AgentError" }
   /agent/identity/claim:
     post:
       tags: [auth]
-      summary: Re-mint an expired user_code
+      summary: Re-mint an expired code
       description: |
-        Invalidates the prior user_code + verification link and mints fresh
-        ones (the 24h registration window must still be open). A corrected
-        email updates the registration's login_hint.
+        Invalidates the prior code and emails a fresh 6-digit code (the 24h
+        registration window must still be open). A corrected email updates the
+        registration's login_hint. The new code is NOT returned in the response
+        — it goes to the human's inbox.
       operationId: remintClaim
       security: []
       requestBody:
@@ -139,7 +123,7 @@ paths:
                 email: { type: string, format: email }
       responses:
         "200":
-          description: Fresh claim attempt
+          description: Fresh code emailed
           content:
             application/json:
               schema:
@@ -148,14 +132,8 @@ paths:
                   registration_id: { type: string }
                   claim_attempt_id: { type: string }
                   status: { type: string, example: initiated }
-                  expires_at: { type: string, format: date-time }
                   claim_attempt:
-                    type: object
-                    properties:
-                      user_code: { type: string }
-                      expires_in: { type: integer }
-                      verification_uri: { type: string, format: uri }
-                      interval: { type: integer }
+                    $ref: "#/components/schemas/ClaimBlock"
         "400": { description: Bad body, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
         "401": { description: Unknown claim_token, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
         "409": { description: Already claimed, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
@@ -164,16 +142,14 @@ paths:
   /agent/identity/claim/complete:
     post:
       tags: [auth]
-      summary: Complete a claim by reading the emailed code back (email mode only)
+      summary: Complete a claim by reading the emailed code back
       description: |
-        For claim_delivery=email registrations only. The human reads the 6-digit
-        code from the emailed claim message back to the agent, which submits it
-        here to confirm the claim WITHOUT a browser session (the binding proof is
-        that the code only reached the human via their inbox). Constant-time
-        compare; shares the code's 5-attempt budget with the approve link and the
-        hosted /claim form. On success the agent's /oauth2/token poll returns the
-        key. (Agent-delivery registrations have no read-back: the human enters the
-        code at the hosted form — calling this returns 409 wrong_delivery_mode.)
+        The human reads the 6-digit code from the emailed message back to the
+        agent, which submits it here to confirm the claim WITHOUT a browser
+        session (the binding proof is that the code only reached the human via
+        their inbox). Constant-time compare; 5 wrong attempts kill the code
+        (410 code_dead), then re-mint via POST /agent/identity/claim. On success
+        the agent's /oauth2/token poll returns the key.
       operationId: completeClaim
       security: []
       requestBody:
@@ -204,9 +180,7 @@ paths:
             message names attempts remaining).
           content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } }
         "409":
-          description: |
-            claimed_or_in_flight (already claimed) or wrong_delivery_mode
-            (registration uses the hosted form, claim_delivery=agent).
+          description: claimed_or_in_flight (already claimed).
           content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } }
         "410":
           description: |
@@ -1062,33 +1036,18 @@ components:
       properties:
         error: { type: string }
         message: { type: string }
-    ClaimEmailMode:
+    ClaimBlock:
       type: object
       description: |
-        The claim block in email mode (claim_delivery=email, the default). The
-        user_code is intentionally omitted — it was emailed to the human along
-        with a one-click approve link. The human clicks approve OR reads the code
-        back to the agent for POST /agent/identity/claim/complete.
+        The claim block. The user_code is intentionally omitted — it is emailed
+        to the human (the only place it appears). The human reads it back to the
+        agent, which POSTs {claim_token, user_code} to complete_url
+        (/agent/identity/claim/complete).
       properties:
-        delivery: { type: string, enum: [email] }
-        code_delivery:
-          type: string
-          description: Human-readable note that the code + approve link were emailed.
         complete_url:
           type: string
           format: uri
-          description: POST {claim_token, user_code} here to complete via read-back.
-        expires_in: { type: integer, example: 600 }
-        interval: { type: integer, example: 5 }
-    ClaimAgentMode:
-      type: object
-      description: |
-        The claim block in spec-pure mode (claim_delivery=agent). Carries the
-        user_code and verification_uri for the agent to surface to the human.
-      properties:
-        delivery: { type: string, enum: [agent] }
-        user_code: { type: string, example: "428117" }
-        verification_uri: { type: string, format: uri }
+          description: POST {claim_token, user_code} here to complete the claim.
         expires_in: { type: integer, example: 600 }
         interval: { type: integer, example: 5 }
     AgentError:
