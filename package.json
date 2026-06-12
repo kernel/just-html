@@ -1,0 +1,27 @@
+{
+  "name": "justhtml",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "migrate": "node --env-file=.env scripts/migrate.mjs",
+    "migrate:status": "node --env-file=.env scripts/migrate.mjs status"
+  },
+  "dependencies": {
+    "next": "15.5.19",
+    "pg": "^8.13.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "typescript": "^5.7.2"
+  },
+  "packageManager": "npm@10.9.2"
+}
