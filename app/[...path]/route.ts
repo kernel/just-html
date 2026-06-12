@@ -8,7 +8,12 @@ import { manPage, htmlResponse } from "@/lib/page";
 // concrete and dynamic segments (app/route.ts, app/api/health/route.ts, and the
 // B2/B3 handlers to come) all win over [...path], so this never shadows a real
 // route — it only fires for genuinely unmatched URLs.
-export const dynamic = "force-dynamic";
+//
+// The 404 body is a build-time constant, so serve it statically from the edge
+// cache instead of invoking a serverless function on every bot probe of a bogus
+// URL (B1 review advisory). force-static is valid here because every method
+// returns the same constant Response with no request-derived state.
+export const dynamic = "force-static";
 
 const PAGE = manPage({
   title: "404 — justhtml.sh",
