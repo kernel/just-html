@@ -465,6 +465,17 @@ paths:
         Provide exactly one of email or domain. role is editor, commenter, or
         viewer. Consumer email providers (gmail.com, ...) are rejected with 422.
         Re-granting the same target+role is idempotent (200 with unchanged:true).
+
+        Email grants send the grantee a share-notification email containing ONE
+        link: a single-use, 7-day login token with next=/d/:slug. Clicking it
+        logs the grantee in (email-keyed session, no account needed) and lands
+        them on the document; the email also explains how to register an agent
+        via auth.md to edit. Set notify:false to suppress the email. DOMAIN
+        grants NEVER notify (we don't email a whole company); notify is ignored
+        for them. Notification sends count against the per-recipient email caps;
+        a send failure or rate-limit never fails the grant (it is already
+        committed, and the /d/:slug "was this shared with you? sign in" fallback
+        recovers a missed/expired link).
       operationId: createGrant
       requestBody:
         required: true
@@ -480,6 +491,12 @@ paths:
                 email: { type: string, format: email }
                 domain: { type: string, example: kernel.sh }
                 role: { type: string, enum: [editor, commenter, viewer] }
+                notify:
+                  type: boolean
+                  default: true
+                  description: |
+                    Email-grants only. Send the grantee a share-notification
+                    email (default true). Ignored for domain grants.
       responses:
         "201":
           description: Grant created
@@ -490,6 +507,12 @@ paths:
                 properties:
                   slug: { type: string }
                   grant: { $ref: "#/components/schemas/Grant" }
+                  notified:
+                    type: boolean
+                    description: |
+                      Present only for email grants: true if the
+                      share-notification email was sent, false if suppressed
+                      (notify:false) or skipped (rate-limited / send failed).
         "200":
           description: Idempotent re-grant (same target + role)
           content:

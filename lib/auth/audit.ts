@@ -16,6 +16,7 @@ export type AuditEvent =
   | "registration.expired"
   | "login_link.requested"
   | "session.created"
+  | "share_notification.sent"
   | "rate_limit.tripped";
 
 export async function audit(

@@ -1,5 +1,6 @@
 import { findBySlug } from "@/lib/docs/store";
-import { canView } from "@/lib/docs/access";
+import { canViewSession } from "@/lib/docs/access";
+import { getSession } from "@/lib/auth/session";
 import { esc } from "@/lib/page";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,16 @@ function htmlResponse(html: string, status = 200): Response {
   });
 }
 
-function privateNotice(): Response {
+function privateNotice(slug: string): Response {
+  // Stale-link fallback (birthday.md "Share notifications"): always offer a
+  // sign-in path back to this exact doc. A grantee whose share link expired (or
+  // who never clicked it) signs in via /login?next=/d/:slug and, once their
+  // email-keyed session resolves the grant, lands on the doc. So an expired or
+  // consumed share link degrades to one extra email round-trip, never a dead
+  // end. The link is shown to everyone (no existence oracle): a stranger who
+  // signs in and has no grant simply sees this same notice again.
+  const next = `/d/${encodeURIComponent(slug)}`;
+  const signinHref = esc(`/login?next=${encodeURIComponent(next)}`);
   const body = `<!doctype html>
 <html lang="en">
 <head>
@@ -55,7 +65,10 @@ function privateNotice(): Response {
 <pre>    This document is private, or does not exist.
 
     If you were given a link with a ?viewtoken=… on it, use that exact
-    link. The owner can rotate the token, which invalidates old links.</pre>
+    link. The owner can rotate the token, which invalidates old links.
+
+    Was this shared with you? <a href="${signinHref}">Sign in</a> with the email it was
+    shared to — if you have access, you'll land right back here.</pre>
 </body>
 </html>`;
   // 404 — no existence oracle (private/unknown look identical).
@@ -68,11 +81,27 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const viewtoken = url.searchParams.get("viewtoken");
 
   const doc = await findBySlug(slug);
-  if (!doc || !canView(doc, viewtoken)) return privateNotice();
+  if (!doc) return privateNotice(slug);
+  const session = await getSession(req);
+  if (!(await canViewSession(doc, session, viewtoken))) return privateNotice(slug);
 
+  // Build the iframe src. The iframe loads /d/:slug/raw, which is sandboxed
+  // (allow-scripts, no allow-same-origin) → opaque origin. Two consequences:
+  //   - The /raw subframe load is NOT a top-level navigation, so SameSite=Lax
+  //     session cookies are NOT sent with it; /raw can only authorize via token
+  //     or public.
+  //   - Therefore a session-authorized viewer (owner / email-grant / domain-
+  //     grant, no ?viewtoken= in the URL) needs the shell to hand the iframe a
+  //     token-bearing capability URL. The shell has already authorized this
+  //     viewer above, and it holds doc.view_token, so it mints that capability
+  //     for the iframe. Private user HTML still renders only origin-less, and
+  //     the token never appears in the address bar for session viewers.
+  // If the caller supplied a valid viewtoken, honor it; otherwise fall back to
+  // the doc's own token (session-authorized path). Public docs need no token.
+  const iframeToken = viewtoken ?? (doc.is_public ? null : doc.view_token);
   const rawSrc =
     `/d/${encodeURIComponent(slug)}/raw` +
-    (viewtoken ? `?viewtoken=${encodeURIComponent(viewtoken)}` : "");
+    (iframeToken ? `?viewtoken=${encodeURIComponent(iframeToken)}` : "");
   const title = doc.title || doc.slug;
   const titleEsc = esc(title);
 

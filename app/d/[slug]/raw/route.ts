@@ -1,5 +1,6 @@
 import { findBySlug } from "@/lib/docs/store";
-import { canView } from "@/lib/docs/access";
+import { canViewSession } from "@/lib/docs/access";
+import { getSession } from "@/lib/auth/session";
 import { clientIp } from "@/lib/auth/request";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { RL_VIEWER_PER_MIN } from "@/lib/docs/config";
@@ -51,10 +52,17 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const viewtoken = url.searchParams.get("viewtoken");
 
   const doc = await findBySlug(slug);
-  // No existence oracle for private docs: a missing doc and a private doc with no
-  // (or a wrong) token are both 404.
+  // No existence oracle for private docs: a missing doc and a private doc the
+  // viewer can't access are both 404.
   if (!doc) return deny(404, "Not found.");
-  if (!canView(doc, viewtoken)) return deny(404, "Not found.");
+  // Session-aware authorization (birthday.md "Viewer-route enforcement"): owner
+  // session → email grant → domain grant → view token → public. When /raw is
+  // loaded inside the sandboxed iframe the session cookie is NOT sent (opaque
+  // origin, Lax) so this resolves via the token the shell appended; when /raw
+  // is opened as a top-level link the session cookie IS sent and authorizes
+  // directly. Either path lands a grantee on their doc.
+  const session = await getSession(req);
+  if (!(await canViewSession(doc, session, viewtoken))) return deny(404, "Not found.");
 
   return new Response(doc.html, {
     status: 200,

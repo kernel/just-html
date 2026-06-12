@@ -92,14 +92,19 @@ export function GET() {
     POST   /docs/:slug/rotate-token    new view token (the "un-share")
     GET    /docs/:slug/versions        version history
     GET    /docs/:slug/versions/:n     a specific version's html
-    POST   /docs/:slug/grants          share {email|domain, role}  (owner only)
+    POST   /docs/:slug/grants          share {email|domain, role, notify?}  (owner only)
     GET    /docs/:slug/grants          list grants                 (owner only)
     DELETE /docs/:slug/grants/:id      revoke a grant              (owner only)
 
-    Viewing (no auth):
+    Viewing:
     GET    /d/:slug                    viewer shell (chrome + sandboxed iframe)
     GET    /d/:slug/raw                zero-chrome HTML (CSP sandbox)
-    GET    /d/:slug?viewtoken=…        required for private docs</pre></section>
+    GET    /d/:slug?viewtoken=…        private docs, via the view token
+
+    A private doc is viewable by: its owner (signed in), anyone signed in
+    with an email/domain you granted, anyone holding the view token, or
+    everyone if it's public. Grant someone by email and they get a one-click
+    email that signs them in and drops them on the doc — no account needed.</pre></section>
 
 <h1>EXAMPLES</h1>
 <section><pre>    # Publish a private doc
@@ -121,10 +126,14 @@ export function GET() {
       -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
       -d '{"public":true}'
 
-    # Share edit access with a teammate (their agent registers as that email)
+    # Share edit access with a teammate. They get a one-click email that signs
+    # them in and lands them on the doc (no account needed); their agent can
+    # register via auth.md with that email to edit. Add "notify":false to skip
+    # the email. Domain grants ({"domain":"co.com"}) never email.
     curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/grants \\
       -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-      -d '{"email":"teammate@co.com","role":"editor"}'</pre></section>
+      -d '{"email":"teammate@co.com","role":"editor"}'
+    # -> {"slug":"...","grant":{...},"notified":true}</pre></section>
 
 <h1>LIMITS</h1>
 <section><pre>    Resource quotas (per user)

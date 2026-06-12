@@ -8,6 +8,8 @@ export const POLL_INTERVAL_S = 5; // token-endpoint poll interval
 export const MAX_CODE_ATTEMPTS = 5; // wrong user_code guesses, then code dead
 export const MAX_REMINTS = 10; // re-mints per registration, lifetime
 export const LOGIN_TOKEN_TTL_S = 900; // magic link, 15 min
+export const SHARE_TOKEN_TTL_S = 604_800; // share-notification login link, 7 days
+                                          // (share emails get clicked tomorrow, not now)
 export const SESSION_TTL_S = 2_592_000; // session lifetime, 30 days
 export const SESSION_SLIDE_FLOOR_S = 3_600; // throttle sliding-expiry writes to 1/h
 export const API_KEY_LAST_USED_THROTTLE_S = 60; // last_used_at bump throttle

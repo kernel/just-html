@@ -11,6 +11,7 @@ import {
   rateLimit,
 } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
+import { sendShareNotification } from "@/lib/docs/share-notify";
 import {
   createGrant,
   GRANT_ROLES,
@@ -106,6 +107,17 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   }
   const role = b.role as GrantRole;
 
+  // notify: suppress the share-notification email (default true). Only ever
+  // relevant for EMAIL grants — domain grants never notify (we don't email a
+  // whole company), so the flag is silently ignored for domains.
+  let notify = true;
+  if (b.notify !== undefined) {
+    if (typeof b.notify !== "boolean") {
+      return apiError(400, "invalid_request", "Field 'notify' must be a boolean.");
+    }
+    notify = b.notify;
+  }
+
   let granteeType: "email" | "domain";
   let grantee: string;
 
@@ -153,9 +165,36 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     if (result.error === "limit") {
       return quotaExceeded("grants", MAX_GRANTS_PER_DOC, MAX_GRANTS_PER_DOC);
     }
-    // error === "exists": idempotent re-grant of the same target + role.
+    // error === "exists": idempotent re-grant of the same target + role. No
+    // re-notification — the grantee was already emailed on the first grant, and
+    // a no-op re-grant shouldn't re-spam their inbox.
     return json({ slug: doc.slug, grant: grantView(result.grant), unchanged: true }, 200);
   }
 
-  return json({ slug: doc.slug, grant: grantView(result.grant) }, 201);
+  // Share notification (birthday.md "Share notifications"). Sent only for a
+  // freshly created or role-changed EMAIL grant, only when notify !== false.
+  // Domain grants never notify. The grant is already committed; a send failure
+  // or rate-limit never fails the request (the /d/:slug "was this shared with
+  // you?" fallback always recovers a missed/expired link).
+  let notified: boolean | undefined;
+  if (granteeType === "email") {
+    if (notify) {
+      const res = await sendShareNotification({
+        req,
+        docId: doc.id,
+        slug: doc.slug,
+        title: doc.title || doc.slug,
+        ownerEmail: principal.email,
+        granteeEmail: grantee,
+      });
+      notified = res.sent;
+    } else {
+      notified = false;
+    }
+  }
+
+  return json(
+    { slug: doc.slug, grant: grantView(result.grant), ...(notified !== undefined ? { notified } : {}) },
+    201
+  );
 }

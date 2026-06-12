@@ -99,22 +99,37 @@ Rotate view token (the "un-share" action) -> POST /docs/:slug/rotate-token
 Version history -> GET /docs/:slug/versions   and   GET /docs/:slug/versions/:n
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/versions -H "Authorization: Bearer $JUSTHTML_API_KEY"
 
-Share (owner only) -> POST /docs/:slug/grants   { email|domain, role }   role: editor|commenter|viewer
+Share (owner only) -> POST /docs/:slug/grants   { email|domain, role, notify? }   role: editor|commenter|viewer
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/grants \\
     -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
     -d '{"email":"teammate@co.com","role":"editor"}'
+  # -> 201 { slug, grant, notified: true }   (notified present only for email grants)
   # Domain grants (e.g. {"domain":"co.com"}) work too; consumer providers
   # (gmail.com, ...) are rejected -> use public or the view token instead.
   # A teammate's agent registers via auth.md with that email and the grant
   # authorizes their edits.
+  #
+  # Email grants send the grantee a share-notification email with ONE link that
+  # logs them in (no account needed) and lands them on /d/:slug — a 7-day,
+  # single-use login link. The email also tells them how to register an agent
+  # via auth.md to edit. Pass {"notify":false} to suppress the email (e.g. you'll
+  # share the link yourself). Domain grants NEVER email (we don't notify a whole
+  # company). Notification sends count against the per-recipient email caps.
 
 List / revoke grants -> GET /docs/:slug/grants ; DELETE /docs/:slug/grants/:id
 
-## Viewing (no auth)
+## Viewing
 
   https://justhtml.sh/d/:slug                 viewer shell (chrome + sandboxed iframe)
   https://justhtml.sh/d/:slug/raw             zero-chrome HTML (CSP sandbox)
-  https://justhtml.sh/d/:slug?viewtoken=...   required for private docs
+  https://justhtml.sh/d/:slug?viewtoken=...   private docs, via the view token
+
+A private doc authorizes a viewer in order: owner session, then a session whose
+email matches an email/domain grant, then a matching ?viewtoken=, then public.
+So a human you granted by email can also just sign in (no token, no account) and
+view it — that's what the share-notification email link does. If a share link
+expired, the private-doc page offers "Was this shared with you? Sign in"
+(-> /login?next=/d/:slug), which recovers access in one email round-trip.
 
 ## Limits
 

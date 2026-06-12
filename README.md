@@ -81,9 +81,17 @@ Auth:
 
 Documents (`/api/v1`, `Authorization: Bearer jh_live_…`): `docs` CRUD,
 `/edits` (deterministic patches), `/rotate-token`, `/versions`, `/grants`.
+Creating an **email** grant sends the grantee a share-notification email — one
+single-use, 7-day login link (`kind='share'` on `login_tokens`) with
+`next=/d/:slug` that signs them in (email-keyed session, no account) and lands
+them on the doc. `notify:false` suppresses it; **domain grants never notify**.
 
-Viewing (no auth): `/d/:slug` (shell + sandboxed iframe), `/d/:slug/raw`
-(CSP-sandboxed, origin-less), `/d/:slug/history` (diff view).
+Viewing: `/d/:slug` (shell + sandboxed iframe), `/d/:slug/raw`
+(CSP-sandboxed, origin-less), `/d/:slug/history` (diff view). A private doc
+authorizes in order: owner session → email-grant session → domain-grant
+session → view token → public. The private-doc notice always offers "Was this
+shared with you? Sign in" (`/login?next=/d/:slug`) so an expired share link
+degrades to one extra email round-trip, never a dead end.
 
 ## Operator: bulk-revoke a user's keys (incident response)
 
