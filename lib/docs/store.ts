@@ -554,7 +554,7 @@ export type SharedDocRow = DocRow & { access: "editor" | "commenter" | "viewer" 
  * (birthday.md "explicit email grant beats domain grant"). The grants table can
  * carry both an 'email' row and a 'domain' row that match this caller; we pick
  * the email-grant role when present via DISTINCT ON ordered by grantee_type
- * ('email' < 'domain' lexically, so 'email' wins the DISTINCT ON pick).
+ * DESC ('email' > 'domain' lexically, so 'email' is taken first per doc).
  *
  * Newest-updated first. `excludeOwnerId` is the caller's user_id when they have
  * an account (so docs they own are not double-listed in the shared section); for
@@ -576,7 +576,7 @@ export async function listSharedDocs(
        FROM doc_grants
        WHERE (grantee_type = 'email'  AND grantee = $1)
           OR (grantee_type = 'domain' AND grantee = $2)
-       ORDER BY doc_id, grantee_type ASC  -- 'email' < 'domain': email grant wins
+       ORDER BY doc_id, grantee_type DESC  -- 'email' > 'domain': email grant wins
      ) g
      JOIN documents d ON d.id = g.doc_id
      WHERE d.deleted_at IS NULL
