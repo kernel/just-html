@@ -1,16 +1,19 @@
 import { notFound } from "next/navigation";
+import { cookies } from "next/headers";
 import { findBySlug, listVersionsWithHtml } from "@/lib/docs/store";
-import { canView } from "@/lib/docs/access";
+import { canViewSession } from "@/lib/docs/access";
+import { getSessionFromToken } from "@/lib/auth/session";
+import { SESSION_COOKIE } from "@/lib/auth/config";
 import { unifiedPatch } from "@/lib/docs/diff";
 import HistoryClient, { type VersionMeta } from "./HistoryClient";
 
 export const dynamic = "force-dynamic";
 
 // GET /d/:slug/history — version list + diffs (birthday.md "History"). React
-// surface #2. ACCESS RULES ARE IDENTICAL TO THE DOC (canView): public docs are
-// open; private docs require a matching ?viewtoken=. A missing slug and an
-// unauthorized private doc render the same "private or does not exist" notice
-// (no existence oracle), matching /d/:slug and /d/:slug/raw.
+// surface #2. ACCESS RULES ARE IDENTICAL TO THE DOC (canViewSession): owner
+// session → email grant → domain grant → view token → public, matching
+// /d/:slug and /d/:slug/raw. A missing slug and an unauthorized private doc
+// render the same "private or does not exist" notice (no existence oracle).
 //
 // Diffs are computed here, server-side, from the FULL snapshots in doc_versions
 // (oldest→newest), then handed to the client component as unified-patch strings.
@@ -29,7 +32,9 @@ export default async function HistoryPage({ params, searchParams }: Props) {
   const viewtoken = Array.isArray(rawToken) ? (rawToken[0] ?? null) : (rawToken ?? null);
 
   const doc = await findBySlug(slug);
-  if (!doc || !canView(doc, viewtoken)) {
+  const sessionToken = (await cookies()).get(SESSION_COOKIE)?.value ?? null;
+  const session = await getSessionFromToken(sessionToken);
+  if (!doc || !(await canViewSession(doc, session, viewtoken))) {
     // No existence oracle: a missing slug and an unauthorized private doc both
     // 404 with the same notice (rendered by ./not-found.tsx), matching /d/:slug.
     notFound();

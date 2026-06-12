@@ -34,7 +34,14 @@ export function readSessionCookie(req: Request): string | null {
  * session.
  */
 export async function getSession(req: Request): Promise<Session | null> {
-  const raw = readSessionCookie(req);
+  return getSessionFromToken(readSessionCookie(req));
+}
+
+/**
+ * Token-level variant of getSession for callers that don't have a Request —
+ * e.g. React server components reading the cookie via next/headers.
+ */
+export async function getSessionFromToken(raw: string | null): Promise<Session | null> {
   if (!raw || !raw.startsWith("sess_")) return null;
   const hash = sha256Hex(raw);
   const { rows } = await query<{
