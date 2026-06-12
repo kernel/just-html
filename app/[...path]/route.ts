@@ -9,11 +9,13 @@ import { manPage, htmlResponse } from "@/lib/page";
 // B2/B3 handlers to come) all win over [...path], so this never shadows a real
 // route — it only fires for genuinely unmatched URLs.
 //
-// The 404 body is a build-time constant, so serve it statically from the edge
-// cache instead of invoking a serverless function on every bot probe of a bogus
-// URL (B1 review advisory). force-static is valid here because every method
-// returns the same constant Response with no request-derived state.
-export const dynamic = "force-static";
+// Kept force-dynamic deliberately. The B1 review floated force-static to serve
+// this from the edge cache, but a force-static route handler that returns a
+// non-200 status (this one returns 404) is mis-served by Next: it prerenders the
+// body but the runtime falls back to the framework error page and emits HTTP 500
+// with a React error shell (verified against production 2026-06-12). Correctness
+// (a real 404, zero JS) beats the marginal edge-cache saving on bogus-URL probes.
+export const dynamic = "force-dynamic";
 
 const PAGE = manPage({
   title: "404 — justhtml.sh",
