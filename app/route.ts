@@ -2,7 +2,14 @@ import { manPage, htmlResponse } from "@/lib/page";
 
 // Homepage — plain HTML, man-page style, zero JS. Placeholder for B1.
 // Full NAME/SYNOPSIS/EXAMPLES docs + copy-pasteable agent prompt land in B6.
-export const dynamic = "force-static";
+//
+// Served as a dynamic route-handler response (new Response(html)) per the
+// style rules — NOT force-static. force-static turns the handler output into
+// a CDN static asset, which Vercel then serves with `access-control-allow-
+// origin: *` and `content-disposition: inline`. Those headers are harmless on
+// a public HTML page but are not something we want appearing on our handler
+// output by accident; force-dynamic keeps the response a real handler response.
+export const dynamic = "force-dynamic";
 
 export function GET() {
   const body = `
