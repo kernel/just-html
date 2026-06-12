@@ -26,7 +26,18 @@ function confirmPage(token: string, next: string): string {
   });
 }
 
-function deadLinkPage(): string {
+// The dead-link page. CRITICAL: it must carry the sanitized `next` forward so an
+// expired/consumed SHARE link degrades to one extra email round-trip, never a
+// dead end (birthday.md "Stale-link fallback (always works)"). Without this, a
+// grantee whose 7-day share link expired loses next=/d/:slug entirely and, being
+// account-less, has no path back to the doc. We point "request a new one" at
+// /login?next=<next> so re-sign-in lands them right back on the doc, where the
+// session-grant check resolves their access.
+function deadLinkPage(next?: string): string {
+  const dest = next && next !== "/login" ? next : null;
+  const requestHref = dest
+    ? `/login?next=${encodeURIComponent(dest)}`
+    : "/login";
   return manPage({
     title: "justhtml.sh — link expired",
     center: "LOGIN",
@@ -34,7 +45,12 @@ function deadLinkPage(): string {
 <h1>LINK EXPIRED OR USED</h1>
 <section><pre>    This login link is expired or already used.
 
-    Request a new one at <a href="/login">justhtml.sh/login</a>.</pre></section>
+    Request a new one at <a href="${esc(requestHref)}">justhtml.sh/login</a>${
+      dest
+        ? ` — signing in again
+    will take you straight to where this link was headed.`
+        : "."
+    }</pre></section>
 `,
   });
 }
@@ -48,7 +64,7 @@ export function GET(req: Request): Response {
   // session sees the "no account yet — tell your agent to sign up" message —
   // not the homepage, which a fresh user would otherwise land on.
   const next = sanitizeNext(url.searchParams.get("next") ?? "/login");
-  if (!token) return htmlResponse(deadLinkPage(), { status: 410 });
+  if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
   return htmlResponse(confirmPage(token, next));
 }
 
@@ -61,7 +77,7 @@ export async function POST(req: Request): Promise<Response> {
   const form = await req.formData();
   const token = String(form.get("token") ?? "");
   const next = sanitizeNext(String(form.get("next") ?? "/login"));
-  if (!token) return htmlResponse(deadLinkPage(), { status: 410 });
+  if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
 
   const { rows } = await query<{ email: string; id: number }>(
     `UPDATE login_tokens SET consumed_at = now()
@@ -70,7 +86,7 @@ export async function POST(req: Request): Promise<Response> {
     [sha256Hex(token)]
   );
   const row = rows[0];
-  if (!row) return htmlResponse(deadLinkPage(), { status: 410 });
+  if (!row) return htmlResponse(deadLinkPage(next), { status: 410 });
 
   // Mirror consumption into the QA table when enabled (best-effort).
   if (process.env.QA_SECRET) {

@@ -107,6 +107,7 @@ function shareHtmlBody(opts: {
   ownerEmail: string;
   title: string;
   link: string;
+  docUrl: string;
   granteeEmail: string;
   date: string;
 }): string {
@@ -116,6 +117,7 @@ function shareHtmlBody(opts: {
   const title = esc(opts.title);
   const grantee = esc(opts.granteeEmail);
   const href = esc(opts.link);
+  const docHref = esc(opts.docUrl);
   return `<!doctype html>
 <html>
   <body style="margin:0; padding:24px; background:#ffffff;">
@@ -137,8 +139,8 @@ NOTES
     straight to the document. no account or password needed.
 
     single use. expires in ${SHARE_EXPIRY_DAYS} days. if it expires, open the
-    document link the owner sent you and choose "was this shared
-    with you? sign in".
+    document directly and choose "was this shared with you? sign in":
+    <a href="${docHref}" style="color:#0000ee;">${docHref}</a>
 
     to edit via API, tell your agent to register at
     justhtml.sh/auth.md with this email.
@@ -156,6 +158,7 @@ function shareTextBody(opts: {
   ownerEmail: string;
   title: string;
   link: string;
+  docUrl: string;
   granteeEmail: string;
 }): string {
   return `${opts.ownerEmail} shared a document with you on justhtml.sh
@@ -167,8 +170,9 @@ OPEN
 
 clicking the link signs you in on this device and takes you straight to the
 document. no account or password needed. single use, expires in ${SHARE_EXPIRY_DAYS} days.
-if it expires, open the document link the owner sent you and choose "was this
-shared with you? sign in".
+if it expires, open the document directly and choose "was this shared with you?
+sign in":
+  ${opts.docUrl}
 
 to edit via API, tell your agent to register at justhtml.sh/auth.md with this
 email.
@@ -187,6 +191,7 @@ export async function sendShareEmail(opts: {
   ownerEmail: string;
   title: string;
   link: string;
+  docUrl: string; // bare https://justhtml.sh/d/:slug — the stale-link recovery target
 }): Promise<string | null> {
   const date = new Date().toISOString().slice(0, 10);
   const { data, error } = await resend().emails.send({
@@ -197,6 +202,7 @@ export async function sendShareEmail(opts: {
       ownerEmail: opts.ownerEmail,
       title: opts.title,
       link: opts.link,
+      docUrl: opts.docUrl,
       granteeEmail: opts.to,
       date,
     }),
@@ -204,6 +210,7 @@ export async function sendShareEmail(opts: {
       ownerEmail: opts.ownerEmail,
       title: opts.title,
       link: opts.link,
+      docUrl: opts.docUrl,
       granteeEmail: opts.to,
     }),
     tags: [{ name: "flow", value: "share_notification" }],

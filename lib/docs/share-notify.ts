@@ -70,6 +70,10 @@ export async function sendShareNotification(opts: {
   const tokenId = rows[0].id;
 
   const link = `${ORIGIN}/login/verify?token=${token}&next=${encodeURIComponent(next)}`;
+  // Bare doc URL so the email's stale-link recovery copy is self-contained: when
+  // the 7-day token expires, the grantee opens this and uses the "was this shared
+  // with you? sign in" link on /d/:slug (which carries next=/d/:slug).
+  const docUrl = `${ORIGIN}${next}`;
 
   // QA escape hatch (REMOVABLE post-launch): mirror the plaintext link so
   // automated reviewers can complete the share flow. Only when QA_SECRET is set.
@@ -87,6 +91,7 @@ export async function sendShareNotification(opts: {
       ownerEmail: opts.ownerEmail,
       title: opts.title,
       link,
+      docUrl,
     });
   } catch {
     await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});

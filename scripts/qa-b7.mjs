@@ -137,6 +137,26 @@ async function main() {
   const rawAnon = await fetch(BASE + "/d/" + slug + "/raw");
   check("anonymous /raw (no token) → 404", rawAnon.status === 404, `status=${rawAnon.status}`);
 
+  log("\n=== consumed share link is NOT a dead end (410 page keeps next) ===");
+  // Regression for the B7 blocking finding: replaying the now-consumed share
+  // token must 410 AND the dead-link page must carry next=/d/:slug forward to
+  // /login so the account-less grantee can re-sign-in straight back to the doc.
+  const replayU = new URL((await qaLatestLink(GRANTEE)).json.link);
+  const replay = await form("/login/verify", {
+    token: replayU.searchParams.get("token"),
+    next: replayU.searchParams.get("next"),
+  });
+  const replayHtml = await replay.res.text();
+  check("consumed share token replay → 410", replay.status === 410, `status=${replay.status}`);
+  check("410 page links back to /login?next=/d/:slug (no dead end)",
+    replayHtml.includes(`/login?next=${encodeURIComponent(`/d/${slug}`)}`),
+    "next preserved");
+  check("410 page does NOT drop to a bare /login only",
+    !/href="\/login"(?!\?)/.test(replayHtml) || replayHtml.includes(`next=${encodeURIComponent(`/d/${slug}`)}`));
+  // Following that recovery link reaches the login form (not another dead end).
+  const recover = await fetch(BASE + `/login?next=${encodeURIComponent(`/d/${slug}`)}`, { redirect: "manual" });
+  check("recovery /login?next=/d/:slug serves the sign-in form (200)", recover.status === 200, `status=${recover.status}`);
+
   log("\n=== notify:false suppresses the email ===");
   const gNo = await jpost("/api/v1/docs/" + slug + "/grants", { email: NONOTIFY, role: "viewer", notify: false }, bearer(ownerKey));
   check("grant 201, notified:false", gNo.status === 201 && gNo.json?.notified === false, `notified=${gNo.json?.notified}`);
