@@ -589,10 +589,16 @@ components:
           type: [integer, "null"]
           description: User who authored this version (null for legacy/system writes).
         patch:
-          type: [object, "null"]
+          type: array
           description: >-
             The edits payload as requested, present only when edit_kind=patch
             (the list of {oldText,newText} applied). Omitted otherwise.
+          items:
+            type: object
+            required: [oldText, newText]
+            properties:
+              oldText: { type: string }
+              newText: { type: string }
         bytes: { type: integer }
         created_at: { type: string, format: date-time }
     Grant:
