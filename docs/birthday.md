@@ -332,33 +332,31 @@ The claim ceremony doubles as account creation AND leaves the human with a
 logged-in browser session — one email click bootstraps both the agent's key
 and the human's session.
 
-### Claim delivery modes (2026-06-12, post-dogfood)
+### The claim ceremony — ONE flow (final, founder directive 2026-06-12)
 
-`POST /agent/identity` takes `claim_delivery`:
+"Simplify simplify": there is exactly one ceremony. No `claim_delivery`
+parameter, no approve link, no hosted claim form, no spec-pure variant.
 
-- **`email` (default, the recommended flow in our auth.md)**: the `user_code`
-  is NOT in the API response — we email it to the login_hint address
-  (man-page style). The email offers two equivalent completions:
-  (a) **click the approve link** → GET shows a confirm page ("Approve the
-  API key for raf@…?" — button POST, scanner-safe), one click approves the
-  claim AND logs the human in (session minted, lands on /docs); or
-  (b) **read the 6-digit code back to the agent**, which calls
-  `POST /agent/identity/claim/complete {claim_token, user_code}`.
-  Either way the agent's `/oauth2/token` poll then returns the key.
-  Binding proof = inbox possession. Minimum human effort: open email,
-  click approve. Registration triggers an email send → registration rate
-  caps align with email-send caps.
-- **`agent` (spec-pure)**: exactly the original ceremony — response carries
-  `user_code` + `verification_uri`, human signs in at the form and types the
-  code. Kept for agents that implement the auth.md spec literally.
+1. `POST /agent/identity {type: "service_auth", login_hint}` →
+   `{claim_token, claim: {complete_url, expires_in, interval}}`. The
+   `user_code` appears NOWHERE in the API response.
+2. justhtml.sh emails the human a 6-digit code (man-page email, the code and
+   nothing else — no links, no buttons).
+3. The human reads the code back to the agent.
+4. Agent: `POST /agent/identity/claim/complete {claim_token, user_code}` →
+   then the `/oauth2/token` claim grant returns the `jh_live_` key (issued
+   exactly once). 5 wrong attempts kill the code; re-mint via
+   `POST /agent/identity/claim` (sends a fresh email).
 
-The two channels are mutually exclusive per registration (the binding proof
-differs); `claim_delivery` is fixed at registration time.
+Binding proof = inbox possession. The ceremony does NOT create a browser
+session — humans sign in at `/login` (magic link) when they want `/docs`;
+share-notification links are unaffected. Registration sends an email, so
+registration rate caps align with the email-send caps.
 
-**Copy rule (from dogfooding)**: when `/login` is reached with a claim
-`next=`, the page must say "your agent is registering a justhtml.sh account
-for <email> — sign in to confirm", not the generic "this never creates an
-account" line, which reads as a contradiction mid-signup.
+This drops the WorkOS-spec-literal path entirely (response-carried
+user_code + hosted verification form) — same call kernel.sh made in
+production. Agents read auth.md first; auth.md describes this one recipe,
+linearly, with no branches.
 
 **Deliberate deviations from spec** (full list with reasoning in
 authmd-implementation.md §8):
@@ -704,10 +702,11 @@ main + prod — brand-new project, no backwards compatibility.)
   PlanetScale + Vercel via Projects; Resend manual signup (not in catalog);
   domain via Vercel Domains API.
 - ~~Anonymous-start registration?~~ No — service_auth only (see deviations).
-- ~~Claim ceremony: emailed OTP or spec-pure?~~ Re-decided after dogfooding
-  (2026-06-12): **hybrid emailed-OTP default** (`claim_delivery: email` —
-  emailed code + scanner-safe one-click approve that also logs you in),
-  spec-pure form kept as `claim_delivery: agent`. See "Claim delivery modes".
+- ~~Claim ceremony: emailed OTP or spec-pure?~~ FINAL (2026-06-12, third
+  revision, founder: "simplify simplify"): **one flow only** — emailed
+  6-digit code, read back to the agent, `claim/complete`. No approve link,
+  no claim_delivery param, no hosted form, no spec-pure mode. See "The
+  claim ceremony — ONE flow".
 - ~~Session state?~~ DB-backed sessions table, opaque hashed token in
   HttpOnly cookie, keyed by verified email (user_id nullable). No
   JWT/NextAuth. Magic-link click = login. Sign-up remains agent-only.
