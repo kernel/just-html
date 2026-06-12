@@ -7,7 +7,7 @@ import { query } from "@/lib/db";
 export type Window = "minute" | "hour" | "day";
 
 export type LimitCheck = {
-  /** counter key, e.g. 'ident:ip:1.2.3.4' | 'login:email:raf@kernel.sh' */
+  /** counter key, e.g. 'ident:ip:1.2.3.4' | 'email:addr:raf@kernel.sh' */
   key: string;
   limit: number;
   window: Window;
