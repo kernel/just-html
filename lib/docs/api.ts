@@ -75,6 +75,35 @@ export function quotaExceeded(
   return apiError(403, "quota_exceeded", msg, { limit: kind, limit_value: limit, current });
 }
 
+/**
+ * 422 — a patch edit could not be applied deterministically (birthday.md
+ * "Editing"). Names the failing edit index and a machine-readable reason so the
+ * calling agent can retry with more context. `extra` carries reason-specific
+ * detail (other_edit_index for overlap, occurrences for multiple_matches).
+ */
+export function unprocessableEdit(
+  reason: string,
+  editIndex: number,
+  message: string,
+  extra?: Record<string, unknown>
+): Response {
+  return apiError(422, "edit_failed", message, {
+    reason,
+    edit_index: editIndex,
+    ...(extra ?? {}),
+  });
+}
+
+/** 409 — base_version mismatch (stale patch). Carries the current version. */
+export function staleVersion(currentVersion: number): Response {
+  return apiError(
+    409,
+    "version_conflict",
+    "base_version does not match the document's current version. Re-read the document (or GET /versions), re-derive your edits against the current content, and retry.",
+    { current_version: currentVersion, versions_url: "versions" }
+  );
+}
+
 export type RlKind = "create" | "write" | "read";
 
 /**

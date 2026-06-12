@@ -1,7 +1,9 @@
 import { getPool, query } from "@/lib/db";
 import { generateSlug, generateViewToken } from "@/lib/docs/slug";
+import { applyEdits, type Edit } from "@/lib/docs/edit-diff";
 import {
   MAX_DOCS_PER_USER,
+  MAX_HTML_BYTES,
   MAX_STORAGE_BYTES_PER_USER,
   MAX_VERSIONS_PER_DOC,
   ORIGIN,
@@ -233,6 +235,179 @@ export async function rewriteDoc(opts: {
   } finally {
     client.release();
   }
+}
+
+/**
+ * Apply a patch (a list of {oldText,newText} edits) — birthday.md "Editing".
+ *
+ * Concurrency (two layers, both Postgres):
+ *  1. Serialization — SELECT ... FOR UPDATE on the documents row inside the
+ *     transaction. Concurrent writers queue; the txn is short.
+ *  2. Staleness — if base_version is supplied and ≠ the locked current version,
+ *     we abort with a `stale` result carrying the current version (→ 409). This
+ *     is checked AFTER acquiring the lock so it reflects the truly-current row,
+ *     not a value read before a competing writer committed.
+ *
+ * The deterministic engine (lib/docs/edit-diff.ts) applies the edits to the
+ * locked html. On per-edit failure it throws EditApplyError, which we let
+ * propagate to the HTTP layer for a structured 422 (it is NOT a quota/stale
+ * outcome). On success: version bump + a 'patch' doc_versions snapshot whose
+ * `patch` jsonb is the REQUESTED edits (snapshot html is the RESULT), then prune.
+ *
+ * Storage quota and the 2 MB per-doc cap are re-checked under the lock against
+ * the produced html (a patch can grow a doc past the cap).
+ */
+export async function applyPatch(opts: {
+  doc: DocRow;
+  edits: Edit[];
+  baseVersion?: number;
+  authorUserId: number;
+}):
+  | Promise<
+      | { doc: DocRow }
+      | { quota: QuotaError }
+      | { stale: { currentVersion: number } }
+      | { tooLarge: { gotBytes: number } }
+    > {
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: lockRows } = await client.query(
+      `SELECT * FROM documents WHERE id = $1 AND deleted_at IS NULL FOR UPDATE`,
+      [opts.doc.id]
+    );
+    const current = lockRows[0] as DocRow | undefined;
+    if (!current) {
+      await client.query("ROLLBACK");
+      throw new Error("doc disappeared under write lock");
+    }
+
+    // Staleness check under the lock (authoritative current version).
+    if (opts.baseVersion !== undefined && opts.baseVersion !== current.version) {
+      await client.query("ROLLBACK");
+      return { stale: { currentVersion: current.version } };
+    }
+
+    // Apply the edits deterministically. EditApplyError propagates → 422.
+    let newHtml: string;
+    try {
+      newHtml = applyEdits(current.html, opts.edits);
+    } catch (e) {
+      await client.query("ROLLBACK");
+      throw e;
+    }
+
+    // 2 MB per-doc cap on the produced html.
+    const newHtmlBytes = byteLen(newHtml);
+    if (newHtmlBytes > MAX_HTML_BYTES) {
+      await client.query("ROLLBACK");
+      return { tooLarge: { gotBytes: newHtmlBytes } };
+    }
+
+    // Storage quota under the lock — same projection as rewriteDoc.
+    const { rows: usageRows } = await client.query(
+      `SELECT
+         COALESCE((SELECT sum(octet_length(html)) FROM documents
+            WHERE owner_id = $1 AND deleted_at IS NULL AND id <> $2), 0)
+       + COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
+            JOIN documents d ON d.id = v.doc_id
+            WHERE d.owner_id = $1 AND d.deleted_at IS NULL AND d.id <> $2), 0) AS other_bytes,
+         COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
+            WHERE v.doc_id = $2), 0) AS this_versions_bytes`,
+      [current.owner_id, current.id]
+    );
+    const otherBytes = Number(usageRows[0]?.other_bytes ?? 0);
+    const thisVersionsBytes = Number(usageRows[0]?.this_versions_bytes ?? 0);
+    const projected = otherBytes + newHtmlBytes + thisVersionsBytes + newHtmlBytes;
+    if (projected > MAX_STORAGE_BYTES_PER_USER) {
+      await client.query("ROLLBACK");
+      return {
+        quota: {
+          kind: "storage",
+          limit: MAX_STORAGE_BYTES_PER_USER,
+          current: otherBytes + Number(byteLen(current.html)) + thisVersionsBytes,
+        },
+      };
+    }
+
+    const nextVersion = current.version + 1;
+    const { rows: updRows } = await client.query(
+      `UPDATE documents SET html = $2, version = $3, updated_at = now()
+       WHERE id = $1 RETURNING *`,
+      [current.id, newHtml, nextVersion]
+    );
+    await client.query(
+      `INSERT INTO doc_versions (doc_id, version, html, author_user_id, edit_kind, patch)
+       VALUES ($1, $2, $3, $4, 'patch', $5)`,
+      [current.id, nextVersion, newHtml, opts.authorUserId, JSON.stringify(opts.edits)]
+    );
+    await pruneVersions(client, current.id);
+    await client.query("COMMIT");
+    return { doc: updRows[0] as DocRow };
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+export type VersionRow = {
+  id: number;
+  doc_id: number;
+  version: number;
+  html: string;
+  bytes: number;
+  author_user_id: number | null;
+  edit_kind: EditKind;
+  patch: unknown;
+  created_at: string;
+};
+
+/** Shape returned for a version (metadata only unless includeHtml). */
+export function versionView(v: VersionRow, includeHtml: boolean) {
+  return {
+    version: v.version,
+    edit_kind: v.edit_kind,
+    patch: v.edit_kind === "patch" ? v.patch : undefined,
+    author_user_id: v.author_user_id,
+    created_at: v.created_at,
+    bytes: Number(v.bytes),
+    ...(includeHtml ? { html: v.html } : {}),
+  };
+}
+
+/** List retained version snapshots for a doc, newest first (metadata + byte size, no html). */
+export async function listVersions(docId: number): Promise<VersionRow[]> {
+  const { rows } = await query<VersionRow>(
+    `SELECT id, doc_id, version, '' AS html, octet_length(html) AS bytes,
+            author_user_id, edit_kind, patch, created_at
+     FROM doc_versions WHERE doc_id = $1 ORDER BY version DESC`,
+    [docId]
+  );
+  return rows;
+}
+
+/** Fetch one version's full snapshot, or null if not retained. */
+export async function findVersion(docId: number, version: number): Promise<VersionRow | null> {
+  const { rows } = await query<VersionRow>(
+    `SELECT id, doc_id, version, html, octet_length(html) AS bytes,
+            author_user_id, edit_kind, patch, created_at
+     FROM doc_versions WHERE doc_id = $1 AND version = $2`,
+    [docId, version]
+  );
+  return rows[0] ?? null;
+}
+
+/** All retained versions WITH html, oldest first — for the history diff page. */
+export async function listVersionsWithHtml(docId: number): Promise<VersionRow[]> {
+  const { rows } = await query<VersionRow>(
+    `SELECT id, doc_id, version, html, octet_length(html) AS bytes,
+            author_user_id, edit_kind, patch, created_at
+     FROM doc_versions WHERE doc_id = $1 ORDER BY version ASC`,
+    [docId]
+  );
+  return rows;
 }
 
 /**

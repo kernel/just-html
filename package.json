@@ -11,6 +11,7 @@
     "migrate:status": "node --env-file=.env scripts/migrate.mjs status"
   },
   "dependencies": {
+    "@pierre/diffs": "^1.2.10",
     "next": "15.5.19",
     "pg": "^8.13.1",
     "react": "19.1.0",
