@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D — quiet gutter strip — justhtml.sh reactions</title>
+<!--
+  VARIANT D — SYNTHESIS: QUIET GUTTER STRIP (resting-state nearly invisible)
+    The document stays pristine: a reacted span gets only a faint tint with NO
+    inline glyph in the text at all. Instead, reactions live in a thin GUTTER
+    strip between the document and the comment rail. Each reacted span projects a
+    small emoji dot into the gutter at its own y-position (clamped, no overlap).
+    At rest the gutter reads as faint marginalia dots; hover a dot (or its span)
+    → the pair lights up and the dot blooms into the full emoji+count chips with a
+    reactor popover. This spatially SEPARATES the two kinds of marginalia: comments
+    own the wide right rail; reactions own the narrow gutter — so a span can carry
+    both without the doc body ever becoming a highlighter accident.
+
+    This is the most restrained option: zero reactions → zero chrome (no gutter),
+    and even with reactions the document text is untouched.
+
+  OVERLAP CASE: comment highlight (yellow, in the doc) + reaction (dot in the
+  gutter, comment card in the rail). The three live in three different lanes —
+  doc / gutter / rail — so they literally cannot collide. Hovering the gutter dot
+  lights the same yellow span the comment card points at, making the relationship
+  legible without stacking anything on the words.
+
+  Doc-level reactions: de-emphasized strip in the rail header.
+-->
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;color:#111;background:#fff}
+  .jh-bar{display:flex;justify-content:space-between;align-items:center;height:2.4rem;padding:0 0.9rem;font-size:13px;border-bottom:1px solid #ccc;background:#fafafa}
+  .jh-bar .jh-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+  .jh-bar a{color:#0000ee}.jh-bar .jh-credit{flex-shrink:0;padding-left:.9rem}
+
+  .stage{position:relative;height:calc(100vh - 2.4rem);overflow:auto;background:#fff;display:flex}
+  .docwrap{flex:1;min-width:0;position:relative}
+  .doc{max-width:40rem;margin:0 auto;padding:2.2rem 1.2rem 8rem;font-family:Georgia,"Times New Roman",serif;font-size:16px;line-height:1.7;color:#1a1a1a}
+  .doc h1{font-size:1.5rem;margin:.2rem 0 1rem}
+  .doc h2{font-size:1.1rem;margin:2rem 0 .5rem;font-family:ui-monospace,monospace;color:#333}
+  .doc p{margin:.8rem 0}
+  .doc pre{font-family:ui-monospace,monospace;font-size:13px;background:#f6f6f6;border:1px solid #e3e3e3;border-radius:4px;padding:.8rem;overflow:auto;line-height:1.45}
+  .doc ul{margin:.6rem 0;padding-left:1.4rem}
+  .doc code{font-family:ui-monospace,monospace;font-size:.9em;background:#f0f0f0;padding:0 3px;border-radius:3px}
+
+  .hl{background:#fff3bf;cursor:pointer;border-bottom:1px solid #f1d96b}
+  .hl.active{background:#ffe089}
+  /* reaction anchor at REST: almost nothing — faintest tint, only visible on hover */
+  .rx-anchor{transition:background .12s,box-shadow .12s}
+  .rx-anchor.active{background:#eef3fb;box-shadow:inset 0 -1px 0 #9db8d8}
+
+  /* the GUTTER strip — its own narrow lane */
+  .gutter{width:52px;flex-shrink:0;position:relative;border-left:1px solid #f0f0f0;background:#fff}
+  .gutter-hd{position:sticky;top:0;height:0;}
+  .gdot{position:absolute;left:7px;display:flex;align-items:center;cursor:pointer;
+    transition:transform .1s}
+  .gdot .mini{font-size:12px;line-height:1;opacity:.55;transition:opacity .12s}
+  .gdot:hover .mini,.gdot.active .mini{opacity:1}
+  /* expanded chips bloom to the LEFT into the gutter / over doc edge on hover */
+  .gdot .full{display:none;position:absolute;right:30px;top:50%;transform:translateY(-50%);
+    white-space:nowrap;background:#fff;border:1px solid #dde4ee;border-radius:11px;
+    padding:2px 6px;box-shadow:0 3px 12px rgba(40,70,120,.14);gap:4px;z-index:6}
+  .gdot:hover .full,.gdot.active .full{display:flex}
+  .gdot .full .rxchip{font-size:11.5px;border:1px solid #e0e0e0;border-radius:9px;padding:0 6px;background:#fbfbfb;cursor:pointer;display:inline-flex;gap:3px;align-items:center;white-space:nowrap}
+  .gdot .full .rxchip.mine{border-color:#9db8d8;background:#eef3fb;color:#3a5b8a}
+  .gdot .full .rxchip .ct{color:#888}.gdot .full .rxchip.mine .ct{color:#3a5b8a}
+  .gdot .full .rx-add{font-size:12px;color:#bbb;border:1px dashed #ddd;border-radius:9px;padding:0 6px;cursor:pointer}
+  .gdot .full .rx-add:hover{color:#777}
+
+  .rail{width:300px;flex-shrink:0;border-left:1px solid #e2e2e2;background:#fbfbfb;position:relative}
+  .rail-hd{position:sticky;top:0;background:#fbfbfb;border-bottom:1px solid #eee;padding:6px 10px;font-size:11px;color:#666;display:flex;justify-content:space-between;align-items:center;z-index:5}
+  .doclevel{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:5px 10px;border-bottom:1px solid #eee;background:#fbfbfb}
+  .doclevel .lbl{color:#aaa;font-size:10px;margin-right:2px}
+  .doclevel .dchip{font-size:10.5px;border:1px solid #ececec;border-radius:9px;padding:0 5px;background:#fcfcfc;color:#888;cursor:pointer}
+  .doclevel .dchip.mine{border-color:#cdd9ea;color:#3a5b8a;background:#f3f7fc}
+  .cards{position:relative;padding:6px 8px 200px}
+  .card{background:#fff;border:1px solid #e2e2e2;border-radius:7px;margin-bottom:7px;font-size:12px;cursor:pointer;overflow:hidden}
+  .card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1)}
+  .card.active{border-color:#f1c40f;box-shadow:0 2px 10px rgba(0,0,0,.13)}
+  .card .top{display:flex;gap:7px;padding:8px 9px}
+  .card img{width:24px;height:24px;border-radius:50%;flex-shrink:0}
+  .card .who{font-weight:700;color:#222}.card .when{color:#999;font-size:10.5px}
+  .card .body{color:#222;margin-top:2px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
+
+  .seltool{position:absolute;display:none;flex-direction:column;gap:2px;background:#111;border-radius:7px;padding:4px;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:30}
+  .seltool button{width:30px;height:30px;border:none;background:transparent;color:#fff;font-size:15px;cursor:pointer;border-radius:5px;display:flex;align-items:center;justify-content:center}
+  .seltool button:hover{background:#333}
+  .emojibar{position:absolute;display:none;background:#fff;border:1px solid #ccc;border-radius:18px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.2);z-index:31;gap:2px}
+  .emojibar button{border:none;background:transparent;font-size:17px;cursor:pointer;padding:2px 4px;border-radius:50%}
+  .emojibar button:hover{background:#f0f0f0}
+
+  .pop{position:fixed;display:none;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:40;padding:6px 8px;font-size:11px;max-width:240px}
+  .pop .row{display:flex;align-items:center;gap:6px;padding:2px 0}
+  .pop img{width:18px;height:18px;border-radius:50%}.pop .hdr{color:#888;font-size:10px;margin-bottom:3px}
+
+  .legend{position:fixed;bottom:8px;left:8px;font-size:10px;color:#aaa;background:#fff;border:1px solid #eee;border-radius:4px;padding:3px 7px;max-width:46%}
+</style>
+</head>
+<body>
+<div class="jh-bar">
+  <span class="jh-title">RECTL(1) — record-control utility — design spec</span>
+  <span class="jh-credit">made with <a href="#">justhtml.sh</a></span>
+</div>
+<div class="stage" id="stage">
+  <div class="docwrap" id="docwrap">
+    <article class="doc" id="doc"></article>
+    <div class="seltool" id="seltool">
+      <button title="add comment" data-act="comment">💬</button>
+      <button title="add reaction" data-act="react">😊</button>
+    </div>
+    <div class="emojibar" id="emojibar"></div>
+  </div>
+  <div class="gutter" id="gutter"><div class="gutter-hd"></div></div>
+  <aside class="rail" id="rail">
+    <div class="rail-hd"><span id="railCount">comments</span></div>
+    <div class="doclevel" id="doclevel"></div>
+    <div class="cards" id="cards"></div>
+  </aside>
+</div>
+<div class="pop" id="pop"></div>
+<div class="legend">D — quiet gutter strip. Doc text untouched; reactions are faint dots in their own lane between doc & rail. Hover a dot/span to bloom. Select text → 😊.</div>
+
+<script src="shared.js"></script>
+<script>
+/* ============ VARIANT D render: faint span + gutter dots ============ */
+const gutter=document.getElementById("gutter");
+renderDoc();
+applyComments();
+applyReactionSpans();
+renderRail();
+renderGutter();
+renderDocLevel();
+wireSelectionToolbar({ onReact(emoji){ addAnchoredReaction(emoji); } });
+
+function applyReactionSpans(){
+  doc.querySelectorAll(".rx-anchor").forEach(unwrap);doc.normalize();
+  groupAnchored().forEach(g=>{
+    const r=findTextRange(g.anchor);if(!r)return;
+    try{const s=document.createElement("span");s.className="rx-anchor";s.dataset.sig=g.sig;s.appendChild(r.extractContents());r.insertNode(s);doc.normalize();}catch(e){}
+  });
+}
+function rxTop(sig){const s=doc.querySelector('.rx-anchor[data-sig="'+CSS.escape(sig)+'"]');if(!s)return null;const r=s.getBoundingClientRect(),sr=stage.getBoundingClientRect();return r.top-sr.top+stage.scrollTop;}
+
+function renderGutter(){
+  [...gutter.querySelectorAll(".gdot")].forEach(n=>n.remove());
+  const groups=groupAnchored().map(g=>({g,top:rxTop(g.sig)})).filter(x=>x.top!==null).sort((a,b)=>a.top-b.top);
+  let last=-100;
+  groups.forEach(({g,top})=>{
+    const y=Math.max(top, last+26); last=y;
+    const dot=document.createElement("div");dot.className="gdot";dot.dataset.sig=g.sig;dot.style.top=y+"px";
+    const ranked=Object.entries(g.byEmoji).sort((a,b)=>b[1].length-a[1].length);
+    const dom=ranked[0][0];
+    const chips=ranked.map(([e,as])=>`<span class="rxchip${as.includes(ME)?' mine':''}" data-emoji="${e}" title="${as.join(', ')}">${e}<span class="ct">${as.length}</span></span>`).join("");
+    dot.innerHTML=`<span class="mini">${dom}${g.count>1?'<span style="font-size:9px;color:#7f9fc4">·'+g.count+'</span>':''}</span>`+
+      `<span class="full">${chips}<span class="rx-add" title="add">+</span></span>`;
+    gutter.appendChild(dot);
+    const span=()=>doc.querySelector('.rx-anchor[data-sig="'+CSS.escape(g.sig)+'"]');
+    dot.addEventListener("mouseenter",()=>{const s=span();if(s)s.classList.add("active");dot.classList.add("active");});
+    dot.addEventListener("mouseleave",()=>{const s=span();if(s)s.classList.remove("active");dot.classList.remove("active");});
+    // hovering the span lights the dot too
+    const s=span();if(s){s.addEventListener("mouseenter",()=>{dot.classList.add("active");s.classList.add("active");});
+      s.addEventListener("mouseleave",()=>{dot.classList.remove("active");s.classList.remove("active");});}
+    dot.querySelectorAll(".rxchip").forEach(ch=>{
+      ch.addEventListener("click",e=>{e.stopPropagation();toggleReaction(g.anchor,ch.dataset.emoji);refresh();});
+      ch.addEventListener("mouseenter",ev=>showReactorPop(ev.currentTarget,ch.dataset.emoji,g.byEmoji[ch.dataset.emoji]));
+      ch.addEventListener("mouseleave",hideReactorPop);
+    });
+    dot.querySelector(".rx-add").addEventListener("click",e=>{e.stopPropagation();const r=e.currentTarget.getBoundingClientRect();openEmojiPickerAt(r.left-180,r.bottom+4,emoji=>{toggleReaction(g.anchor,emoji);refresh();});});
+  });
+}
+
+function refresh(){doc.querySelectorAll(".hl").forEach(unwrap);doc.normalize();applyComments();applyReactionSpans();renderRail();renderGutter();renderDocLevel();}
+afterAnchoredReactionAdded=refresh;
+window.addEventListener("resize",()=>{renderGutter();});
+</script>
+</body>
+</html>

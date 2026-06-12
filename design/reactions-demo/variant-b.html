@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>B — rail micro-cards — justhtml.sh reactions</title>
+<!--
+  VARIANT B — RAIL MICRO-CARDS
+    Anchored reactions become tiny emoji-only cards in the SAME comment rail,
+    y-aligned to their span exactly like comment cards, and participating in the
+    SAME no-overlap clamping. The document stays clean: reacted spans get only a
+    very quiet tint (faint blue underline), much lighter than the comment
+    highlight's solid yellow. The marginalia all lives in one column — the rail
+    is the single home for "what people thought", whether words or emoji.
+
+  OVERLAP CASE: a span with both a comment and reactions produces TWO stacked
+  rail items at (near) the same y: the comment card and, directly under it, the
+  reaction micro-card — clamped so they never collide. Hovering either lights the
+  shared span. The doc shows the yellow highlight (comment owns the strong
+  treatment) with the faint blue reaction underline layered beneath it.
+
+  Doc-level reactions: compact strip in the rail header, de-emphasized.
+-->
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;color:#111;background:#fff}
+  .jh-bar{display:flex;justify-content:space-between;align-items:center;height:2.4rem;padding:0 0.9rem;font-size:13px;border-bottom:1px solid #ccc;background:#fafafa}
+  .jh-bar .jh-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+  .jh-bar a{color:#0000ee}
+  .jh-bar .jh-credit{flex-shrink:0;padding-left:.9rem}
+
+  .stage{position:relative;height:calc(100vh - 2.4rem);overflow:auto;background:#fff;display:flex}
+  .docwrap{flex:1;min-width:0;position:relative}
+  .doc{max-width:42rem;margin:0 auto;padding:2.2rem 1.2rem 8rem;font-family:Georgia,"Times New Roman",serif;font-size:16px;line-height:1.7;color:#1a1a1a}
+  .doc h1{font-size:1.5rem;margin:.2rem 0 1rem}
+  .doc h2{font-size:1.1rem;margin:2rem 0 .5rem;font-family:ui-monospace,monospace;color:#333}
+  .doc p{margin:.8rem 0}
+  .doc pre{font-family:ui-monospace,monospace;font-size:13px;background:#f6f6f6;border:1px solid #e3e3e3;border-radius:4px;padding:.8rem;overflow:auto;line-height:1.45}
+  .doc ul{margin:.6rem 0;padding-left:1.4rem}
+  .doc code{font-family:ui-monospace,monospace;font-size:.9em;background:#f0f0f0;padding:0 3px;border-radius:3px}
+
+  .hl{background:#fff3bf;cursor:pointer;border-bottom:1px solid #f1d96b}
+  .hl.active{background:#ffe089}
+  .rx-anchor{border-bottom:1px solid #cfe0f3;cursor:default}        /* very quiet */
+  .rx-anchor.active{background:#eef3fb;border-bottom-color:#9db8d8}
+
+  .rail{width:310px;flex-shrink:0;border-left:1px solid #e2e2e2;background:#fbfbfb;position:relative}
+  .rail-hd{position:sticky;top:0;background:#fbfbfb;border-bottom:1px solid #eee;padding:6px 10px;font-size:11px;color:#666;display:flex;justify-content:space-between;align-items:center;z-index:5}
+  .doclevel{display:flex;align-items:center;gap:4px;flex-wrap:wrap;padding:5px 10px;border-bottom:1px solid #eee;background:#fbfbfb}
+  .doclevel .lbl{color:#aaa;font-size:10px;margin-right:2px}
+  .doclevel .dchip{font-size:10.5px;border:1px solid #ececec;border-radius:9px;padding:0 5px;background:#fcfcfc;color:#888;cursor:pointer}
+  .doclevel .dchip.mine{border-color:#cdd9ea;color:#3a5b8a;background:#f3f7fc}
+  .cards{position:relative;padding:6px 8px 220px}
+
+  .card{background:#fff;border:1px solid #e2e2e2;border-radius:7px;margin-bottom:7px;font-size:12px;cursor:pointer;overflow:hidden}
+  .card:hover{box-shadow:0 2px 8px rgba(0,0,0,.1)}
+  .card.active{border-color:#f1c40f;box-shadow:0 2px 10px rgba(0,0,0,.13)}
+  .card .top{display:flex;gap:7px;padding:8px 9px}
+  .card img{width:24px;height:24px;border-radius:50%;flex-shrink:0}
+  .card .who{font-weight:700;color:#222}
+  .card .when{color:#999;font-size:10.5px}
+  .card .body{color:#222;margin-top:2px;font-family:Georgia,serif;font-size:13px;line-height:1.45}
+
+  /* the reaction MICRO-CARD: emoji-only, lighter than a comment card */
+  .rxcard{background:#fbfcfe;border:1px solid #e3e9f1;border-radius:7px;margin-bottom:7px;
+    padding:5px 8px;display:flex;align-items:center;gap:5px;flex-wrap:wrap;cursor:default;transition:box-shadow .1s,border-color .1s}
+  .rxcard:hover{box-shadow:0 2px 8px rgba(0,0,0,.07)}
+  .rxcard.active{border-color:#9db8d8;box-shadow:0 2px 10px rgba(50,80,130,.12)}
+  .rxcard.paired{margin-top:-3px;border-top-left-radius:3px;border-top-right-radius:3px} /* hug comment above */
+  .rxcard .rxchip{font-size:12px;border:1px solid #e0e0e0;border-radius:10px;padding:1px 7px;background:#fff;cursor:pointer;white-space:nowrap;display:inline-flex;gap:3px;align-items:center}
+  .rxcard .rxchip.mine{border-color:#9db8d8;background:#eef3fb;color:#3a5b8a}
+  .rxcard .rxchip .ct{color:#888}
+  .rxcard .rxchip.mine .ct{color:#3a5b8a}
+  .rxcard .rx-add{font-size:12px;color:#bbb;border:1px dashed #ddd;border-radius:10px;padding:1px 7px;cursor:pointer}
+  .rxcard .rx-add:hover{color:#777;border-color:#aaa}
+  .rxcard .pairtag{font-size:9px;color:#aa99bb;width:100%;margin-bottom:1px}
+
+  .seltool{position:absolute;display:none;flex-direction:column;gap:2px;background:#111;border-radius:7px;padding:4px;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:30}
+  .seltool button{width:30px;height:30px;border:none;background:transparent;color:#fff;font-size:15px;cursor:pointer;border-radius:5px;display:flex;align-items:center;justify-content:center}
+  .seltool button:hover{background:#333}
+  .emojibar{position:absolute;display:none;background:#fff;border:1px solid #ccc;border-radius:18px;padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.2);z-index:31;gap:2px}
+  .emojibar button{border:none;background:transparent;font-size:17px;cursor:pointer;padding:2px 4px;border-radius:50%}
+  .emojibar button:hover{background:#f0f0f0}
+
+  .pop{position:fixed;display:none;background:#fff;border:1px solid #ccc;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:40;padding:6px 8px;font-size:11px;max-width:240px}
+  .pop .row{display:flex;align-items:center;gap:6px;padding:2px 0}
+  .pop img{width:18px;height:18px;border-radius:50%}
+  .pop .hdr{color:#888;font-size:10px;margin-bottom:3px}
+
+  .legend{position:fixed;bottom:8px;left:8px;font-size:10px;color:#aaa;background:#fff;border:1px solid #eee;border-radius:4px;padding:3px 7px;max-width:46%}
+</style>
+</head>
+<body>
+<div class="jh-bar">
+  <span class="jh-title">RECTL(1) — record-control utility — design spec</span>
+  <span class="jh-credit">made with <a href="#">justhtml.sh</a></span>
+</div>
+<div class="stage" id="stage">
+  <div class="docwrap" id="docwrap">
+    <article class="doc" id="doc"></article>
+    <div class="seltool" id="seltool">
+      <button title="add comment" data-act="comment">💬</button>
+      <button title="add reaction" data-act="react">😊</button>
+    </div>
+    <div class="emojibar" id="emojibar"></div>
+  </div>
+  <aside class="rail" id="rail">
+    <div class="rail-hd"><span id="railCount">comments</span></div>
+    <div class="doclevel" id="doclevel"></div>
+    <div class="cards" id="cards"></div>
+  </aside>
+</div>
+<div class="pop" id="pop"></div>
+<div class="legend">B — rail micro-cards. Reactions are tiny emoji cards in the rail, y-aligned + clamped like comments. Doc stays quiet. Select text → 😊.</div>
+
+<script src="shared.js"></script>
+<script>
+/* ============ VARIANT B render: merged rail of comment cards + rx micro-cards ============ */
+renderDoc();
+applyComments();
+applyReactionAnchors();
+renderRailMerged();
+renderDocLevel();
+wireSelectionToolbar({ onReact(emoji){ addAnchoredReaction(emoji); } });
+
+function applyReactionAnchors(){
+  doc.querySelectorAll(".rx-anchor").forEach(unwrap); doc.normalize();
+  groupAnchored().forEach(g=>{
+    const r=findTextRange(g.anchor);if(!r)return;
+    try{const s=document.createElement("span");s.className="rx-anchor";s.dataset.sig=g.sig;s.appendChild(r.extractContents());r.insertNode(s);doc.normalize();}catch(e){}
+  });
+}
+function rxTop(sig){
+  const s=doc.querySelector('.rx-anchor[data-sig="'+CSS.escape(sig)+'"]');if(!s)return null;
+  const r=s.getBoundingClientRect(),sr=stage.getBoundingClientRect();return r.top-sr.top+stage.scrollTop;
+}
+
+/* one y-sorted, no-overlap-clamped column of comments + reaction micro-cards */
+function renderRailMerged(){
+  cards.innerHTML="";
+  document.getElementById("railCount").textContent=
+    COMMENTS.length+" comment"+(COMMENTS.length!==1?"s":"")+" · "+groupAnchored().length+" reacted spans";
+
+  const items=[];
+  COMMENTS.forEach(c=>items.push({kind:"comment",c,sig:anchorSig(c.anchor),top:hlTop(c.id)}));
+  groupAnchored().forEach(g=>items.push({kind:"rx",g,sig:g.sig,top:rxTop(g.sig)}));
+  // sort by y; within same y, comment before its paired reaction card
+  items.sort((a,b)=>{const d=(a.top??1e9)-(b.top??1e9);if(d)return d;return a.kind==="comment"?-1:1;});
+
+  let lastBottom=0;
+  items.forEach((it,i)=>{
+    let el;
+    const prev=items[i-1];
+    const paired = it.kind==="rx" && prev && prev.kind==="comment" && prev.sig===it.sig;
+    if(it.kind==="comment"){
+      el=document.createElement("div");el.className="card";el.dataset.cid=it.c.id;
+      el.innerHTML=`<div class="top"><img src="${av(it.c.author,48)}"><div style="min-width:0">
+        <span class="who">${it.c.author}</span> <span class="when">Jun 11</span>
+        <div class="body">${esc(it.c.body)}</div></div></div>`;
+      wireSpanHover(el, it.c.id, null);
+    } else {
+      el=document.createElement("div");el.className="rxcard"+(paired?" paired":"");el.dataset.sig=it.sig;
+      const chips=Object.entries(it.g.byEmoji).map(([e,as])=>{
+        const mine=as.includes(ME);
+        return `<span class="rxchip${mine?' mine':''}" data-emoji="${e}" title="${as.join(', ')}">${e}<span class="ct">${as.length}</span></span>`;
+      }).join("");
+      el.innerHTML=(paired?`<span class="pairtag">↳ reactions on the same span</span>`:"")+chips+`<span class="rx-add" title="add reaction">+</span>`;
+      wireSpanHover(el, null, it.sig);
+      el.querySelectorAll(".rxchip").forEach(ch=>{
+        ch.addEventListener("click",()=>{toggleReaction(it.g.anchor,ch.dataset.emoji);refresh();});
+        ch.addEventListener("mouseenter",ev=>showReactorPop(ev.currentTarget,ch.dataset.emoji,it.g.byEmoji[ch.dataset.emoji]));
+        ch.addEventListener("mouseleave",hideReactorPop);
+      });
+      el.querySelector(".rx-add").addEventListener("click",e=>{
+        const r=e.currentTarget.getBoundingClientRect();
+        openEmojiPickerAt(r.left, r.bottom+4, emoji=>{toggleReaction(it.g.anchor,emoji);refresh();});
+      });
+    }
+    if(it.top!==null){const want=Math.max(lastBottom,paired?lastBottom:it.top);el.style.marginTop=(want-lastBottom)+"px";}
+    cards.appendChild(el);
+    lastBottom=el.offsetTop+el.offsetHeight;
+  });
+}
+
+function wireSpanHover(el, cid, sig){
+  const sel = cid ? '.hl[data-cid="'+cid+'"]' : '.rx-anchor[data-sig="'+CSS.escape(sig)+'"]';
+  el.addEventListener("mouseenter",()=>{const h=doc.querySelector(sel);if(h)h.classList.add("active");el.classList.add("active");});
+  el.addEventListener("mouseleave",()=>{const h=doc.querySelector(sel);if(h)h.classList.remove("active");el.classList.remove("active");});
+}
+
+function refresh(){
+  doc.querySelectorAll(".hl").forEach(unwrap);doc.normalize();
+  applyComments();applyReactionAnchors();renderRailMerged();renderDocLevel();
+}
+afterAnchoredReactionAdded=refresh;
+</script>
+</body>
+</html>

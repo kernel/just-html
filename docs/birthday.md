@@ -260,6 +260,24 @@ via postMessage: shell sends anchors → overlay resolves text-quotes, paints
 highlights, reports y-positions; overlay reports text selections → shell
 shows the toolbar/compose.
 
+**Anchored reactions (founder, 2026-06-12: variant A — inline emoji chip)**:
+reactions can target a text span, not just the doc or a comment. Chosen
+rendering from `design/reactions-demo/variant-a.html`: emoji+count chip at
+the END of the reacted span, inline in the text flow; reacted span gets a
+dotted underline (visibly distinct from the yellow comment highlight); chip
+hover shows reactor Gravatars/emails; clicking your own toggles it off.
+**The instant you add a reaction, the span styling appears — no reload**
+(founder hit this as a demo bug; it is a hard requirement). Doc-level
+reactions live de-emphasized in the rail header strip, never inline.
+
+Model: first-class `reactions.anchor jsonb` (same W3C text-quote shape as
+comments; NOT emoji-only comments) — target is 3-way: comment_id set → on a
+comment; anchor set → on a span; both null → on the doc (mutually
+exclusive). Dedup key extends to (doc, author, emoji, target). Anchored
+reactions ride the SAME tier-1/2/3 re-anchoring as comments on every doc
+write; an orphaned anchored reaction degrades to doc-level (shown in the
+rail header strip).
+
 **Permission matrix (decided 2026-06-12)**:
 - Comment: owner, editor grant, commenter grant, token-holder with identity,
   or any identity on a public doc. Identity = session email or API key —

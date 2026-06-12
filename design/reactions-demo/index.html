@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anchored reactions — design variants — justhtml.sh</title>
+<style>
+  :root{color-scheme:light}
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;color:#111;background:#fff;font-size:13px;line-height:1.5}
+  a{color:#0000ee}
+  header{padding:1.4rem 1.2rem .6rem;border-bottom:1px solid #eee;max-width:60rem}
+  header h1{font-size:1.15rem;margin:0 0 .4rem}
+  header p{margin:.3rem 0;color:#444;max-width:54rem}
+  header .note{color:#888;font-size:12px}
+  code{background:#f2f2f2;padding:0 3px;border-radius:3px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;padding:14px}
+  .frame{border:1px solid #ccc;border-radius:6px;overflow:hidden;background:#fafafa;display:flex;flex-direction:column}
+  .frame .cap{display:flex;justify-content:space-between;align-items:baseline;gap:.6rem;padding:7px 10px;border-bottom:1px solid #e2e2e2;background:#f4f4f4}
+  .frame .cap .lbl{font-weight:700}
+  .frame .cap .desc{color:#666;font-size:11.5px;font-weight:400;flex:1}
+  .frame .cap a{flex-shrink:0;font-size:11.5px}
+  .frame iframe{border:none;width:100%;height:560px;display:block;background:#fff}
+</style>
+</head>
+<body>
+<header>
+  <h1>Anchored reactions — design variants</h1>
+  <p>Select text in any document → floating toolbar → <code>😊</code> → pick from the curated
+  set (👍 👎 🎉 ❤️ 😄 🚀 👀). The reaction is visually tied to that span. Each variant explores a
+  fundamentally different home for the marginalia. All share one mock model
+  (<code>{id, emoji, author, anchor, comment_id}</code>), the chosen variant-B comment rail, and real Gravatars
+  for <code>raf@kernel.sh</code> / <code>hi@raf.xyz</code>.</p>
+  <p class="note">Mock data deliberately includes: a span reacted by multiple authors with stacked
+  emoji; a span carrying <em>both</em> a comment highlight and reactions (the hard overlap case — the
+  "either a write landed whole…" sentence); doc-level reactions; and a reaction on the code block.
+  Click your own reaction to toggle it off. Comment highlight = solid yellow; reaction anchor = quiet blue — two distinct languages.</p>
+</header>
+
+<div class="grid">
+  <div class="frame">
+    <div class="cap"><span class="lbl">A — inline emoji chip</span><span class="desc">chip+count at span end, in the text (Notion-flavored)</span><a href="variant-a.html" target="_blank">open full screen ↗</a></div>
+    <iframe src="variant-a.html" title="Variant A"></iframe>
+  </div>
+  <div class="frame">
+    <div class="cap"><span class="lbl">B — rail micro-cards</span><span class="desc">tiny emoji cards in the comment rail, y-aligned + clamped</span><a href="variant-b.html" target="_blank">open full screen ↗</a></div>
+    <iframe src="variant-b.html" title="Variant B"></iframe>
+  </div>
+  <div class="frame">
+    <div class="cap"><span class="lbl">C — superscript footnote</span><span class="desc">one tiny superscript marker; hover → footnote popover</span><a href="variant-c.html" target="_blank">open full screen ↗</a></div>
+    <iframe src="variant-c.html" title="Variant C"></iframe>
+  </div>
+  <div class="frame">
+    <div class="cap"><span class="lbl">D — quiet gutter strip</span><span class="desc">doc untouched; faint dots in their own lane between doc & rail</span><a href="variant-d.html" target="_blank">open full screen ↗</a></div>
+    <iframe src="variant-d.html" title="Variant D"></iframe>
+  </div>
+</div>
+</body>
+</html>
