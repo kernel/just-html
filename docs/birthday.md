@@ -228,6 +228,22 @@ NOT get more intelligent than this in v1 (no semantic/LLM re-anchoring) —
 tier 1 covers patch edits precisely, tier 2 covers rewrites honestly, and
 orphaning is an acceptable, legible failure mode.
 
+### Comment UI interaction spec (founder, 2026-06-12)
+
+- **Zero comments → zero chrome.** The viewer looks exactly as it does today.
+- **Anchored thread**: google-docs-style highlight on the anchor span; in the
+  right margin, a small bubble with the author's avatar (Gravatar by email
+  hash, identicon fallback) and a reply count.
+- **Hover the bubble** → bubble is replaced by a small modal beside it with
+  the full thread (avatars, emails, timestamps). Mouse leaves → modal swaps
+  back to the bubble. **Click into the modal** → pinned interactive: reply,
+  add comment. (Hover-intent delay + hover bridge so it doesn't flicker.)
+- **Select text** → small floating vertical toolbar beside the selection:
+  "add comment" and "add emoji reaction" icon buttons.
+- Resolved threads: collapsed/dimmed. Orphaned: shown in margin, no
+  highlight, marked orphaned.
+- Design demos/variations explored 2026-06-12 in `design/comments-demo/`.
+
 ### All-threads view
 
 The viewer shell's comment sidebar lists **every** thread (Google-Docs
