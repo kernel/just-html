@@ -369,9 +369,13 @@ export async function createComment(opts: {
   try {
     await client.query("BEGIN");
 
-    // Cap under the transaction.
+    // Cap under the transaction. We lock the documents row (FOR UPDATE is not
+    // allowed on an aggregate query) to serialize concurrent comment inserts
+    // against the same doc, then count live comments. Concurrent commenters
+    // queue briefly; the txn is short.
+    await client.query(`SELECT id FROM documents WHERE id = $1 FOR UPDATE`, [opts.doc.id]);
     const { rows: cntRows } = await client.query(
-      `SELECT count(*) AS n FROM comments WHERE doc_id = $1 AND deleted_at IS NULL FOR UPDATE`,
+      `SELECT count(*) AS n FROM comments WHERE doc_id = $1 AND deleted_at IS NULL`,
       [opts.doc.id]
     );
     if (Number((cntRows[0] as { n: string }).n) >= MAX_COMMENTS_PER_DOC) {

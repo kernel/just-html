@@ -54,15 +54,13 @@ async function pollToken(ct, tries = 10) {
   }
   return null;
 }
-// Register + claim a user via the email read-back path; return its jh_live_ key.
-async function registerKey(email) {
-  const reg = await jpost("/agent/identity", { type: "service_auth", login_hint: email });
-  const ct = reg.json?.claim_token;
-  await qaClaimEmail(email); // trigger/capture
-  const ce = await qaClaimEmail(email);
-  const code = ce.json?.code;
-  await jpost("/agent/identity/claim/complete", { claim_token: ct, user_code: code });
-  return pollToken(ct);
+// Keys are seeded directly in the DB (scripts/qa-b10-seed.mjs) to avoid the
+// auth-flow per-IP registration cap — the registration ceremony is covered by
+// qa-b9; B10 only needs valid keys to exercise the comment/reaction surface.
+import { execFileSync } from "node:child_process";
+function seedKeys(emails) {
+  const out = execFileSync("node", ["--env-file=.env", "scripts/qa-b10-seed.mjs", ...emails], { encoding: "utf8" });
+  return JSON.parse(out.trim().split("\n").pop());
 }
 const auth = (k) => ({ Authorization: `Bearer ${k}` });
 
@@ -74,13 +72,12 @@ const DOC_HTML = `<!doctype html><html><body>
 </body></html>`;
 
 async function main() {
-  log("[setup] registering owner + commenter + viewer keys");
+  log("[setup] seeding owner + commenter + viewer keys");
   const ownerEmail = `raf+qa-b10-owner-${TS}@kernel.sh`;
   const commenterEmail = `raf+qa-b10-commenter-${TS}@kernel.sh`;
   const viewerEmail = `raf+qa-b10-viewer-${TS}@kernel.sh`;
-  const [ownerKey, commenterKey, viewerKey] = await Promise.all([
-    registerKey(ownerEmail), registerKey(commenterEmail), registerKey(viewerEmail),
-  ]);
+  const keys = seedKeys([ownerEmail, commenterEmail, viewerEmail]);
+  const ownerKey = keys[ownerEmail], commenterKey = keys[commenterEmail], viewerKey = keys[viewerEmail];
   ok(ownerKey?.startsWith("jh_live_"), "owner key", ownerKey?.slice(0, 12));
   ok(commenterKey?.startsWith("jh_live_"), "commenter key", commenterKey?.slice(0, 12));
   ok(viewerKey?.startsWith("jh_live_"), "viewer key", viewerKey?.slice(0, 12));
