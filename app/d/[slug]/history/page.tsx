@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { findBySlug, listVersionsWithHtml } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { unifiedPatch } from "@/lib/docs/diff";
@@ -21,28 +22,6 @@ type Props = {
   searchParams: Promise<{ [k: string]: string | string[] | undefined }>;
 };
 
-const NOTICE_STYLE: React.CSSProperties = {
-  margin: 0,
-  padding: "2.5rem 1.25rem",
-  fontFamily: `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`,
-  fontSize: 14,
-  lineHeight: 1.55,
-  maxWidth: 760,
-  marginLeft: "auto",
-  marginRight: "auto",
-};
-
-function PrivateNotice() {
-  return (
-    <main style={NOTICE_STYLE}>
-      <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{`    This document is private, or does not exist.
-
-    If you were given a link with a ?viewtoken=… on it, use that exact
-    link. The owner can rotate the token, which invalidates old links.`}</pre>
-    </main>
-  );
-}
-
 export default async function HistoryPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
@@ -51,7 +30,9 @@ export default async function HistoryPage({ params, searchParams }: Props) {
 
   const doc = await findBySlug(slug);
   if (!doc || !canView(doc, viewtoken)) {
-    return <PrivateNotice />;
+    // No existence oracle: a missing slug and an unauthorized private doc both
+    // 404 with the same notice (rendered by ./not-found.tsx), matching /d/:slug.
+    notFound();
   }
 
   const snapshots = await listVersionsWithHtml(doc.id); // oldest → newest
