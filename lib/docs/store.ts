@@ -91,7 +91,7 @@ export function granteeView(doc: DocRow, includeHtml: boolean, role: string) {
  * `role`. Two near-identical shapes coexist by design; don't conflate them.
  */
 export function listItemView(
-  doc: DocRow,
+  doc: DocRow & { comment_count?: number | string },
   access: "owner" | "editor" | "commenter" | "viewer"
 ) {
   return {
@@ -101,6 +101,10 @@ export function listItemView(
     access,
     version: doc.version,
     public: doc.is_public,
+    // Live (non-deleted) comment + reply count (birthday.md B11: list items gain
+    // comment_count; the /docs dashboard rows surface it too). Defaults to 0 when
+    // the row didn't carry the aggregate.
+    comment_count: Number(doc.comment_count ?? 0),
     created_at: doc.created_at,
     updated_at: doc.updated_at,
     // Owned docs carry the view_token (the owner's shareable capability); shared
@@ -552,11 +556,25 @@ export async function findBySlug(slug: string): Promise<DocRow | null> {
   return rows[0] ?? null;
 }
 
-/** List a user's live docs, newest first. */
-export async function listDocs(ownerId: number, limit: number): Promise<DocRow[]> {
-  const { rows } = await query<DocRow>(
-    `SELECT * FROM documents WHERE owner_id = $1 AND deleted_at IS NULL
-     ORDER BY created_at DESC LIMIT $2`,
+/**
+ * A doc row carrying a live comment count — for the listing surfaces (the /docs
+ * dashboard rows and GET /api/v1/docs items, birthday.md B11). comment_count is
+ * the number of non-deleted comments + replies on the doc.
+ */
+export type DocListRow = DocRow & { comment_count: number };
+
+/** Correlated live-comment count, reused by both listing queries. */
+const COMMENT_COUNT_SUBQUERY = `
+  (SELECT count(*) FROM comments c
+     WHERE c.doc_id = d.id AND c.deleted_at IS NULL)::int AS comment_count`;
+
+/** List a user's live docs, newest first (with comment_count). */
+export async function listDocs(ownerId: number, limit: number): Promise<DocListRow[]> {
+  const { rows } = await query<DocListRow>(
+    `SELECT d.*, ${COMMENT_COUNT_SUBQUERY}
+     FROM documents d
+     WHERE d.owner_id = $1 AND d.deleted_at IS NULL
+     ORDER BY d.created_at DESC LIMIT $2`,
     [ownerId, limit]
   );
   return rows;
@@ -568,7 +586,10 @@ export async function listDocs(ownerId: number, limit: number): Promise<DocRow[]
  * the /docs web page. The role here reflects the precedence ladder (email grant
  * beats domain grant for the same email); see the SQL below.
  */
-export type SharedDocRow = DocRow & { access: "editor" | "commenter" | "viewer" };
+export type SharedDocRow = DocRow & {
+  access: "editor" | "commenter" | "viewer";
+  comment_count: number;
+};
 
 /**
  * List docs shared with `email` (an email grant for that exact address OR a
@@ -598,7 +619,7 @@ export async function listSharedDocs(
 ): Promise<SharedDocRow[]> {
   const lower = email.toLowerCase();
   const { rows } = await query<SharedDocRow>(
-    `SELECT d.*, g.role AS access
+    `SELECT d.*, g.role AS access, ${COMMENT_COUNT_SUBQUERY}
      FROM (
        SELECT DISTINCT ON (doc_id) doc_id, role
        FROM doc_grants

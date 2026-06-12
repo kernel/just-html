@@ -202,8 +202,11 @@ export function commentView(c: CommentRow, reactions: ReactionRow[]) {
   };
 }
 
+/** Aggregated reaction group as returned to clients. */
+export type ReactionGroup = { emoji: string; count: number; authors: string[] };
+
 /** Collapse reactions into { emoji, count, authors[] } groups. */
-function aggregateReactions(reactions: ReactionRow[]) {
+function aggregateReactions(reactions: ReactionRow[]): ReactionGroup[] {
   const byEmoji = new Map<string, string[]>();
   for (const r of reactions) {
     const arr = byEmoji.get(r.emoji) ?? [];
@@ -250,6 +253,7 @@ async function countLiveComments(docId: number): Promise<number> {
 export async function allThreads(doc: DocRow): Promise<{
   total: number;
   threads: ReturnType<typeof threadView>[];
+  doc_reactions?: ReactionGroup[];
 }> {
   const { rows: commentRows } = await query<CommentRow>(
     `SELECT c.*, u.email AS author_email
@@ -324,7 +328,7 @@ export async function allThreads(doc: DocRow): Promise<{
     ...(docLevelReactions.length
       ? { doc_reactions: aggregateReactions(docLevelReactions) }
       : {}),
-  } as { total: number; threads: ReturnType<typeof threadView>[] };
+  };
 }
 
 function threadView(

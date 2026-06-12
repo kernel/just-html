@@ -90,10 +90,11 @@ List docs -> GET /docs?scope=owned|shared|all&limit=100
   curl -s https://justhtml.sh/api/v1/docs -H "Authorization: Bearer $JUSTHTML_API_KEY"
   # scope=owned (default): docs you own. scope=shared: docs granted to your
   # email or your email's domain (excludes docs you own). scope=all: both.
-  # Each item: { slug, url, title, access, version, public, created_at,
-  #              updated_at }. access is owner|editor|commenter|viewer (an
-  #              explicit email grant beats a domain grant). Owned items also
-  #              carry view_token; shared items do not.
+  # Each item: { slug, url, title, access, version, public, comment_count,
+  #              created_at, updated_at }. access is owner|editor|commenter|
+  #              viewer (an explicit email grant beats a domain grant).
+  #              comment_count is live comments+replies on the doc. Owned items
+  #              also carry view_token; shared items do not.
   curl -s 'https://justhtml.sh/api/v1/docs?scope=all' -H "Authorization: Bearer $JUSTHTML_API_KEY"
   # The signed-in web equivalent (owned + shared sections) is https://justhtml.sh/docs
 
@@ -181,7 +182,14 @@ React (attributed; re-post toggles off) -> POST /docs/:slug/reactions   { emoji,
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/reactions \\
     -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
     -d '{"emoji":"👍","comment_id":42}'   # omit comment_id to react on the doc
+  # -> 201 { reaction: { id, emoji, author, comment_id, created_at } }
+  #    (or 200 { toggled:true, removed:true } if the same reaction existed)
   # Remove a reaction: DELETE /docs/:slug/reactions/:id (your own), or re-POST to toggle.
+  # Reactions are unique per (target, author, emoji) — one of you, per emoji,
+  # per doc-or-comment. Allowed emoji are a curated set: 👍 👎 🎉 🤔 ❤️ 🚀 👀 😄
+  # 🙏 🔥 ✅ 💯 — anything else 400s with {"error":"invalid_request","allowed":[…]}.
+  # GET /comments returns each thread's reactions and any doc-level reactions as
+  # a top-level "doc_reactions":[{emoji,count,authors}] (present only when any).
 
 Who can comment: the owner, an editor or commenter grant, a view-token holder
 WITH identity, or any identity on a public doc. Who can react: anyone who can

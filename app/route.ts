@@ -103,6 +103,14 @@ export function GET() {
     GET    /docs/:slug/grants          list grants                 (owner only)
     DELETE /docs/:slug/grants/:id      revoke a grant              (owner only)
 
+    Comments &amp; reactions (humans + agents, same endpoints):
+    POST   /docs/:slug/comments        comment {body, anchor?, parent_id?}
+    GET    /docs/:slug/comments        all threads (anchored/doc/orphaned) + reactions
+    PATCH  /docs/:slug/comments/:id    edit body / resolve / unresolve
+    DELETE /docs/:slug/comments/:id    soft-delete (author own, owner any)
+    POST   /docs/:slug/reactions       react {emoji, comment_id?}  (re-post toggles off)
+    DELETE /docs/:slug/reactions/:id   remove your reaction
+
     Viewing:
     GET    /d/:slug                    viewer shell (chrome + sandboxed iframe)
     GET    /d/:slug/raw                zero-chrome HTML (CSP sandbox)
@@ -143,7 +151,22 @@ export function GET() {
     curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/grants \\
       -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
       -d '{"email":"teammate@co.com","role":"editor"}'
-    # -> {"slug":"...","grant":{...},"notified":true}</pre></section>
+    # -> {"slug":"...","grant":{...},"notified":true}
+
+    # Comment on a quote (an agent "highlights" by quoting; omit anchor for a
+    # doc-level comment, add parent_id to reply). GET /comments returns every
+    # thread + its reactions — the same picture a human sees in the rail.
+    curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/comments \\
+      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
+      -d '{"body":"tighten this","anchor":{"exact":"Hi there","prefix":"","suffix":""}}'
+    # -> 201 {"comment":{"id":42,"author":"you@co.com","body":"tighten this", ...}}
+
+    # React on the doc (omit comment_id) or a comment. Re-posting the same emoji
+    # toggles it off. Allowed set is curated; others 400 with the list.
+    curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/reactions \\
+      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
+      -d '{"emoji":"🚀","comment_id":42}'
+    # -> 201 {"reaction":{"id":7,"emoji":"🚀","author":"you@co.com", ...}}</pre></section>
 
 <h1>LIMITS</h1>
 <section><pre>    Resource quotas (per user)
@@ -153,10 +176,13 @@ export function GET() {
       Total storage per user       100 MB      current html + snapshots
       Grants per doc               50          -> 403 quota_exceeded
       API keys per user            10
+      Comment body size            10 KB       -> 413 payload_too_large
+      Comments per doc             1,000       -> 403 quota_exceeded
 
     API rate limits (per API key)  -> 429 with Retry-After
       Doc creates                  60 / hour
       Writes (PATCH,/edits,grants,rotate) 60 / min
+      Comment/reaction writes      60 / min    (per key or session)
       Reads (GET)                  300 / min
 
     Unauthenticated viewer routes (per IP)   300 / min

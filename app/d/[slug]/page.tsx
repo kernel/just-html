@@ -80,20 +80,27 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   if (viewtoken) rawQuery = `?viewtoken=${encodeURIComponent(viewtoken)}`;
   else if (!doc.is_public) rawQuery = `?cap=${encodeURIComponent(mintViewCap(slug))}`;
 
-  // Can this viewer comment? (Drives whether the rail is interactive.)
+  // Can this viewer comment and/or react? (Drives whether the rail is
+  // interactive and whether the selection toolbar offers comment/react.)
   const principal = await resolveCommentPrincipal(null, session);
   let canComment = false;
+  let canReact = false;
   if (principal) {
     const cap = await resolveCapability(doc, principal, canView(doc, viewtoken));
     canComment = cap.canComment;
+    canReact = cap.canReact;
   }
 
   const threadData = await allThreads(doc);
+  const docReactions = threadData.doc_reactions ?? [];
   const hasComments = threadData.total > 0;
+  const hasDocReactions = docReactions.length > 0;
   const title = doc.title || doc.slug;
 
-  // Cold path: no comments AND this viewer can't comment → plain shell.
-  if (!hasComments && !canComment) {
+  // Cold path: no comments, no doc reactions, AND this viewer can't comment or
+  // react → plain shell (zero chrome). The moment a doc-level reaction exists
+  // (or the viewer can interact) the rail earns its keep.
+  if (!hasComments && !hasDocReactions && !canComment && !canReact) {
     return <PlainShell title={title} rawSrc={`/d/${encodeURIComponent(slug)}/raw${rawQuery}`} />;
   }
 
@@ -106,8 +113,10 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       rawSrc={`/d/${encodeURIComponent(slug)}/raw${overlayQuery}`}
       viewtoken={viewtoken}
       canComment={canComment}
+      canReact={canReact}
       signedIn={session !== null}
       initialThreads={threadData.threads}
+      initialDocReactions={docReactions}
       version={doc.version}
     />
   );

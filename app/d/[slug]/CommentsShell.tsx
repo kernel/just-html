@@ -21,7 +21,10 @@ import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "r
 // /api/v1/docs/:slug/comments and /reactions; the API enforces permissions.
 
 const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`;
-const EMOJIS = ["👍", "🎉", "🤔", "❤️", "🚀", "👀"];
+// The picker set — the curated brand emoji (birthday.md B11 example set). Every
+// one is in the server's ALLOWED_EMOJI (lib/docs/reactions.ts); agents may also
+// react with the wider allowed set, but the human picker stays small.
+const EMOJIS = ["👍", "👎", "🎉", "❤️", "😄", "🚀", "👀"];
 
 type Reaction = { emoji: string; count: number; authors: string[] };
 type Anchor = { exact: string; prefix?: string; suffix?: string; start?: number; end?: number } | null;
@@ -46,8 +49,10 @@ type Props = {
   rawSrc: string;
   viewtoken: string | null;
   canComment: boolean;
+  canReact: boolean;
   signedIn: boolean;
   initialThreads: Thread[];
+  initialDocReactions: Reaction[];
   version: number;
 };
 
@@ -60,10 +65,11 @@ function fmtTime(iso: string): string {
 }
 
 export default function CommentsShell(props: Props) {
-  const { slug, title, rawSrc, viewtoken, canComment, signedIn } = props;
+  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [threads, setThreads] = useState<Thread[]>(props.initialThreads);
+  const [docReactions, setDocReactions] = useState<Reaction[]>(props.initialDocReactions);
   const [showResolved, setShowResolved] = useState(false);
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -112,7 +118,7 @@ export default function CommentsShell(props: Props) {
           setPositions(d.positions || {});
           break;
         case "jh:selection":
-          if (canComment && d.anchor && d.anchor.exact) {
+          if ((canComment || canReact) && d.anchor && d.anchor.exact) {
             setSelection({ anchor: d.anchor, top: d.rect?.top ?? 0, viewTop: d.rect?.viewTop ?? 0 });
           }
           break;
@@ -130,13 +136,14 @@ export default function CommentsShell(props: Props) {
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [paintAnchors, postToOverlay, canComment]);
+  }, [paintAnchors, postToOverlay, canComment, canReact]);
 
   const reload = useCallback(async () => {
     const r = await fetch(`${apiBase}/comments${tokenQuery}`, { credentials: "same-origin" });
     if (r.ok) {
       const j = await r.json();
       setThreads(j.threads || []);
+      setDocReactions(j.doc_reactions || []);
     }
   }, [apiBase, tokenQuery]);
 
@@ -230,19 +237,27 @@ export default function CommentsShell(props: Props) {
             style={{ border: "none", width: "100%", height: "100%", display: "block", background: "#fff" }}
           />
           {/* selection toolbar — overlaid on the docwrap; positioned to the
-              selection's viewport-top within the iframe. */}
-          {selection && canComment ? (
+              selection's viewport-top within the iframe. Shows on selection when
+              the viewer can comment OR react (react-only viewers still get the
+              react affordance). */}
+          {selection && (canComment || canReact) ? (
             <SelectionToolbar
               viewTop={selection.viewTop}
+              canComment={canComment}
+              canReact={canReact}
               onComment={() => {
                 setDraft({ anchor: selection.anchor, top: selection.top });
                 setSelection(null);
                 postToOverlay({ type: "jh:clearSelection" });
               }}
-              onReact={() => {
-                /* react-on-selection is a doc-level reaction stub until B11 —
-                   keep the button visible but inert beyond a doc-level 👍. */
+              onReact={(emoji) => {
+                // B11: react-on-selection is live. A reaction targets the doc or
+                // a comment (reactions.comment_id) — there is no per-span
+                // reaction in the schema — so a selection react is a DOC-level
+                // reaction (the mini picker per the variant-b demo).
+                react(emoji, null);
                 setSelection(null);
+                postToOverlay({ type: "jh:clearSelection" });
               }}
             />
           ) : null}
@@ -257,6 +272,20 @@ export default function CommentsShell(props: Props) {
               {showResolved ? "hide resolved" : "show resolved"}
             </span>
           </div>
+
+          {/* Doc-level reactions, compact in the rail header (birthday.md B11:
+              "doc-level reactions render compactly in the rail header"). The
+              react chip set + a mini picker for anyone who can react. */}
+          {docReactions.length > 0 || canReact ? (
+            <div style={docReactionsRowStyle}>
+              <span style={{ color: "#999", fontSize: 10.5, marginRight: 2 }}>on this doc:</span>
+              <Reactions
+                reactions={docReactions}
+                canComment={canReact}
+                onReact={(e) => react(e, null)}
+              />
+            </div>
+          ) : null}
 
           {!signedIn ? (
             <div style={{ padding: "8px 10px", fontSize: 12, color: "#666", borderBottom: "1px solid #eee" }}>
@@ -298,24 +327,50 @@ export default function CommentsShell(props: Props) {
 
 function SelectionToolbar({
   viewTop,
+  canComment,
+  canReact,
   onComment,
   onReact,
 }: {
   viewTop: number;
+  canComment: boolean;
+  canReact: boolean;
   onComment: () => void;
-  onReact: () => void;
+  onReact: (emoji: string) => void;
 }) {
   // The iframe spans the docwrap; the selection rect's viewport-top maps onto the
   // docwrap (both share the top edge). Clamp into view.
   const top = Math.max(8, viewTop);
+  const [picking, setPicking] = useState(false);
   return (
     <div style={{ ...seltoolStyle, top }}>
-      <button title="add comment" style={seltoolBtn} onClick={onComment}>
-        💬
-      </button>
-      <button title="add reaction" style={seltoolBtn} onClick={onReact}>
-        😊
-      </button>
+      {canComment ? (
+        <button title="add comment" style={seltoolBtn} onClick={onComment}>
+          💬
+        </button>
+      ) : null}
+      {canReact ? (
+        <button title="add reaction" style={seltoolBtn} onClick={() => setPicking((p) => !p)}>
+          😊
+        </button>
+      ) : null}
+      {/* B11 mini picker — the curated set, opens beside the react button. */}
+      {picking && canReact ? (
+        <div style={seltoolPickerStyle}>
+          {EMOJIS.map((e) => (
+            <span
+              key={e}
+              style={{ cursor: "pointer", fontSize: 16, padding: "1px 2px" }}
+              onClick={() => {
+                onReact(e);
+                setPicking(false);
+              }}
+            >
+              {e}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -681,6 +736,29 @@ const railHeadStyle: React.CSSProperties = {
   justifyContent: "space-between",
   alignItems: "center",
   zIndex: 5,
+};
+
+const docReactionsRowStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+  flexWrap: "wrap",
+  padding: "5px 10px",
+  borderBottom: "1px solid #eee",
+  background: "#fbfbfb",
+};
+
+const seltoolPickerStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 36,
+  top: 0,
+  display: "flex",
+  gap: 2,
+  background: "#111",
+  borderRadius: 7,
+  padding: "3px 5px",
+  boxShadow: "0 4px 14px rgba(0,0,0,.3)",
+  whiteSpace: "nowrap",
 };
 
 const seltoolStyle: React.CSSProperties = {

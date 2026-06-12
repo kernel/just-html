@@ -48,9 +48,9 @@ npm run migrate:status   # show applied / pending
 ```
 
 Current schema: extensions, auth (users, registrations, claim codes, login
-tokens, sessions, api keys), documents + versions, phase-2 collab tables
-(comments/reactions, designed-not-wired), rate-limit + audit tables, and the
-removable `qa_login_links` table.
+tokens, sessions, api keys), documents + versions, collaboration tables
+(comments with W3C text-quote anchors + re-anchoring, reactions), rate-limit +
+audit tables, and the removable `qa_login_links` table.
 
 ## Deploy
 
@@ -81,13 +81,30 @@ Auth:
 
 Documents (`/api/v1`, `Authorization: Bearer jh_live_…`): `docs` CRUD,
 `/edits` (deterministic patches), `/rotate-token`, `/versions`, `/grants`.
-Creating an **email** grant sends the grantee a share-notification email — one
-single-use, 7-day login link (`kind='share'` on `login_tokens`) with
-`next=/d/:slug` that signs them in (email-keyed session, no account) and lands
-them on the doc. `notify:false` suppresses it; **domain grants never notify**.
+`GET /api/v1/docs` items carry `access` and `comment_count`. Creating an
+**email** grant sends the grantee a share-notification email — one single-use,
+7-day login link (`kind='share'` on `login_tokens`) with `next=/d/:slug` that
+signs them in (email-keyed session, no account) and lands them on the doc.
+`notify:false` suppresses it; **domain grants never notify**.
 
-Viewing: `/d/:slug` (shell + sandboxed iframe), `/d/:slug/raw`
-(CSP-sandboxed, origin-less), `/d/:slug/history` (diff view). A private doc
+Comments & reactions (`/api/v1/docs/:slug/comments`, `/reactions`): humans and
+agents use the same endpoints. A human click-drags to highlight; an agent
+"highlights" by quoting (W3C text-quote anchor `{exact, prefix?, suffix?}`;
+null = doc-level). `GET /comments` returns the complete all-threads view
+(anchored in document order → doc-level → orphaned, resolved behind a flag) plus
+each thread's reactions and any `doc_reactions`. Anchors re-anchor in the same
+transaction as every doc write (offset-map through patches → quote re-find →
+orphan). Reactions are **attributed-only** (a curated emoji set; unique per
+target+author+emoji; re-posting toggles off). Comment: owner / editor or
+commenter grant / view-token holder with identity / any identity on a public
+doc. React: anyone who can view, with identity. Anonymous never writes.
+
+Viewing: `/d/:slug` (shell + sandboxed iframe; the google-docs-style comment
+rail appears once a doc has comments/reactions or the viewer can interact —
+zero comments + non-interacting viewer = zero chrome), `/d/:slug/raw`
+(CSP-sandboxed, origin-less; `?overlay=1` injects the highlight/selection
+overlay only inside the shell's iframe — direct `/raw` stays byte-pristine),
+`/d/:slug/history` (diff view). A private doc
 authorizes in order: owner session → email-grant session → domain-grant
 session → view token → public. The private-doc notice always offers "Was this
 shared with you? Sign in" (`/login?next=/d/:slug`) so an expired share link

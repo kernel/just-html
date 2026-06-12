@@ -828,7 +828,12 @@ paths:
               type: object
               required: [emoji]
               properties:
-                emoji: { type: string, description: One of the supported emoji. }
+                emoji:
+                  type: string
+                  description: |
+                    One of the curated set: 👍 👎 🎉 🤔 ❤️ 🚀 👀 😄 🙏 🔥 ✅ 💯.
+                    Anything else → 400 invalid_request with an "allowed" array
+                    listing the full set.
                 comment_id:
                   type: [integer, "null"]
                   description: Target comment; omit/null = react on the document.
@@ -860,6 +865,8 @@ paths:
         "400": { $ref: "#/components/responses/ApiBadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: comment_id does not reference a live comment on this document.
         "429": { $ref: "#/components/responses/RateLimited" }
   /api/v1/docs/{slug}/reactions/{id}:
     parameters:
@@ -923,7 +930,7 @@ components:
         A document as returned by GET /api/v1/docs (any scope). Carries access
         (owner|editor|commenter|viewer). Owned items (access=owner) additionally
         carry view_token; shared items omit it.
-      required: [slug, url, title, access, version, public, created_at, updated_at]
+      required: [slug, url, title, access, version, public, comment_count, created_at, updated_at]
       properties:
         slug: { type: string }
         url: { type: string, format: uri }
@@ -937,6 +944,11 @@ components:
             grant for the same email).
         version: { type: integer }
         public: { type: boolean }
+        comment_count:
+          type: integer
+          description: |
+            Live (non-deleted) comments + replies on the doc. 0 when there are
+            none. The /docs dashboard surfaces the same count.
         view_token:
           type: string
           description: Present only when access=owner.

@@ -1,6 +1,6 @@
 import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
 import { getSession } from "@/lib/auth/session";
-import { listDocs, listSharedDocs, type DocRow, type SharedDocRow } from "@/lib/docs/store";
+import { listDocs, listSharedDocs, type DocListRow, type SharedDocRow } from "@/lib/docs/store";
 import { emailDomain } from "@/lib/docs/grants";
 import { query } from "@/lib/db";
 
@@ -40,16 +40,23 @@ function docRow(opts: {
   access: string;
   isPublic: boolean;
   updatedAt: string;
+  commentCount: number;
 }): string {
   const label = opts.title && opts.title.trim() ? opts.title : opts.slug;
   const href = `/d/${encodeURIComponent(opts.slug)}`;
   const vis = opts.isPublic ? "public" : "private";
-  // Title link, then a meta line beneath it (access · visibility · updated).
+  // Comment count (birthday.md B11: dashboard rows gain a comment count). Only
+  // shown when there are any, to keep zero-comment rows uncluttered.
+  const comments =
+    opts.commentCount > 0
+      ? ` · ${opts.commentCount} comment${opts.commentCount === 1 ? "" : "s"}`
+      : "";
+  // Title link, then a meta line beneath it (access · visibility · updated · comments).
   return `    <a href="${esc(href)}">${esc(label)}</a>
-      ${esc(opts.access)} · ${vis} · updated ${esc(fmtDate(opts.updatedAt))} · <a href="${esc(href)}">${esc(opts.slug)}</a>`;
+      ${esc(opts.access)} · ${vis} · updated ${esc(fmtDate(opts.updatedAt))}${comments} · <a href="${esc(href)}">${esc(opts.slug)}</a>`;
 }
 
-function ownedSection(owned: DocRow[]): string {
+function ownedSection(owned: DocListRow[]): string {
   if (owned.length === 0) {
     return `<h1>YOUR DOCUMENTS</h1>
 <section><pre>    You don't own any documents yet. Your agent publishes them via the
@@ -62,6 +69,7 @@ function ownedSection(owned: DocRow[]): string {
       access: "owner",
       isPublic: d.is_public,
       updatedAt: d.updated_at,
+      commentCount: d.comment_count,
     })
   );
   return `<h1>YOUR DOCUMENTS</h1>
@@ -81,6 +89,7 @@ function sharedSection(shared: SharedDocRow[]): string {
       access: d.access,
       isPublic: d.is_public,
       updatedAt: d.updated_at,
+      commentCount: d.comment_count,
     })
   );
   return `<h1>SHARED WITH YOU</h1>
