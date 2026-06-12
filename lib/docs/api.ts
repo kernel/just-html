@@ -10,16 +10,11 @@ import {
 // Shared API helpers for /api/v1/docs/*: JSON envelopes, scope checks, structured
 // quota/limit responses, and per-key rate limiting.
 //
-// NOTE on rate-limit windows: the plan specifies per-minute write/read limits, but
-// the rate_limits counter table buckets by hour or day (date_trunc). Rather than
-// add a minute bucket + migration, we map the per-minute limits onto the hour
-// window by multiplying by 60 (60 writes/min → 3600 writes/hr; 300 reads/min →
-// 18000 reads/hr). This preserves the intent (a generous sustained ceiling that
-// caps abuse) using the existing counter machinery; a burst inside one minute is
-// still bounded by the hourly bucket. Creates are natively hourly (60/hr).
-// Documented here so it's a one-line change if true minute windows are ever needed.
-const WRITES_PER_HOUR = RL_WRITES_PER_MIN * 60;
-const READS_PER_HOUR = RL_READS_PER_MIN * 60;
+// Rate-limit windows match the published Limits table exactly (birthday.md: limits
+// are documented "so agents can plan around them", so documented == enforced):
+// writes 60/min, reads 300/min (minute bucket), doc creates 60/hr (hour bucket).
+// The rate_limits counter keys on (key, window_start) and now supports a 'minute'
+// window via date_trunc('minute', now()), so no migration is required.
 
 const JSON_CT = "application/json; charset=utf-8";
 
@@ -141,8 +136,8 @@ export async function rateLimit(
     kind === "create"
       ? { key: k, limit: RL_CREATES_PER_HOUR, window: "hour" as const }
       : kind === "write"
-        ? { key: k, limit: WRITES_PER_HOUR, window: "hour" as const }
-        : { key: k, limit: READS_PER_HOUR, window: "hour" as const };
+        ? { key: k, limit: RL_WRITES_PER_MIN, window: "minute" as const }
+        : { key: k, limit: RL_READS_PER_MIN, window: "minute" as const };
   const tripped = await checkLimits([check]);
   if (!tripped) return null;
   audit(req, "rate_limit.tripped", {

@@ -4,7 +4,7 @@ import { query } from "@/lib/db";
 // upsert-and-return per check. Increment-then-check: rejected requests still
 // consume budget (correct for abuse control). Fail OPEN on store errors.
 
-export type Window = "hour" | "day";
+export type Window = "minute" | "hour" | "day";
 
 export type LimitCheck = {
   /** counter key, e.g. 'ident:ip:1.2.3.4' | 'login:email:raf@kernel.sh' */
@@ -20,7 +20,11 @@ export type RateResult = {
 };
 
 function windowStartExpr(w: Window): string {
-  return w === "day" ? "date_trunc('day', now())" : "date_trunc('hour', now())";
+  return w === "day"
+    ? "date_trunc('day', now())"
+    : w === "minute"
+      ? "date_trunc('minute', now())"
+      : "date_trunc('hour', now())";
 }
 
 function secondsToReset(w: Window): number {
@@ -28,6 +32,11 @@ function secondsToReset(w: Window): number {
   if (w === "day") {
     const next = new Date(now);
     next.setUTCHours(24, 0, 0, 0);
+    return Math.max(1, Math.ceil((next.getTime() - now.getTime()) / 1000));
+  }
+  if (w === "minute") {
+    const next = new Date(now);
+    next.setUTCSeconds(60, 0);
     return Math.max(1, Math.ceil((next.getTime() - now.getTime()) / 1000));
   }
   const next = new Date(now);

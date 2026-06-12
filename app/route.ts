@@ -137,7 +137,7 @@ export function GET() {
 
     API rate limits (per API key)  -> 429 with Retry-After
       Doc creates                  60 / hour
-      Writes (PATCH,/edits,grants) 60 / min
+      Writes (PATCH,/edits,grants,rotate) 60 / min
       Reads (GET)                  300 / min
 
     Unauthenticated viewer routes (per IP)   300 / min

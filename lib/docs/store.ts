@@ -390,7 +390,9 @@ export function versionView(v: VersionRow, includeHtml: boolean) {
     version: v.version,
     edit_kind: v.edit_kind,
     patch: v.edit_kind === "patch" ? v.patch : undefined,
-    author_user_id: v.author_user_id,
+    // pg returns bigint as a string; coerce so ids are JSON numbers API-wide
+    // (matches Grant.id and the VersionMeta schema in spec.yaml).
+    author_user_id: v.author_user_id === null ? null : Number(v.author_user_id),
     created_at: v.created_at,
     bytes: Number(v.bytes),
     ...(includeHtml ? { html: v.html } : {}),

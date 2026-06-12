@@ -585,6 +585,14 @@ components:
       properties:
         version: { type: integer }
         edit_kind: { type: string, enum: [create, patch, rewrite] }
+        author_user_id:
+          type: [integer, "null"]
+          description: User who authored this version (null for legacy/system writes).
+        patch:
+          type: [object, "null"]
+          description: >-
+            The edits payload as requested, present only when edit_kind=patch
+            (the list of {oldText,newText} applied). Omitted otherwise.
         bytes: { type: integer }
         created_at: { type: string, format: date-time }
     Grant:

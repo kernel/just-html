@@ -144,7 +144,10 @@ export function emailDomain(email: string): string {
 
 export function grantView(g: GrantRow) {
   return {
-    id: g.id,
+    // pg returns bigint columns as strings; coerce to a JSON number so the
+    // serialized id matches the OpenAPI spec (Grant.id: integer) and DELETE's
+    // integer grant_id. (spec.yaml + DELETE /grants/:id are the source of truth.)
+    id: Number(g.id),
     grantee_type: g.grantee_type,
     grantee: g.grantee,
     role: g.role,
