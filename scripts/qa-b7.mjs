@@ -116,6 +116,7 @@ async function main() {
   await sleep(800);
   const ll = await qaLatestLink(GRANTEE);
   check("QA has a share link for grantee", ll.status === 200 && !!ll.json?.link);
+  const shareLink = ll.status === 200 ? ll.json.link : null; // capture before consumption
   const shareNext = ll.status === 200 ? new URL(ll.json.link).searchParams.get("next") : null;
   check("share link next=/d/:slug", shareNext === `/d/${slug}`, `next=${shareNext}`);
 
@@ -141,12 +142,18 @@ async function main() {
   // Regression for the B7 blocking finding: replaying the now-consumed share
   // token must 410 AND the dead-link page must carry next=/d/:slug forward to
   // /login so the account-less grantee can re-sign-in straight back to the doc.
-  const replayU = new URL((await qaLatestLink(GRANTEE)).json.link);
-  const replay = await form("/login/verify", {
-    token: replayU.searchParams.get("token"),
-    next: replayU.searchParams.get("next"),
+  const replayU = new URL(shareLink); // the share link captured before it was consumed above
+  const replayRes = await fetch(BASE + "/login/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Origin: BASE },
+    body: new URLSearchParams({
+      token: replayU.searchParams.get("token"),
+      next: replayU.searchParams.get("next"),
+    }).toString(),
+    redirect: "manual",
   });
-  const replayHtml = await replay.res.text();
+  const replayHtml = await replayRes.text();
+  const replay = { status: replayRes.status };
   check("consumed share token replay → 410", replay.status === 410, `status=${replay.status}`);
   check("410 page links back to /login?next=/d/:slug (no dead end)",
     replayHtml.includes(`/login?next=${encodeURIComponent(`/d/${slug}`)}`),
