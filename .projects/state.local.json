@@ -30,19 +30,6 @@
     }
   },
   "resources": {
-    "justhtml": {
-      "configuration": {
-        "name": "2026-06-11-justhtml"
-      },
-      "createdAt": "2026-06-12T15:16:46.706Z",
-      "lastRevealedAt": "2026-06-12T15:16:47.251Z",
-      "lastStatus": "complete",
-      "name": "justhtml",
-      "providerId": "prvdr_61ULUAr4zlQgZkvXY5LsG",
-      "providerName": "Vercel",
-      "resourceId": "fres_61UqumS6Jdu57MtlQ16SajMkUvSQzGndpBHas5Guu85g",
-      "serviceId": "project"
-    },
     "justhtml-db": {
       "configuration": {
         "name": "justhtml",

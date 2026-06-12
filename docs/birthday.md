@@ -45,7 +45,7 @@ column for a pointer.
 
 | Concern   | Choice                | Provisioning (decided 2026-06-12)      |
 |-----------|-----------------------|----------------------------------------|
-| Hosting   | Vercel                | Stripe Projects: `Vercel / hobby` + `Vercel / project` (git-deployed) |
+| Hosting   | Vercel                | ✅ **DONE** (2026-06-12) — project `justhtml` in the kernel team (`onkernel`), created directly (NOT via Stripe Projects; an earlier Stripe-provisioned project in a separate team was deleted). Token-based CLI deploys; see AGENTS.md. |
 | Database  | PlanetScale Postgres  | Stripe Projects: `PlanetScale / postgresql`, PS-5 cluster — $5/node/mo, 10 GB included |
 | Email     | Resend                | ✅ **DONE** (2026-06-12) — manual signup (not in Stripe Projects catalog); sending domain `notify.justhtml.sh` verified, key in `.env`. Free tier covers login-link volume. |
 | Domain    | justhtml.sh           | ✅ **DONE** — purchased in Kernel's Vercel account (2026-06-12) |
@@ -495,10 +495,13 @@ surface is literally just HTML off a handler.
 ## Build plan
 
 **Phase 0 — provisioning** (✅ complete 2026-06-12)
-1. ~~Stripe Projects~~ — DONE: `PlanetScale/postgresql` (PS-5, aws-us-east,
-   db `justhtml`) and `Vercel/hobby` + `Vercel/project` (project `justhtml`)
-   provisioned; credentials in local `.env` (PLANETSCALE_*, VERCEL_*).
-   Still TODO at deploy time: push env vars to the Vercel project.
+1. ~~Database + hosting~~ — DONE: PlanetScale Postgres (PS-5, aws-us-east,
+   db `justhtml`) via Stripe Projects; Vercel project `justhtml` created
+   directly in the kernel team (`onkernel`) with env vars pushed and
+   justhtml.sh attached + verified (same-team, instant). Credentials in
+   local `.env`. (History: an initial Vercel project was provisioned via
+   Stripe Projects in a separate team; it couldn't verify the domain and
+   was deleted in favor of the kernel-team project.)
 2. ~~Resend~~ — DONE (2026-06-12): `notify.justhtml.sh` verified, key in
    local `.env`; still needs adding to Vercel env at deploy time.
 3. ~~Buy `justhtml.sh`~~ — DONE, purchased in Kernel's Vercel account

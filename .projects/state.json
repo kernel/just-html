@@ -9,11 +9,6 @@
     }
   },
   "resources": {
-    "justhtml": {
-      "name": "justhtml",
-      "providerName": "Vercel",
-      "serviceId": "project"
-    },
     "justhtml-db": {
       "name": "justhtml-db",
       "providerName": "PlanetScale",
@@ -23,6 +18,16 @@
       "name": "vercel-plan",
       "providerName": "Vercel",
       "serviceId": "hobby"
+    }
+  },
+  "environments": {
+    "default": {
+      "output": ".env",
+      "resources": [
+        {
+          "resourceName": "justhtml-db"
+        }
+      ]
     }
   }
 }
