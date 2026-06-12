@@ -360,6 +360,17 @@ always offers "Was this shared with you? Sign in" → `/login?next=/d/:slug`.
 So an expired/consumed share link degrades to one extra email round-trip,
 never a dead end.
 
+### The docs page: `/docs` (v1, added 2026-06-12)
+
+A logged-in, man-page-styled, zero-JS page listing every document the
+session's email **owns or has access to**: title (fallback: slug), slug link
+to `/d/:slug`, your access role, visibility, last-updated. Owned and
+shared-with-you sections. Account-less sessions (grantee who never
+registered) see their shared docs plus the "no account yet — tell your agent
+to sign up" line. Not logged in → redirect to `/login?next=/docs`. The API
+twin is `GET /api/v1/docs?scope=owned|shared|all` so agents can enumerate
+the same picture. (Key management / token rotation UI stays phase 2.)
+
 **Viewer-route enforcement** (explicit, not just implied by the ladder):
 `/d/:slug` and `/d/:slug/raw` authorize in order: owner session → session
 email matching an email grant → session email-domain matching a domain
@@ -384,7 +395,7 @@ REST under `/api/v1`, `Authorization: Bearer jh_live_…`:
 | Method | Path                              | Purpose                                   |
 |--------|-----------------------------------|-------------------------------------------|
 | POST   | `/api/v1/docs`                    | `{html, title?, public?}` → `{slug, url, view_token}` |
-| GET    | `/api/v1/docs`                    | List own docs                             |
+| GET    | `/api/v1/docs`                    | List docs. `?scope=owned` (default) \| `shared` (granted to your email/domain) \| `all`; each item carries `access: owner\|editor\|commenter\|viewer` + `title` |
 | GET    | `/api/v1/docs/:slug`              | Fetch metadata + html                     |
 | PATCH  | `/api/v1/docs/:slug`              | Update html / title / public flag         |
 | DELETE | `/api/v1/docs/:slug`              | Soft-delete                               |
@@ -589,8 +600,8 @@ main + prod — brand-new project, no backwards compatibility.)
   resolve, delete, orphan handling.
 - Emoji reactions on docs and comments.
 - `doc_grants` API + email-OTP browser sessions for human commenters.
-- Minimal "my docs" dashboard (list, revoke keys, rotate tokens) — also
-  man-page styled.
+- Dashboard management actions (revoke keys, rotate tokens from the web) —
+  the `/docs` listing page itself is v1, see "The docs page".
 
 ## Open questions / decisions made
 
