@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "project": {
+    "initializedAt": "2026-06-12T14:55:36.763Z",
+    "merchantDisplayName": null,
+    "merchantId": "acct_1RRLPO2LnOd0TWMs",
+    "projectId": "project_61UquS0DavlWy7Gci16SajMkUvSQzGndpBHas5GuuPk0",
+    "projectName": "2026-06-11-justhtml"
+  },
+  "providers": {
+    "planetscale": {
+      "accountRequestId": "facctrq_61UquZEgsjHhHdovj16SajMkUvSQzGndpBHas5GuuQjw",
+      "configuration": {},
+      "linkedAt": "2026-06-12T15:07:57.841Z",
+      "providerId": "prvdr_61UGL5sd8z0WkMArr5Jlo",
+      "providerName": "PlanetScale",
+      "redirectUrl": null,
+      "requestedAt": "2026-06-12T15:03:05.188Z",
+      "status": "complete"
+    },
+    "vercel": {
+      "accountRequestId": "facctrq_61UqumECDvAQS10CW16SajMkUvSQzGndpBHas5Guu7s8",
+      "configuration": {},
+      "linkedAt": "2026-06-12T15:16:34.428Z",
+      "providerId": "prvdr_61ULUAr4zlQgZkvXY5LsG",
+      "providerName": "Vercel",
+      "redirectUrl": null,
+      "requestedAt": "2026-06-12T15:16:34.428Z",
+      "status": "complete"
+    }
+  },
+  "resources": {
+    "justhtml": {
+      "configuration": {
+        "name": "2026-06-11-justhtml"
+      },
+      "createdAt": "2026-06-12T15:16:46.706Z",
+      "lastRevealedAt": "2026-06-12T15:16:47.251Z",
+      "lastStatus": "complete",
+      "name": "justhtml",
+      "providerId": "prvdr_61ULUAr4zlQgZkvXY5LsG",
+      "providerName": "Vercel",
+      "resourceId": "fres_61UqumS6Jdu57MtlQ16SajMkUvSQzGndpBHas5Guu85g",
+      "serviceId": "project"
+    },
+    "justhtml-db": {
+      "configuration": {
+        "name": "justhtml",
+        "cluster": "PS-5",
+        "region": "aws-us-east",
+        "replicas": 0
+      },
+      "createdAt": "2026-06-12T15:16:09.735Z",
+      "lastRevealedAt": "2026-06-12T15:16:10.059Z",
+      "lastStatus": "complete",
+      "name": "justhtml-db",
+      "providerId": "prvdr_61UGL5sd8z0WkMArr5Jlo",
+      "providerName": "PlanetScale",
+      "resourceId": "fres_61UqufMFhm04bMeOK16SajMkUvSQzGndpBHas5GuuGb2",
+      "serviceId": "postgresql"
+    },
+    "vercel-plan": {
+      "configuration": {},
+      "createdAt": "2026-06-12T15:16:36.898Z",
+      "lastRevealedAt": "2026-06-12T15:16:37.232Z",
+      "lastStatus": "complete",
+      "name": "vercel-plan",
+      "providerId": "prvdr_61ULUAr4zlQgZkvXY5LsG",
+      "providerName": "Vercel",
+      "resourceId": "fres_61UqumJxbQWMeGjbb16SajMkUvSQzGndpBHas5Guu9Q0",
+      "serviceId": "hobby"
+    }
+  }
+}

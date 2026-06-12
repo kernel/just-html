@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "providers": {
+    "planetscale": {
+      "name": "PlanetScale"
+    },
+    "vercel": {
+      "name": "Vercel"
+    }
+  },
+  "resources": {
+    "justhtml": {
+      "name": "justhtml",
+      "providerName": "Vercel",
+      "serviceId": "project"
+    },
+    "justhtml-db": {
+      "name": "justhtml-db",
+      "providerName": "PlanetScale",
+      "serviceId": "postgresql"
+    },
+    "vercel-plan": {
+      "name": "vercel-plan",
+      "providerName": "Vercel",
+      "serviceId": "hobby"
+    }
+  }
+}
