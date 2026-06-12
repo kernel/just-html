@@ -180,6 +180,9 @@ export type ReactionRow = {
   author_user_id: number | null;
   author_email: string | null;
   emoji: string;
+  anchor: TextAnchor | null;
+  anchored_version: number | null;
+  orphaned: boolean;
   created_at: string;
 };
 
@@ -205,6 +208,19 @@ export function commentView(c: CommentRow, reactions: ReactionRow[]) {
 /** Aggregated reaction group as returned to clients. */
 export type ReactionGroup = { emoji: string; count: number; authors: string[] };
 
+/**
+ * Anchored-reaction group as returned to clients (birthday.md "Anchored
+ * reactions": GET /comments includes anchored reactions grouped by anchor
+ * signature so clients stack/count without re-grouping). One entry per span:
+ * the anchor, its signature, and the per-emoji aggregation for that span.
+ */
+export type AnchoredReactionGroup = {
+  sig: string;
+  anchor: TextAnchor;
+  anchored_version: number | null;
+  reactions: ReactionGroup[];
+};
+
 /** Collapse reactions into { emoji, count, authors[] } groups. */
 function aggregateReactions(reactions: ReactionRow[]): ReactionGroup[] {
   const byEmoji = new Map<string, string[]>();
@@ -218,6 +234,43 @@ function aggregateReactions(reactions: ReactionRow[]): ReactionGroup[] {
     count: authors.length,
     authors,
   }));
+}
+
+/**
+ * Group ANCHORED (non-orphaned) reactions by their anchor signature
+ * (prefix|exact|suffix — matches lib/docs/reactions.ts anchorSignature + the
+ * overlay's anchorSig), then aggregate per emoji within each span. Ordered by
+ * the resolved text position so the client paints/stacks in document order.
+ */
+function groupAnchoredReactions(reactions: ReactionRow[], docText: string): AnchoredReactionGroup[] {
+  const bySig = new Map<string, { anchor: TextAnchor; av: number | null; rows: ReactionRow[] }>();
+  for (const r of reactions) {
+    if (!r.anchor || r.orphaned) continue;
+    const a = r.anchor;
+    const sig = `${a.prefix ?? ""}|${a.exact}|${a.suffix ?? ""}`;
+    const g = bySig.get(sig);
+    if (g) g.rows.push(r);
+    else bySig.set(sig, { anchor: a, av: r.anchored_version, rows: [r] });
+  }
+  const groups = [...bySig.entries()].map(([sig, g]) => {
+    let pos =
+      typeof g.anchor.start === "number"
+        ? g.anchor.start
+        : (() => {
+            const rr = resolveQuote(docText, g.anchor, undefined);
+            return rr.ok ? rr.start : Number.MAX_SAFE_INTEGER;
+          })();
+    if (!Number.isFinite(pos)) pos = Number.MAX_SAFE_INTEGER;
+    return {
+      sig,
+      anchor: g.anchor,
+      anchored_version: g.av,
+      reactions: aggregateReactions(g.rows),
+      _pos: pos,
+    };
+  });
+  groups.sort((a, b) => a._pos - b._pos);
+  return groups.map(({ _pos, ...rest }) => rest);
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +307,7 @@ export async function allThreads(doc: DocRow): Promise<{
   total: number;
   threads: ReturnType<typeof threadView>[];
   doc_reactions?: ReactionGroup[];
+  anchored_reactions?: AnchoredReactionGroup[];
 }> {
   const { rows: commentRows } = await query<CommentRow>(
     `SELECT c.*, u.email AS author_email
@@ -270,14 +324,25 @@ export async function allThreads(doc: DocRow): Promise<{
     [doc.id]
   );
 
+  // Split reactions into the 3-way target (birthday.md "Anchored reactions"):
+  //   comment_id set        -> comment-level (attached to a card)
+  //   anchor set, resolved  -> span-anchored (grouped by signature; inline chip)
+  //   anchor set, orphaned  -> DEGRADES to doc-level (rail header strip), kept
+  //   both null             -> doc-level
   const reactionsByComment = new Map<number, ReactionRow[]>();
   const docLevelReactions: ReactionRow[] = [];
+  const anchoredReactions: ReactionRow[] = [];
   for (const r of reactionRows) {
-    if (r.comment_id === null) docLevelReactions.push(r);
-    else {
+    if (r.comment_id !== null) {
       const arr = reactionsByComment.get(Number(r.comment_id)) ?? [];
       arr.push(r);
       reactionsByComment.set(Number(r.comment_id), arr);
+    } else if (r.anchor && !r.orphaned) {
+      anchoredReactions.push(r);
+    } else {
+      // doc-level (anchor null) OR an orphaned anchored reaction degraded to
+      // doc-level display (its data — anchor/orphaned — is kept on the row).
+      docLevelReactions.push(r);
     }
   }
 
@@ -321,13 +386,20 @@ export async function allThreads(doc: DocRow): Promise<{
     threadView(root, repliesByParent.get(Number(root.id)) ?? [], reactionsByComment, group)
   );
 
+  const anchoredGroups = groupAnchoredReactions(anchoredReactions, docText);
+
   return {
     total: commentRows.length,
     threads,
     // doc-level reactions surfaced alongside (used by reactions UI / agents).
+    // Includes orphaned anchored reactions degraded to doc-level (kept).
     ...(docLevelReactions.length
       ? { doc_reactions: aggregateReactions(docLevelReactions) }
       : {}),
+    // Anchored reactions grouped by anchor signature in document order, so
+    // clients stack/count + paint the inline chip without re-grouping
+    // (birthday.md "Anchored reactions").
+    ...(anchoredGroups.length ? { anchored_reactions: anchoredGroups } : {}),
   };
 }
 

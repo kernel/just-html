@@ -671,8 +671,17 @@ paths:
                     items: { $ref: "#/components/schemas/CommentThread" }
                   doc_reactions:
                     type: array
-                    description: Doc-level reactions (present only when any exist).
+                    description: |
+                      Doc-level reactions (present only when any exist). Includes
+                      orphaned anchored reactions degraded to doc-level.
                     items: { $ref: "#/components/schemas/ReactionGroup" }
+                  anchored_reactions:
+                    type: array
+                    description: |
+                      Span reactions grouped by anchor signature, in document
+                      order, so clients stack/count without re-grouping (present
+                      only when any exist).
+                    items: { $ref: "#/components/schemas/AnchoredReactionGroup" }
         "404": { $ref: "#/components/responses/NotFound" }
     post:
       tags: [collaboration]
@@ -784,13 +793,22 @@ paths:
       - $ref: "#/components/parameters/Slug"
     post:
       tags: [collaboration]
-      summary: React to a doc or comment (attributed; re-post toggles off)
+      summary: React to a doc, a comment, or a quoted span (attributed; re-post toggles off)
       operationId: addReaction
       description: |
-        Add an emoji reaction on the doc (omit comment_id) or a comment.
-        Attributed-only (identity required); unique per (target, author, emoji)
-        — re-posting the same reaction removes it (toggle). React permission:
-        anyone who can view, with identity.
+        Add an emoji reaction. The target is 3-way and MUTUALLY EXCLUSIVE:
+          - comment_id set  → react on that comment
+          - anchor set      → react on a text span (W3C text-quote, same shape +
+            validation as a comment anchor; an agent "highlights" by quoting)
+          - neither set     → react on the whole document
+        Supplying BOTH comment_id and anchor → 400. Attributed-only (identity
+        required); unique per (target, author, emoji) — for span reactions the
+        "target" is the anchor signature, so the same emoji on two different spans
+        are two distinct reactions. Re-posting the same reaction removes it
+        (toggle). Anchored reactions re-anchor on every doc edit exactly like
+        comments (move, or orphan + later un-orphan); an orphaned anchored
+        reaction degrades to doc-level display. React permission: anyone who can
+        view, with identity.
       security:
         - bearerApiKey: []
         - {}
@@ -810,7 +828,31 @@ paths:
                     listing the full set.
                 comment_id:
                   type: [integer, "null"]
-                  description: Target comment; omit/null = react on the document.
+                  description: |
+                    Target comment; omit/null = not a comment reaction. Mutually
+                    exclusive with anchor.
+                anchor:
+                  oneOf:
+                    - { $ref: "#/components/schemas/TextAnchor" }
+                    - { type: "null" }
+                  description: |
+                    Target span (W3C text-quote selector). Mutually exclusive with
+                    comment_id; omit/null = react on the doc (or comment).
+            examples:
+              docLevel:
+                summary: React on the whole document
+                value: { emoji: "👍" }
+              onComment:
+                summary: React on a comment
+                value: { emoji: "🎉", comment_id: 42 }
+              onSpan:
+                summary: React on a quoted span (anchored reaction)
+                value:
+                  emoji: "🚀"
+                  anchor:
+                    exact: "deterministic compaction"
+                    prefix: "record store with "
+                    suffix: "."
       responses:
         "201":
           description: Reaction added
@@ -824,6 +866,12 @@ paths:
                     properties:
                       id: { type: integer }
                       comment_id: { type: [integer, "null"] }
+                      anchor:
+                        oneOf:
+                          - { $ref: "#/components/schemas/TextAnchor" }
+                          - { type: "null" }
+                      anchored_version: { type: [integer, "null"] }
+                      orphaned: { type: boolean }
                       emoji: { type: string }
                       author: { type: string }
                       created_at: { type: string, format: date-time }
@@ -997,6 +1045,21 @@ components:
         authors:
           type: array
           items: { type: string, description: Author email. }
+    AnchoredReactionGroup:
+      type: object
+      description: |
+        All reactions on one text span, grouped by anchor signature, then
+        collapsed per emoji. The viewer paints one highlight on the span and a
+        chip per emoji at the span's end.
+      properties:
+        sig:
+          type: string
+          description: Anchor signature (prefix|exact|suffix) — the grouping key.
+        anchor: { $ref: "#/components/schemas/TextAnchor" }
+        anchored_version: { type: [integer, "null"] }
+        reactions:
+          type: array
+          items: { $ref: "#/components/schemas/ReactionGroup" }
     Comment:
       type: object
       properties:

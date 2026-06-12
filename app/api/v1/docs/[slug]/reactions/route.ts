@@ -10,14 +10,20 @@ import {
   COMMENT_WRITE_RL,
 } from "@/lib/docs/comments";
 import { addOrToggleReaction, isAllowedEmoji, ALLOWED_EMOJI } from "@/lib/docs/reactions";
+import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-// POST /api/v1/docs/:slug/reactions — { emoji, comment_id? } (null = on the doc).
-// React: anyone who can VIEW, with identity (birthday.md "Permission matrix").
-// Attributed-only; unique per (target, author, emoji); re-posting toggles it off.
+// POST /api/v1/docs/:slug/reactions — { emoji, comment_id?, anchor? }.
+// The target is 3-WAY and mutually exclusive (birthday.md "Anchored reactions"):
+//   comment_id set -> on a comment; anchor set -> on a span; both null -> on doc.
+// Supplying BOTH comment_id AND anchor is a 400. The anchor is the same W3C
+// text-quote {exact, prefix?, suffix?, start?, end?} as comment anchors, with the
+// same validation. React: anyone who can VIEW, with identity (birthday.md
+// "Permission matrix"). Attributed-only; unique per (target, author, emoji);
+// re-posting the same reaction toggles it off.
 
 function unauthorized(): Response {
   return new Response(
@@ -89,9 +95,27 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     commentId = n;
   }
 
+  // Anchor: a span target (same W3C shape + validation as comment anchors). The
+  // target is mutually exclusive — a comment-level reaction can't also be
+  // span-anchored (400; the DB CHECK reactions_target_exclusive is the backstop).
+  let anchor: TextAnchor | null = null;
+  if (b.anchor !== undefined && b.anchor !== null) {
+    if (commentId !== null) {
+      return apiError(
+        400,
+        "invalid_request",
+        "A reaction targets exactly one of: a comment (comment_id), a span (anchor), or the doc (neither). Supply at most one of comment_id and anchor."
+      );
+    }
+    const parsed = parseAnchor(b.anchor);
+    if ("error" in parsed) return apiError(400, "invalid_request", parsed.error);
+    anchor = parsed.anchor;
+  }
+
   const result = await addOrToggleReaction({
     doc,
     commentId,
+    anchor,
     authorUserId: principal.userId,
     emoji: b.emoji,
   });
@@ -106,6 +130,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
       reaction: {
         id: Number(result.reaction.id),
         comment_id: result.reaction.comment_id === null ? null : Number(result.reaction.comment_id),
+        anchor: result.reaction.anchor,
+        anchored_version: result.reaction.anchored_version,
+        orphaned: result.reaction.orphaned,
         emoji: result.reaction.emoji,
         author: principal.email,
         created_at: result.reaction.created_at,

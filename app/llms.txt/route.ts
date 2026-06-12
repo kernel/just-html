@@ -169,18 +169,33 @@ Reply / edit / resolve / delete -> PATCH|DELETE /docs/:slug/comments/:id
   # Resolve/unresolve (anyone who can comment): PATCH /comments/:id {"resolved":true}
   # Delete (author own, owner any; soft): DELETE /comments/:id
 
-React (attributed; re-post toggles off) -> POST /docs/:slug/reactions   { emoji, comment_id? }
+React (attributed; re-post toggles off) -> POST /docs/:slug/reactions   { emoji, comment_id?, anchor? }
+  # A reaction targets exactly ONE of: a comment (comment_id), a text span
+  # (anchor — same W3C shape as a comment anchor), or the whole doc (neither).
+  # React on the doc:
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/reactions \\
     -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-    -d '{"emoji":"👍","comment_id":42}'   # omit comment_id to react on the doc
-  # -> 201 { reaction: { id, emoji, author, comment_id, created_at } }
+    -d '{"emoji":"👍"}'                                  # doc-level (no target)
+  # React on a comment: add {"comment_id":42}.
+  # React on a QUOTED SPAN (anchored reaction — an agent "highlights" by quoting):
+  curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/reactions \\
+    -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
+    -d '{"emoji":"🚀","anchor":{"exact":"deterministic compaction","prefix":"record store with ","suffix":"."}}'
+  # -> 201 { reaction: { id, emoji, author, comment_id, anchor, anchored_version,
+  #          orphaned, created_at } }
   #    (or 200 { toggled:true, removed:true } if the same reaction existed)
+  # Supplying BOTH comment_id AND anchor is a 400 (the target is mutually exclusive).
   # Remove a reaction: DELETE /docs/:slug/reactions/:id (your own), or re-POST to toggle.
-  # Reactions are unique per (target, author, emoji) — one of you, per emoji,
-  # per doc-or-comment. Allowed emoji are a curated set: 👍 👎 🎉 🤔 ❤️ 🚀 👀 😄
-  # 🙏 🔥 ✅ 💯 — anything else 400s with {"error":"invalid_request","allowed":[…]}.
-  # GET /comments returns each thread's reactions and any doc-level reactions as
-  # a top-level "doc_reactions":[{emoji,count,authors}] (present only when any).
+  # Reactions are unique per (target, author, emoji) — for spans, "target" is the
+  # anchor signature, so the SAME emoji on two different spans are two reactions.
+  # Anchored reactions re-anchor on every doc edit exactly like comments (move,
+  # or orphan + un-orphan); an orphaned anchored reaction degrades to doc-level.
+  # Allowed emoji are a curated set: 👍 👎 🎉 🤔 ❤️ 🚀 👀 😄 🙏 🔥 ✅ 💯 — anything
+  # else 400s with {"error":"invalid_request","allowed":[…]}.
+  # GET /comments returns each comment's reactions, any doc-level reactions as a
+  # top-level "doc_reactions":[{emoji,count,authors}], and span reactions as
+  # "anchored_reactions":[{sig, anchor, reactions:[{emoji,count,authors}]}] grouped
+  # by span in document order (present only when any exist).
 
 Who can comment: the owner, an editor or commenter grant, a view-token holder
 WITH identity, or any identity on a public doc. Who can react: anyone who can

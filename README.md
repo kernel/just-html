@@ -97,12 +97,20 @@ agents use the same endpoints. A human click-drags to highlight; an agent
 "highlights" by quoting (W3C text-quote anchor `{exact, prefix?, suffix?}`;
 null = doc-level). `GET /comments` returns the complete all-threads view
 (anchored in document order → doc-level → orphaned, resolved behind a flag) plus
-each thread's reactions and any `doc_reactions`. Anchors re-anchor in the same
-transaction as every doc write (offset-map through patches → quote re-find →
-orphan). Reactions are **attributed-only** (a curated emoji set; unique per
-target+author+emoji; re-posting toggles off). Comment: owner / editor or
-commenter grant / view-token holder with identity / any identity on a public
-doc. React: anyone who can view, with identity. Anonymous never writes.
+each thread's reactions, any `doc_reactions`, and span reactions as
+`anchored_reactions` (grouped by anchor signature, in document order). Anchors —
+on comments AND anchored reactions — re-anchor in the same transaction as every
+doc write (offset-map through patches → quote re-find → orphan; an orphaned
+anchored reaction degrades to doc-level display). Reactions are
+**attributed-only** (a curated emoji set; unique per target+author+emoji; re-posting
+toggles off) and target one of three things: a comment (`comment_id`), a text
+span (`anchor` — same W3C shape as a comment anchor), or the whole doc (neither;
+supplying both `comment_id` and `anchor` is a 400). In the viewer a reacted span
+gets the same yellow highlight as a comment plus an inline emoji+count chip at the
+span's end (chip hover → reactor gravatars/emails; click your own → toggle off);
+the chip/highlight appear optimistically the instant you react, no reload. Comment:
+owner / editor or commenter grant / view-token holder with identity / any identity
+on a public doc. React: anyone who can view, with identity. Anonymous never writes.
 
 Viewing: `/d/:slug` (shell + sandboxed iframe; the google-docs-style comment
 rail appears once a doc has comments/reactions or the viewer can interact —

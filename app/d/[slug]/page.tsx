@@ -93,14 +93,16 @@ export default async function ViewerPage({ params, searchParams }: Props) {
 
   const threadData = await allThreads(doc);
   const docReactions = threadData.doc_reactions ?? [];
+  const anchoredReactions = threadData.anchored_reactions ?? [];
   const hasComments = threadData.total > 0;
   const hasDocReactions = docReactions.length > 0;
+  const hasAnchoredReactions = anchoredReactions.length > 0;
   const title = doc.title || doc.slug;
 
-  // Cold path: no comments, no doc reactions, AND this viewer can't comment or
-  // react → plain shell (zero chrome). The moment a doc-level reaction exists
-  // (or the viewer can interact) the rail earns its keep.
-  if (!hasComments && !hasDocReactions && !canComment && !canReact) {
+  // Cold path: no comments, no reactions of any kind, AND this viewer can't
+  // comment or react → plain shell (zero chrome). The moment any reaction exists
+  // (doc-level or anchored) or the viewer can interact, the rail earns its keep.
+  if (!hasComments && !hasDocReactions && !hasAnchoredReactions && !canComment && !canReact) {
     return <PlainShell title={title} rawSrc={`/d/${encodeURIComponent(slug)}/raw${rawQuery}`} />;
   }
 
@@ -115,8 +117,10 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       canComment={canComment}
       canReact={canReact}
       signedIn={session !== null}
+      me={principal?.email ?? session?.email ?? null}
       initialThreads={threadData.threads}
       initialDocReactions={docReactions}
+      initialAnchoredReactions={anchoredReactions}
       version={doc.version}
     />
   );

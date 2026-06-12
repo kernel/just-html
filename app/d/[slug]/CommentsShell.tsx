@@ -28,6 +28,15 @@ const EMOJIS = ["👍", "👎", "🎉", "❤️", "😄", "🚀", "👀"];
 
 type Reaction = { emoji: string; count: number; authors: string[] };
 type Anchor = { exact: string; prefix?: string; suffix?: string; start?: number; end?: number } | null;
+// Anchored reaction group (one per span), as returned by GET /comments grouped by
+// anchor signature (birthday.md "Anchored reactions": clients stack/count without
+// re-grouping). The chip is painted inline at the END of the span by the overlay.
+type AnchoredReactionGroup = {
+  sig: string;
+  anchor: NonNullable<Anchor>;
+  anchored_version: number | null;
+  reactions: Reaction[];
+};
 type Comment = {
   id: number;
   parent_id: number | null;
@@ -51,10 +60,17 @@ type Props = {
   canComment: boolean;
   canReact: boolean;
   signedIn: boolean;
+  me: string | null;
   initialThreads: Thread[];
   initialDocReactions: Reaction[];
+  initialAnchoredReactions: AnchoredReactionGroup[];
   version: number;
 };
+
+/** Anchor signature — MUST match the server (lib/docs/reactions.ts) + overlay. */
+function anchorSig(a: NonNullable<Anchor>): string {
+  return `${a.prefix ?? ""}|${a.exact}|${a.suffix ?? ""}`;
+}
 
 function fmtTime(iso: string): string {
   try {
@@ -65,11 +81,19 @@ function fmtTime(iso: string): string {
 }
 
 export default function CommentsShell(props: Props) {
-  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn } = props;
+  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn, me } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [threads, setThreads] = useState<Thread[]>(props.initialThreads);
   const [docReactions, setDocReactions] = useState<Reaction[]>(props.initialDocReactions);
+  const [anchoredReactions, setAnchoredReactions] = useState<AnchoredReactionGroup[]>(
+    props.initialAnchoredReactions
+  );
+  // email -> gravatar URL (async-computed; sent to the overlay for the chip popover)
+  const [avatars, setAvatars] = useState<Record<string, string>>({});
+  // Latest reactAnchored, refd so the message-listener effect (declared earlier)
+  // can call it without depending on its declaration order or re-subscribing.
+  const reactAnchoredRef = useRef<(emoji: string, anchor: NonNullable<Anchor>) => void>(() => {});
   const [showResolved, setShowResolved] = useState(false);
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -93,14 +117,71 @@ export default function CommentsShell(props: Props) {
     [threads, showResolved]
   );
 
+  // Reaction groups to paint inline (each span's chip set), with a `mine` flag so
+  // the overlay can style "my" chip + know what a re-click toggles off.
+  const paintReactionGroups = useMemo(
+    () =>
+      anchoredReactions.map((g) => ({
+        sig: g.sig,
+        exact: g.anchor.exact,
+        prefix: g.anchor.prefix,
+        suffix: g.anchor.suffix,
+        reactions: g.reactions.map((r) => ({
+          emoji: r.emoji,
+          count: r.count,
+          authors: r.authors,
+          mine: me != null && r.authors.includes(me),
+        })),
+      })),
+    [anchoredReactions, me]
+  );
+
   const postToOverlay = useCallback((msg: unknown) => {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
   }, []);
+
+  // Compute gravatar URLs (sha256 of the lowercased email) for every reactor +
+  // commenter, so the overlay's chip popover can show avatars. Async (SubtleCrypto)
+  // but cheap; the result is cached in state and re-sent with jh:reactions.
+  useEffect(() => {
+    const emails = new Set<string>();
+    for (const g of anchoredReactions) for (const r of g.reactions) for (const e of r.authors) emails.add(e);
+    for (const r of docReactions) for (const e of r.authors) emails.add(e);
+    const missing = [...emails].filter((e) => !(e in avatars));
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const email of missing) {
+        try {
+          const data = new TextEncoder().encode(email.trim().toLowerCase());
+          const buf = await crypto.subtle.digest("SHA-256", data);
+          const hex = [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+          next[email] = `https://gravatar.com/avatar/${hex}?d=identicon&s=36`;
+        } catch {
+          /* SubtleCrypto unavailable (non-secure context) — skip avatars. */
+        }
+      }
+      if (!cancelled && Object.keys(next).length) setAvatars((a) => ({ ...a, ...next }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [anchoredReactions, docReactions, avatars]);
 
   // Send anchors whenever they change or the overlay (re)becomes ready.
   useEffect(() => {
     if (overlayReady) postToOverlay({ type: "jh:anchors", anchors: paintAnchors });
   }, [overlayReady, paintAnchors, postToOverlay]);
+
+  // Send anchored reactions (inline chips) likewise. Re-sent on every change,
+  // which is the optimistic-update path: the local state mutates → this fires →
+  // the overlay repaints the chip/highlight with no reload (birthday.md HARD
+  // REQUIREMENT).
+  useEffect(() => {
+    if (overlayReady)
+      postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
+  }, [overlayReady, paintReactionGroups, me, avatars, postToOverlay]);
 
   // Listen to overlay messages. Only accept messages from our iframe's window
   // (the sandboxed iframe posts with origin "null"; we match on source window).
@@ -113,6 +194,7 @@ export default function CommentsShell(props: Props) {
         case "jh:ready":
           setOverlayReady(true);
           postToOverlay({ type: "jh:anchors", anchors: paintAnchors });
+          postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
           break;
         case "jh:positions":
           setPositions(d.positions || {});
@@ -132,11 +214,15 @@ export default function CommentsShell(props: Props) {
         case "jh:hlHover":
           setActiveId(d.id);
           break;
+        case "jh:reactionToggle":
+          // A chip was clicked inside the iframe → optimistic toggle (add/remove).
+          if (canReact && d.anchor && d.anchor.exact) reactAnchoredRef.current(d.emoji, d.anchor);
+          break;
       }
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [paintAnchors, postToOverlay, canComment, canReact]);
+  }, [paintAnchors, paintReactionGroups, me, avatars, postToOverlay, canComment, canReact]);
 
   const reload = useCallback(async () => {
     const r = await fetch(`${apiBase}/comments${tokenQuery}`, { credentials: "same-origin" });
@@ -144,6 +230,7 @@ export default function CommentsShell(props: Props) {
       const j = await r.json();
       setThreads(j.threads || []);
       setDocReactions(j.doc_reactions || []);
+      setAnchoredReactions(j.anchored_reactions || []);
     }
   }, [apiBase, tokenQuery]);
 
@@ -199,6 +286,71 @@ export default function CommentsShell(props: Props) {
     [apiBase, tokenQuery, reload]
   );
 
+  // Anchored reaction (on a SPAN). OPTIMISTIC (birthday.md HARD REQUIREMENT): the
+  // local state mutates first so the chip + highlight paint immediately via the
+  // jh:reactions postMessage — no reload, no refetch wait. The POST runs in the
+  // background; on completion we reconcile with the server's truth, on failure we
+  // roll back. Same path for add and toggle-off (re-clicking your own emoji).
+  const reactAnchored = useCallback(
+    (emoji: string, anchor: NonNullable<Anchor>) => {
+      if (!me) {
+        // No identity → can't attribute/toggle; just POST (will 401) and reload.
+        void (async () => {
+          await fetch(`${apiBase}/reactions${tokenQuery}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ emoji, anchor }),
+          });
+          await reload();
+        })();
+        return;
+      }
+      const sig = anchorSig(anchor);
+      // Optimistic local mutation: add my reaction, or remove it if I already
+      // reacted with this emoji on this span (toggle off). Empty groups are dropped.
+      setAnchoredReactions((prev) => {
+        const next = prev.map((g) => ({ ...g, reactions: g.reactions.map((r) => ({ ...r })) }));
+        let g = next.find((x) => x.sig === sig);
+        if (!g) {
+          g = { sig, anchor, anchored_version: null, reactions: [] };
+          next.push(g);
+        }
+        const ex = g.reactions.find((r) => r.emoji === emoji);
+        const iReacted = ex ? ex.authors.includes(me) : false;
+        if (iReacted && ex) {
+          ex.authors = ex.authors.filter((a) => a !== me);
+          ex.count = ex.authors.length;
+        } else if (ex) {
+          ex.authors = [...ex.authors, me];
+          ex.count = ex.authors.length;
+        } else {
+          g.reactions.push({ emoji, count: 1, authors: [me] });
+        }
+        // prune empty emoji + empty spans (chip/highlight removed at count 0)
+        g.reactions = g.reactions.filter((r) => r.count > 0);
+        return next.filter((x) => x.reactions.length > 0);
+      });
+      // Fire-and-reconcile.
+      void (async () => {
+        const r = await fetch(`${apiBase}/reactions${tokenQuery}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ emoji, anchor }),
+        });
+        // Reconcile with server truth (covers re-anchor offset updates, races,
+        // and the failure path — reload reflects the canonical state either way).
+        await reload();
+        if (!r.ok) {
+          // best-effort: reload already corrected the optimistic state.
+        }
+      })();
+    },
+    [apiBase, tokenQuery, reload, me]
+  );
+  reactAnchoredRef.current = reactAnchored;
+
   // Sync the active highlight to the overlay.
   useEffect(() => {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
@@ -251,11 +403,10 @@ export default function CommentsShell(props: Props) {
                 postToOverlay({ type: "jh:clearSelection" });
               }}
               onReact={(emoji) => {
-                // B11: react-on-selection is live. A reaction targets the doc or
-                // a comment (reactions.comment_id) — there is no per-span
-                // reaction in the schema — so a selection react is a DOC-level
-                // reaction (the mini picker per the variant-b demo).
-                react(emoji, null);
+                // B13: the selection toolbar's react flow creates an ANCHORED
+                // reaction (anchor = the selection quote), not a doc-level one.
+                // Optimistic: the chip + highlight appear immediately (no reload).
+                reactAnchored(emoji, selection.anchor);
                 setSelection(null);
                 postToOverlay({ type: "jh:clearSelection" });
               }}
