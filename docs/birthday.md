@@ -337,6 +337,35 @@ an unknown email works (you get a session — needed for the claim ceremony),
 but the dashboard for account-less sessions says: "no account yet — tell
 your agent to sign up at justhtml.sh/auth.md".
 
+### Share notifications: the non-user grantee story (v1)
+
+When an **email grant** is created, the grantee gets a man-page-style email
+(subject: `<owner email> shared "<title>" with you — justhtml.sh`) with ONE
+link that **logs them in and lands them on the doc**:
+
+- The link is a single-use login token with `next=/d/:slug`, but with a
+  **7-day TTL** (`kind='share'` on login_tokens) instead of the 15-minute
+  login TTL — share emails get clicked tomorrow, not now. Same security
+  anchor either way: possession of the inbox.
+- No account needed: sessions are email-keyed with nullable user_id. A
+  grantee who has never heard of justhtml.sh clicks once and is viewing.
+- The email includes one line for the agent path: "to edit via API, tell
+  your agent to register at justhtml.sh/auth.md with this email."
+- `POST /grants` accepts `notify: false` to suppress it. **Domain grants
+  never notify** (we don't email a whole company).
+- Counts against the per-email send rate caps.
+
+**Stale-link fallback (always works)**: the private-doc notice on `/d/:slug`
+always offers "Was this shared with you? Sign in" → `/login?next=/d/:slug`.
+So an expired/consumed share link degrades to one extra email round-trip,
+never a dead end.
+
+**Viewer-route enforcement** (explicit, not just implied by the ladder):
+`/d/:slug` and `/d/:slug/raw` authorize in order: owner session → session
+email matching an email grant → session email-domain matching a domain
+grant → valid view token → public. Editor-granted humans see the doc; web
+editing is not v1 (editing is API-only — their agent edits).
+
 Both `/login` and the claim verification form are plain HTML forms served
 from route handlers — zero JS, man-page styled. CSRF: SameSite=Lax plus
 Origin-header check on mutating form POSTs. User-uploaded HTML can never
@@ -597,6 +626,10 @@ main + prod — brand-new project, no backwards compatibility.)
 - ~~Session state?~~ DB-backed sessions table, opaque hashed token in
   HttpOnly cookie, keyed by verified email (user_id nullable). No
   JWT/NextAuth. Magic-link click = login. Sign-up remains agent-only.
+- ~~Non-user grantee story?~~ (2026-06-12) Email grants send a share
+  notification with a one-click 7-day login+redirect link; stale links
+  degrade to sign-in-from-the-private-notice; viewer routes authorize by
+  session-email grants, not just view tokens. See "Share notifications".
 - ~~Registration status column?~~ No — derived from claimed_at/
   claim_expires_at, per the reference implementation. No sweeper jobs.
 - ~~Object storage?~~ No — Postgres TEXT with 2 MB cap.
