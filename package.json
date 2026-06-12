@@ -14,7 +14,8 @@
     "next": "15.5.19",
     "pg": "^8.13.1",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "resend": "^4.8.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

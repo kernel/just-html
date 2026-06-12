@@ -68,3 +68,21 @@ export function htmlResponse(html: string, init?: ResponseInit): Response {
     },
   });
 }
+
+/** HTML-escape for safe interpolation into man-page bodies / attributes. */
+export function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** 303 redirect, optionally setting a cookie. */
+export function redirect(location: string, headers?: Record<string, string>): Response {
+  return new Response(null, {
+    status: 303,
+    headers: { Location: location, ...(headers ?? {}) },
+  });
+}
