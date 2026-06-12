@@ -37,6 +37,36 @@ ${errBlock}
   });
 }
 
+// Dashboard-lite landing for a signed-in session with no onward destination.
+// Account-less sessions (signed in, but no account yet — sign-up is agent-only)
+// get the "tell your agent to sign up" message; sessions bound to an account get
+// a short account summary. Man-page styled, zero JS.
+function dashboardPage(email: string, hasAccount: boolean): string {
+  const body = hasAccount
+    ? `<h1>SIGNED IN</h1>
+<section><pre>    You're signed in as <code>${esc(email)}</code>, and you have a justhtml.sh
+    account. Your documents live behind your API key.
+
+    Your agent publishes and manages docs with the key it received when
+    it signed you up. To view a private doc you own, open its share link
+    (the one carrying <code>?viewtoken=…</code>) — your agent has it.
+
+    See <a href="/llms.txt">/llms.txt</a> and <a href="/api/spec.yaml">/api/spec.yaml</a> for the full API.</pre></section>`
+    : `<h1>NO ACCOUNT YET</h1>
+<section><pre>    You're signed in as <code>${esc(email)}</code>, but you don't have a
+    justhtml.sh account yet.
+
+    Sign-up is agent-only — tell your agent to sign up at
+    <a href="/auth.md">justhtml.sh/auth.md</a>. It will register with this email, show you a
+    6-digit code and a link, and you confirm right here. You'll end up
+    with an account and your agent will hold the API key.</pre></section>`;
+  return manPage({
+    title: "justhtml.sh — account",
+    center: "ACCOUNT",
+    bodyHtml: body,
+  });
+}
+
 function checkEmailPage(): string {
   return manPage({
     title: "justhtml.sh — check your email",
@@ -55,12 +85,18 @@ function checkEmailPage(): string {
   });
 }
 
-// GET /login?next=… — render the form (or 303 if already signed in).
+// GET /login?next=… — render the form, or if already signed in: redirect to a
+// real onward destination, else show the dashboard-lite account landing (which
+// carries the "no account yet — tell your agent to sign up" message for
+// account-less sessions).
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const next = sanitizeNext(url.searchParams.get("next"));
   const session = await getSession(req);
-  if (session) return redirect(next);
+  if (session) {
+    if (next !== "/") return redirect(next);
+    return htmlResponse(dashboardPage(session.email, session.user_id != null));
+  }
   return htmlResponse(loginForm(next));
 }
 
