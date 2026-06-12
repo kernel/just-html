@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>justhtml.sh — comment overlay — design iteration</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;color:#111;background:#f3f3f3;
+    font-size:13px;line-height:1.5}
+  header{background:#fafafa;border-bottom:1px solid #ccc;padding:.9rem 1.1rem}
+  header h1{margin:0;font-size:15px}
+  header p{margin:.4rem 0 0;color:#555;max-width:60rem}
+  header a{color:#0000ee}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:14px;padding:14px}
+  .cell{background:#fff;border:1px solid #ccc;border-radius:6px;overflow:hidden;display:flex;flex-direction:column}
+  .cell .lbl{padding:7px 10px;border-bottom:1px solid #eee;background:#fafafa;display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+  .cell .lbl .name{font-weight:700}
+  .cell .lbl .intent{color:#666;font-weight:400;font-size:11.5px;flex:1}
+  .cell .lbl a{color:#0000ee;flex-shrink:0;white-space:nowrap}
+  .framewrap{position:relative;height:560px;background:#fff;overflow:hidden}
+  /* scale down a 1280-wide render so two-column layouts (rail) are visible */
+  iframe{border:none;width:1280px;height:800px;transform:scale(.56);transform-origin:top left;background:#fff}
+  .note{padding:14px;color:#666;font-size:12px;max-width:60rem;line-height:1.6}
+  .note h2{font-size:13px;margin:1rem 0 .3rem;color:#111}
+  .note ul{margin:.3rem 0;padding-left:1.2rem}
+  .note code{background:#eee;padding:0 3px;border-radius:2px}
+  @media (max-width:920px){.grid{grid-template-columns:1fr}.framewrap{height:440px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>justhtml.sh — comment overlay — design iteration</h1>
+  <p>Four side-by-side takes on the Phase-2 comment overlay. Each renders a faked
+  doc inside the real man-page viewer chrome (the overlay lives in the shell over a
+  sandboxed iframe in production). All variants implement every interaction:
+  hover-to-open thread, click-to-pin, reply, selection toolbar, add-comment, emoji
+  reaction, plus a resolved thread and an orphaned comment. Frames are scaled down —
+  use <strong>open full screen</strong> to interact properly.</p>
+</header>
+
+<div class="grid">
+  <div class="cell">
+    <div class="lbl"><span><span class="name">A — margin bubbles</span> (literal spec)</span>
+      <span class="intent">avatar bubbles in the right margin; hover pops a modal beside the bubble; vertical icon toolbar on selection.</span>
+      <a href="variant-a.html" target="_blank">open full screen ↗</a></div>
+    <div class="framewrap"><iframe src="variant-a.html" title="Variant A" loading="lazy"></iframe></div>
+  </div>
+
+  <div class="cell">
+    <div class="lbl"><span><span class="name">B — google-docs rail</span></span>
+      <span class="intent">bubbles collapse into a persistent right rail; cards align to highlights and expand in place to reply.</span>
+      <a href="variant-b.html" target="_blank">open full screen ↗</a></div>
+    <div class="framewrap"><iframe src="variant-b.html" title="Variant B" loading="lazy"></iframe></div>
+  </div>
+
+  <div class="cell">
+    <div class="lbl"><span><span class="name">C — man-page footnotes</span></span>
+      <span class="intent">no avatars, no fill: anchors get superscript [1][2] markers; monospace footnote cards; text-button toolbar.</span>
+      <a href="variant-c.html" target="_blank">open full screen ↗</a></div>
+    <div class="framewrap"><iframe src="variant-c.html" title="Variant C" loading="lazy"></iframe></div>
+  </div>
+
+  <div class="cell">
+    <div class="lbl"><span><span class="name">D — synthesis</span> (quiet marginalia)</span>
+      <span class="intent">doc looks untouched at rest (dotted underline + margin dots); highlight is a transient hover state that blooms a docs-capable card.</span>
+      <a href="variant-d.html" target="_blank">open full screen ↗</a></div>
+    <div class="framewrap"><iframe src="variant-d.html" title="Variant D" loading="lazy"></iframe></div>
+  </div>
+</div>
+
+<div class="note">
+  <h2>Design tension explored</h2>
+  <ul>
+    <li><strong>A vs B</strong> — floating margin bubbles (low footprint, but stacking/collision problems when comments cluster) vs a fixed rail (predictable layout, costs horizontal space, less "marginalia").</li>
+    <li><strong>C</strong> — pushes the brand's man-page restraint to its limit: comments read as footnotes, never compete with the prose. Risk: avatars/identity are deemphasized.</li>
+    <li><strong>D</strong> — argues the heaviest Google-Docs element is the <em>permanent</em> yellow fill; making it a hover-only state lets a full comment layer coexist with a light man-page doc.</li>
+  </ul>
+  <h2>Judgments made beyond the spec</h2>
+  <ul>
+    <li><strong>Overlapping highlights / clustered bubbles:</strong> A and D push colliding margin markers down by a min-gap; B aligns rail cards to highlight tops but never lets two cards overlap (each card's top is clamped below the previous card's bottom — the Google-Docs algorithm). C sidesteps it entirely with thin text rows.</li>
+    <li><strong>Orphaned comments:</strong> A/D show a hollow/dashed margin marker with no in-text highlight; B shows a dashed card in the rail under the anchored ones; C lists them in a dedicated <code>ORPHANED</code> section at the doc's end — the most honest footnote treatment.</li>
+    <li><strong>Resolved threads:</strong> dimmed + collapsed everywhere; B/C gate them behind a show-resolved toggle (matches the all-threads-view spec); the highlight degrades to a faint dashed underline rather than a fill.</li>
+    <li><strong>Zero comments:</strong> every variant renders the bare doc + chrome with no gutter additions (toggle comments off to see it).</li>
+    <li><strong>Cross-element anchors:</strong> anchoring is against rendered text content (W3C text-quote), with a whitespace-normalized fallback search, so a quote spanning element boundaries still resolves; if DOM-wrapping the span fails, the bubble/dot still appears (anchor known, highlight skipped).</li>
+    <li><strong>Mobile:</strong> not a primary target (agent-authored docs are read on desktop), but the rail (B) would become a bottom sheet and margin markers (A/C/D) would dock to the right edge; the comparison grid collapses to one column under 920px.</li>
+    <li><strong>Hover-intent:</strong> all hover-to-open variants use a ~120ms open delay, a ~160ms close delay, and an invisible hover-bridge element between marker and card so the cursor can cross the gap without flicker.</li>
+  </ul>
+</div>
+</body>
+</html>

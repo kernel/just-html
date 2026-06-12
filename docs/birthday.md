@@ -244,6 +244,32 @@ orphaning is an acceptable, legible failure mode.
   highlight, marked orphaned.
 - Design demos/variations explored 2026-06-12 in `design/comments-demo/`.
 
+**CHOSEN (founder, 2026-06-12): variant B — google-docs rail.** Persistent
+right comment rail when comments exist (zero comments → zero chrome); cards
+align to their highlight's vertical position with no-overlap clamping;
+cards expand in place to reply; show-resolved toggle; orphaned = dashed rail
+card; Gravatar avatars; selection still gets the floating toolbar for
+add-comment/react. Reference implementation: `design/comments-demo/variant-b.html`.
+Comment-level reactions confirmed in scope (reactions.comment_id).
+
+**Production architecture**: the rail lives in the shell (third React
+surface). User HTML stays in the origin-less sandboxed iframe; the
+iframe-embedded rendering (and ONLY it — direct /d/:slug/raw fetches stay
+byte-pristine) carries an injected overlay script that talks to the shell
+via postMessage: shell sends anchors → overlay resolves text-quotes, paints
+highlights, reports y-positions; overlay reports text selections → shell
+shows the toolbar/compose.
+
+**Permission matrix (decided 2026-06-12)**:
+- Comment: owner, editor grant, commenter grant, token-holder with identity,
+  or any identity on a public doc. Identity = session email or API key —
+  anonymous never writes.
+- React: anyone who can view, with identity (viewer grants included).
+- Resolve/unresolve: anyone who can comment. Delete: author (own), owner (any).
+- Reactions are attributed-only (unique per target+author+emoji; toggle by
+  re-click). The earlier "reactions anonymous-allowed" inclination is
+  dropped — the dedup constraint needs an author.
+
 ### All-threads view
 
 The viewer shell's comment sidebar lists **every** thread (Google-Docs

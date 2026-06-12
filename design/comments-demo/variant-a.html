@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variant A — margin bubbles — justhtml.sh comments</title>
+<!--
+  ARCHITECTURE NOTE (demo only):
+  In production the user's HTML lives in a sandboxed, origin-less iframe
+  (/d/:slug/raw, CSP: sandbox allow-scripts). The comment OVERLAY lives in the
+  SHELL (the React /d/:slug page), positioned ABOVE the iframe. The shell can't
+  read the iframe DOM cross-origin, so anchoring works by: shell asks iframe (via
+  postMessage) to resolve a W3C text-quote anchor {exact,prefix,suffix} to a
+  client-rect, and to report window.getSelection() rects back out. Highlights are
+  drawn by the iframe content (a tiny injected script) OR as absolutely-positioned
+  shell overlays aligned to reported rects.
+  HERE, for design exploration, we fake the doc inline in the same document and
+  resolve anchors directly against the DOM. Everything else (bubbles, hover modal,
+  pin-on-click, reply, selection toolbar, reactions) is the real intended UX.
+
+  VARIANT A — closest literal reading of the founder spec:
+    google-docs highlight on the span, a small avatar BUBBLE in the right margin,
+    hover -> modal near the bubble, click to pin + reply, vertical selection toolbar.
+-->
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;color:#111;background:#fff}
+
+  /* --- shell chrome (copied from live /d/:slug) --- */
+  .jh-bar{display:flex;justify-content:space-between;align-items:center;height:2.4rem;
+    padding:0 0.9rem;font-size:13px;border-bottom:1px solid #ccc;color:#111;background:#fafafa}
+  .jh-bar .jh-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+  .jh-bar .jh-credit{flex-shrink:0;padding-left:0.9rem;display:flex;gap:.9rem;align-items:center}
+  .jh-bar a{color:#0000ee}
+  .jh-bar .jh-cc{font-size:12px;color:#555;border:1px solid #ccc;background:#fff;border-radius:3px;
+    padding:1px 7px;cursor:pointer}
+  .jh-bar .jh-cc[aria-pressed=true]{background:#111;color:#fff;border-color:#111}
+
+  /* --- the "iframe" stand-in. In prod this is a sandboxed iframe; the doc text
+         is the USER's HTML, served origin-less. --- */
+  .stage{position:relative;height:calc(100vh - 2.4rem);overflow:auto;background:#fff}
+  .doc{max-width:46rem;margin:0 auto;padding:2.2rem 1.2rem 8rem;
+    font-family:Georgia,"Times New Roman",serif;font-size:16px;line-height:1.65;color:#1a1a1a}
+  .doc h1{font-size:1.5rem;margin:.2rem 0 1rem}
+  .doc h2{font-size:1.1rem;margin:2rem 0 .5rem;font-family:ui-monospace,monospace;color:#333}
+  .doc p{margin:.8rem 0}
+  .doc pre{font-family:ui-monospace,monospace;font-size:13px;background:#f6f6f6;border:1px solid #e3e3e3;
+    border-radius:4px;padding:.8rem;overflow:auto;line-height:1.45}
+  .doc ul{margin:.6rem 0;padding-left:1.4rem}
+  .doc li{margin:.3rem 0}
+  .doc code{font-family:ui-monospace,monospace;font-size:.9em;background:#f0f0f0;padding:0 3px;border-radius:3px}
+
+  /* google-docs style highlight */
+  .hl{background:#fff3bf;cursor:pointer;border-bottom:1px solid #f1d96b;transition:background .12s}
+  .hl:hover,.hl.flash{background:#ffe89e}
+  .hl.resolved{background:transparent;border-bottom:1px dashed #cbd3da;color:#6b7680}
+
+  /* inline reaction chip dropped on the doc */
+  .inline-react{display:inline-block;font-size:12px;background:#fff;border:1px solid #d8d8d8;
+    border-radius:10px;padding:0 5px;margin-left:4px;vertical-align:.1em;font-family:ui-monospace,monospace;
+    line-height:1.5;user-select:none}
+
+  /* --- overlay layer (lives in the shell over the iframe) --- */
+  #overlay{position:absolute;inset:0;pointer-events:none}
+  #overlay > *{pointer-events:auto}
+
+  /* margin bubble */
+  .bubble{position:absolute;width:30px;height:30px;border-radius:50%;border:1px solid #ccc;
+    background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.12);cursor:pointer;display:flex;
+    align-items:center;justify-content:center;transition:transform .1s,box-shadow .1s}
+  .bubble img{width:26px;height:26px;border-radius:50%;display:block}
+  .bubble:hover{transform:scale(1.06);box-shadow:0 2px 7px rgba(0,0,0,.2)}
+  .bubble .cnt{position:absolute;top:-6px;right:-6px;background:#111;color:#fff;font-size:10px;
+    font-family:ui-monospace,monospace;min-width:15px;height:15px;border-radius:8px;display:flex;
+    align-items:center;justify-content:center;padding:0 3px}
+  .bubble.resolved{opacity:.42;filter:grayscale(1)}
+  .bubble.orphan{border-style:dashed;border-color:#c44}
+
+  /* invisible hover bridge between bubble and modal so the cursor can cross */
+  .bridge{position:absolute;background:transparent}
+
+  /* thread modal */
+  .modal{position:absolute;width:288px;background:#fff;border:1px solid #cfcfcf;border-radius:7px;
+    box-shadow:0 6px 24px rgba(0,0,0,.18);font-family:ui-monospace,monospace;font-size:12px;
+    z-index:20;overflow:hidden}
+  .modal.pinned{box-shadow:0 8px 30px rgba(0,0,0,.26);border-color:#111}
+  .modal .mhdr{display:flex;justify-content:space-between;align-items:center;padding:5px 9px;
+    background:#fafafa;border-bottom:1px solid #eee;color:#666;font-size:11px}
+  .modal .mhdr .pin-state{letter-spacing:.04em}
+  .modal .mhdr .x{cursor:pointer;color:#999;font-weight:700;padding:0 3px}
+  .modal .mhdr .x:hover{color:#111}
+  .cmt{padding:8px 10px;border-bottom:1px solid #f1f1f1}
+  .cmt:last-child{border-bottom:none}
+  .cmt.reply{padding-left:22px;background:#fcfcfc}
+  .cmt .crow{display:flex;gap:7px;align-items:flex-start}
+  .cmt img{width:22px;height:22px;border-radius:50%;flex-shrink:0}
+  .cmt .who{font-weight:700;color:#222}
+  .cmt .when{color:#999;font-size:10.5px}
+  .cmt .body{color:#222;line-height:1.5;margin-top:2px;font-family:Georgia,serif;font-size:13px}
+  .cmt .rx{margin-top:5px;display:flex;gap:4px;flex-wrap:wrap}
+  .rx .chip{font-size:11px;border:1px solid #ddd;border-radius:9px;padding:0 6px;background:#fafafa;cursor:pointer}
+  .rx .chip:hover{background:#f0f0f0}
+  .rx .chip.add{color:#999}
+  .resolved-banner{padding:5px 10px;background:#f3f6f4;color:#5a7a64;font-size:11px;border-bottom:1px solid #e4ece6}
+  .orphan-banner{padding:5px 10px;background:#fcf0f0;color:#b04a4a;font-size:11px;border-bottom:1px solid #f0dcdc}
+
+  /* reply / compose box */
+  .compose{padding:7px 9px;background:#fafafa;border-top:1px solid #eee;display:none}
+  .modal.pinned .compose{display:block}
+  .compose textarea{width:100%;border:1px solid #d4d4d4;border-radius:4px;font-family:ui-monospace,monospace;
+    font-size:12px;padding:5px;resize:vertical;min-height:34px;color:#111}
+  .compose .crow2{display:flex;justify-content:space-between;align-items:center;margin-top:5px}
+  .compose .me{display:flex;align-items:center;gap:5px;color:#777;font-size:11px}
+  .compose .me img{width:18px;height:18px;border-radius:50%}
+  .compose button{font-family:ui-monospace,monospace;font-size:12px;border:1px solid #111;background:#111;
+    color:#fff;border-radius:4px;padding:3px 11px;cursor:pointer}
+  .compose button:disabled{opacity:.4;cursor:default}
+  .modal .hint-click{padding:5px 10px;background:#fffdf2;color:#9a8a3a;font-size:10.5px;border-top:1px solid #f0ead0}
+  .modal.pinned .hint-click{display:none}
+
+  /* selection toolbar — vertical, off to the side */
+  .seltool{position:absolute;display:none;flex-direction:column;gap:2px;background:#111;border-radius:7px;
+    padding:4px;box-shadow:0 4px 14px rgba(0,0,0,.3);z-index:30}
+  .seltool button{width:30px;height:30px;border:none;background:transparent;color:#fff;font-size:15px;
+    cursor:pointer;border-radius:5px;display:flex;align-items:center;justify-content:center}
+  .seltool button:hover{background:#333}
+  .emojibar{position:absolute;display:none;background:#fff;border:1px solid #ccc;border-radius:18px;
+    padding:3px 6px;box-shadow:0 4px 14px rgba(0,0,0,.2);z-index:31;gap:2px}
+  .emojibar button{border:none;background:transparent;font-size:17px;cursor:pointer;padding:2px 4px;border-radius:50%}
+  .emojibar button:hover{background:#f0f0f0}
+
+  /* compose-from-selection popover */
+  .selcompose{position:absolute;display:none;width:250px;background:#fff;border:1px solid #111;border-radius:7px;
+    box-shadow:0 8px 26px rgba(0,0,0,.24);z-index:32;font-family:ui-monospace,monospace}
+  .selcompose .sc-q{padding:6px 9px;font-size:11px;color:#777;border-bottom:1px solid #eee;
+    background:#fff3bf;font-style:italic;max-height:42px;overflow:hidden}
+  .selcompose textarea{width:100%;border:none;font-family:ui-monospace,monospace;font-size:12px;padding:8px 9px;
+    resize:vertical;min-height:42px;color:#111;outline:none}
+  .selcompose .sc-row{display:flex;justify-content:space-between;align-items:center;padding:6px 9px;
+    border-top:1px solid #eee}
+  .selcompose .sc-row .me{display:flex;align-items:center;gap:5px;color:#777;font-size:11px}
+  .selcompose .sc-row .me img{width:18px;height:18px;border-radius:50%}
+  .selcompose button.go{border:1px solid #111;background:#111;color:#fff;border-radius:4px;padding:3px 11px;
+    font-family:ui-monospace,monospace;font-size:12px;cursor:pointer}
+
+  .legend{position:fixed;bottom:8px;left:8px;font-size:10px;color:#aaa;font-family:ui-monospace,monospace;
+    background:#fff;border:1px solid #eee;border-radius:4px;padding:3px 7px;max-width:60%}
+</style>
+</head>
+<body>
+<div class="jh-bar">
+  <span class="jh-title">RECTL(1) — record-control utility — design spec</span>
+  <span class="jh-credit">
+    <button class="jh-cc" id="toggleComments" aria-pressed="true">comments: on</button>
+    made with <a href="#">justhtml.sh</a>
+  </span>
+</div>
+
+<div class="stage" id="stage">
+  <!-- This .doc is the stand-in for the sandboxed user iframe. -->
+  <article class="doc" id="doc">
+    <h1>RECTL(1) — record-control utility</h1>
+
+    <h2>NAME</h2>
+    <p>rectl — append-only record store with deterministic compaction.</p>
+
+    <h2>SYNOPSIS</h2>
+    <p><code>rectl [--store PATH] &lt;command&gt; [args]</code></p>
+
+    <h2>DESCRIPTION</h2>
+    <p>rectl manages an append-only log of records. Writes never mutate existing
+    entries; instead every write produces a new immutable segment. Compaction
+    runs synchronously inside the write transaction, so a reader never observes a
+    half-compacted store. This keeps the failure modes legible: either a write
+    landed whole, or it did not land at all.</p>
+
+    <p>The store is durable into the multi-gigabyte range on a single node. We cap
+    individual record bodies at two megabytes; anything larger should be stored by
+    reference. Each segment retains a full snapshot rather than a diff, which makes
+    point-in-time reads cheap at the cost of disk we are happy to spend.</p>
+
+    <h2>COMPACTION</h2>
+    <p>Compaction is a three-tier process, smartest first. Tier one maps offsets
+    through known edits and is exact. Tier two re-finds records by content when
+    offsets are ambiguous. Tier three gives up honestly and marks the record
+    orphaned rather than guessing — an acceptable, legible failure mode.</p>
+
+    <pre>$ rectl --store ./data put "hello"
+wrote segment 0007 (snapshot, 41 bytes)
+$ rectl --store ./data compact
+tier1: 3 mapped  tier2: 1 refound  tier3: 1 orphaned</pre>
+
+    <h2>FLAGS</h2>
+    <ul>
+      <li><code>--store PATH</code> — directory holding segments (required).</li>
+      <li><code>--base-version N</code> — refuse the write if the head moved (optimistic concurrency).</li>
+      <li><code>--json</code> — emit machine-readable output for agents.</li>
+    </ul>
+
+    <h2>NOTES</h2>
+    <p>Concurrent writers are serialized with a row lock; transactions are short, so
+    queueing is invisible in practice. There is no background sweeper — state is
+    derived, never swept. This whole paragraph is deliberately uncommented so you
+    have empty text to select and try the toolbar on.</p>
+  </article>
+
+  <div id="overlay"></div>
+</div>
+
+<!-- floating UI, appended to body / overlay at runtime -->
+<div class="seltool" id="seltool">
+  <button title="add comment" data-act="comment">💬</button>
+  <button title="add reaction" data-act="react">😊</button>
+</div>
+<div class="emojibar" id="emojibar"></div>
+<div class="selcompose" id="selcompose">
+  <div class="sc-q" id="scQuote"></div>
+  <textarea id="scText" placeholder="Comment…"></textarea>
+  <div class="sc-row">
+    <span class="me"><img id="scAvatar" alt=""> raf@kernel.sh</span>
+    <button class="go" id="scGo">Comment</button>
+  </div>
+</div>
+
+<div class="legend">Variant A — margin bubbles + hover modal + vertical selection toolbar. Select doc text to try the toolbar.</div>
+
+<script>
+/* ---------- mock data: shaped like the real `comments` model ---------- */
+const ME = "raf@kernel.sh";
+const EMOJIS = ["👍","🎉","🤔","❤️","🚀","👀"];
+const gravatar = {
+  "raf@kernel.sh":"d90cdba524aef2d5fa01aae4092131a770419bf3f9af02cb37e1f2381cd6704f",
+  "hi@raf.xyz":"9f3663fe7dcb7d39251d2f55840b94cd542688be7da210ba04cc35b25cc7c089",
+};
+function av(email,s){const h=gravatar[email]||gravatar[ME];return `https://gravatar.com/avatar/${h}?d=identicon&s=${s||64}`;}
+
+let comments = [
+  { id:"c1", author:ME, body:"Should we name the snapshot retention cap here? Readers will ask.",
+    anchor:{exact:"full snapshot rather than a diff", prefix:"Each segment retains a ", suffix:", which makes"},
+    parent_id:null, resolved:false, orphaned:false, reactions:[{emoji:"👍",by:"hi@raf.xyz"}] },
+  { id:"c1r1", author:"hi@raf.xyz", body:"Agreed — link to LIMITS once that section lands.",
+    anchor:null, parent_id:"c1", resolved:false, orphaned:false, reactions:[] },
+  { id:"c1r2", author:ME, body:"Will do. 100 versions/store feels right.",
+    anchor:null, parent_id:"c1", resolved:false, orphaned:false, reactions:[] },
+
+  { id:"c2", author:"hi@raf.xyz", body:"Love this framing — 'either it landed whole or not at all'. Keep verbatim.",
+    anchor:{exact:"either a write\n    landed whole, or it did not land at all", prefix:"the failure modes legible: ", suffix:"."},
+    parent_id:null, resolved:false, orphaned:false, reactions:[{emoji:"❤️",by:ME},{emoji:"🎉",by:"hi@raf.xyz"}] },
+
+  { id:"c3", author:ME, body:"Resolved: we agreed orphaning is fine, no LLM re-anchoring in v1.",
+    anchor:{exact:"marks the record\n    orphaned rather than guessing", prefix:"give up honestly and ", suffix:" — an acceptable"},
+    parent_id:null, resolved:true, orphaned:false, reactions:[] },
+  { id:"c3r1", author:"hi@raf.xyz", body:"+1, ship it.", anchor:null, parent_id:"c3", resolved:true, orphaned:false, reactions:[] },
+
+  /* orphaned: this exact text was edited away, so the anchor no longer resolves */
+  { id:"c4", author:"hi@raf.xyz", body:"This referred to the old 'vacuum' subcommand we renamed. Anchor lost.",
+    anchor:{exact:"run the vacuum subcommand nightly", prefix:"operators should ", suffix:" via cron"},
+    parent_id:null, resolved:false, orphaned:true, reactions:[] },
+];
+
+const reps = id => comments.filter(c=>c.parent_id===id && !c.orphaned);
+const roots = () => comments.filter(c=>c.parent_id===null);
+function timeFor(id){ // deterministic fake timestamps
+  const base=new Date("2026-06-10T14:00:00"); let n=0; for(const ch of id)n+=ch.charCodeAt(0);
+  const d=new Date(base.getTime()+ (n%72)*3600*1000);
+  return d.toLocaleString([], {month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+}
+
+/* ---------- anchor resolution (demo: against local DOM; prod: via postMessage to iframe) ---------- */
+const doc = document.getElementById("doc");
+const stage = document.getElementById("stage");
+const overlay = document.getElementById("overlay");
+
+function findTextRange(anchor){
+  // build full text + map of text-node offsets, then locate exact (preferring prefix/suffix agreement)
+  const walker=document.createTreeWalker(doc,NodeFilter.SHOW_TEXT,null);
+  let nodes=[],full="";
+  while(walker.nextNode()){const n=walker.currentNode;nodes.push({node:n,start:full.length});full+=n.nodeValue;}
+  const norm=s=>s.replace(/\s+/g," ").trim();
+  const exact=anchor.exact;
+  // try raw indexOf first, then whitespace-normalized search
+  let idx=full.indexOf(exact);
+  let matchLen=exact.length;
+  if(idx<0){
+    const nf=full.replace(/\s+/g," "), ne=norm(exact);
+    const ni=nf.indexOf(ne);
+    if(ni<0) return null;
+    // map normalized index back — approximate by walking raw chars
+    let raw=0,nrm=0;
+    while(nrm<ni){ if(/\s/.test(full[raw])){ while(/\s/.test(full[raw]))raw++; nrm++; } else {raw++;nrm++;} }
+    idx=raw;
+    // extend to cover the normalized exact length
+    let end=raw,count=0;
+    while(count<ne.length && end<full.length){ if(/\s/.test(full[end])){while(/\s/.test(full[end]))end++;count++;}else{end++;count++;} }
+    matchLen=end-raw;
+  }
+  const startOff=idx, endOff=idx+matchLen;
+  const locate=off=>{for(const e of nodes){if(off>=e.start&&off<=e.start+e.node.nodeValue.length)return {node:e.node,offset:off-e.start};}return null;};
+  const a=locate(startOff),b=locate(endOff);
+  if(!a||!b)return null;
+  const r=document.createRange(); r.setStart(a.node,a.offset); r.setEnd(b.node,b.offset);
+  return r;
+}
+
+/* wrap a resolved range in highlight spans (handles multi-node by using surroundContents on split) */
+function highlight(range,cls,cid){
+  const rects=[...range.getClientRects()];
+  // Use a robust approach: clone range contents into marks via Range.surroundContents when single node,
+  // else fall back to overlay rectangles. For demo simplicity we draw overlay rects (works across nodes).
+  return rects;
+}
+
+/* ---------- render highlights as marks where possible ---------- */
+function applyHighlights(){
+  // remove existing marks
+  doc.querySelectorAll(".hl").forEach(m=>{const p=m.parentNode;while(m.firstChild)p.insertBefore(m.firstChild,m);p.removeChild(m);p.normalize();});
+  roots().forEach(c=>{
+    if(c.orphaned||!c.anchor)return;
+    const r=findTextRange(c.anchor); if(!r)return;
+    try{
+      const span=document.createElement("span");
+      span.className="hl"+(c.resolved?" resolved":"");
+      span.dataset.cid=c.id;
+      span.appendChild(r.extractContents());
+      r.insertNode(span);
+      doc.normalize();
+    }catch(e){ /* cross-node selection: leave un-marked but bubble still shows */ }
+  });
+}
+
+/* ---------- bubbles + modal ---------- */
+let openModal=null, pinned=false, hoverTimer=null, leaveTimer=null;
+
+function clearOverlay(){ overlay.querySelectorAll(".bubble,.bridge").forEach(e=>e.remove()); }
+
+function bubbleY(c){
+  const span=doc.querySelector('.hl[data-cid="'+c.id+'"]');
+  if(span){const r=span.getBoundingClientRect(),sr=stage.getBoundingClientRect();return r.top-sr.top+stage.scrollTop+2;}
+  return null;
+}
+
+function layoutBubbles(){
+  clearOverlay();
+  const sr=stage.getBoundingClientRect();
+  const used=[];
+  // anchored + doc-level + orphaned, each gets a margin bubble
+  let orphanStack=0;
+  roots().forEach(c=>{
+    let y=bubbleY(c);
+    const orphan=c.orphaned||(!c.orphaned&&c.anchor&&y===null);
+    if(y===null){ // orphaned / unresolved -> stack near bottom of viewport-ish in margin
+      y = stage.scrollTop + sr.height - 60 - orphanStack*40; orphanStack++;
+    }
+    // avoid vertical overlap
+    while(used.some(u=>Math.abs(u-y)<34)) y+=34;
+    used.push(y);
+    const b=document.createElement("div");
+    b.className="bubble"+(c.resolved?" resolved":"")+(orphan?" orphan":"");
+    b.style.left=(doc.getBoundingClientRect().right - sr.left + 18)+"px";
+    b.style.top=y+"px";
+    b.dataset.cid=c.id;
+    const im=new Image(); im.src=av(c.author,64); im.alt=c.author; b.appendChild(im);
+    const n=reps(c.id).length;
+    if(n){const cc=document.createElement("span");cc.className="cnt";cc.textContent=n+1;b.appendChild(cc);}
+    overlay.appendChild(b);
+    b.addEventListener("mouseenter",()=>onBubbleEnter(c,b));
+    b.addEventListener("mouseleave",()=>scheduleLeave());
+    b.addEventListener("click",e=>{e.stopPropagation();openThread(c,b,true);});
+  });
+}
+
+function onBubbleEnter(c,b){
+  clearTimeout(leaveTimer);
+  hoverTimer=setTimeout(()=>openThread(c,b,false),120); // hover-intent delay
+}
+function scheduleLeave(){
+  clearTimeout(hoverTimer);
+  if(pinned)return;
+  leaveTimer=setTimeout(closeModal,160);
+}
+
+function buildModal(c,pin){
+  const m=document.createElement("div");
+  m.className="modal"+(pin?" pinned":"");
+  if(c.resolved) m.innerHTML='<div class="resolved-banner">✓ resolved thread</div>';
+  if(c.orphaned) m.innerHTML='<div class="orphan-banner">⚠ orphaned — anchor no longer resolves</div>';
+  m.insertAdjacentHTML("beforeend",
+    `<div class="mhdr"><span class="pin-state">${pin?"pinned · click outside to close":"hover thread"}</span><span class="x" title="close">×</span></div>`);
+  const chain=[c,...reps(c.id)];
+  chain.forEach(cm=>{
+    const isReply=cm.parent_id!==null;
+    const rx=cm.reactions.map(r=>`<span class="chip" data-emoji="${r.emoji}">${r.emoji} ${cm.reactions.filter(x=>x.emoji===r.emoji).length}</span>`)
+      .filter((v,i,a)=>a.indexOf(v)===i).join("");
+    m.insertAdjacentHTML("beforeend",
+     `<div class="cmt ${isReply?'reply':''}">
+        <div class="crow"><img src="${av(cm.author,48)}" alt="">
+          <div><span class="who">${cm.author}</span> <span class="when">${timeFor(cm.id)}</span>
+          <div class="body">${esc(cm.body)}</div>
+          <div class="rx">${rx}<span class="chip add" data-add="${cm.id}">+ react</span></div>
+          </div></div></div>`);
+  });
+  m.insertAdjacentHTML("beforeend",`<div class="hint-click">click to reply…</div>`);
+  m.insertAdjacentHTML("beforeend",
+    `<div class="compose"><textarea placeholder="Reply…"></textarea>
+       <div class="crow2"><span class="me"><img src="${av(ME,36)}" alt=""> ${ME}</span>
+       <button disabled>Reply</button></div></div>`);
+  return m;
+}
+function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/\n/g," ");}
+
+function positionModal(m,b){
+  const sr=stage.getBoundingClientRect(), br=parseFloat(b.style.top);
+  // place to the right of the bubble, off the doc body
+  let left=parseFloat(b.style.left)+38;
+  if(left+296 > stage.clientWidth) left=parseFloat(b.style.left)-296; // flip if no room
+  m.style.left=left+"px";
+  m.style.top=Math.max(stage.scrollTop+4, br-6)+"px";
+  // hover bridge so cursor can travel bubble->modal without leaving
+  const bridge=document.createElement("div");
+  bridge.className="bridge";
+  const bx=parseFloat(b.style.left);
+  bridge.style.left=Math.min(bx,left)+"px";
+  bridge.style.top=(br-10)+"px";
+  bridge.style.width=Math.abs(left-bx)+60+"px";
+  bridge.style.height="56px";
+  overlay.appendChild(bridge);
+  bridge.addEventListener("mouseenter",()=>clearTimeout(leaveTimer));
+  bridge.addEventListener("mouseleave",scheduleLeave);
+}
+
+function openThread(c,b,pin){
+  if(openModal && openModal.dataset.cid===c.id && (pinned||!pin)){ if(pin)pinModal(); return; }
+  closeModal();
+  const m=buildModal(c,pin);
+  m.dataset.cid=c.id;
+  overlay.appendChild(m);
+  positionModal(m,b);
+  openModal=m; pinned=pin;
+  if(pin) b.style.visibility="hidden"; else b.style.visibility="hidden";
+  m._bubble=b;
+  m.addEventListener("mouseenter",()=>clearTimeout(leaveTimer));
+  m.addEventListener("mouseleave",scheduleLeave);
+  m.addEventListener("click",e=>{ if(!pinned){pinModal();} e.stopPropagation(); });
+  m.querySelector(".x").addEventListener("click",e=>{e.stopPropagation();closeModal();});
+  wireModal(m,c);
+}
+function pinModal(){
+  if(!openModal)return; pinned=true; openModal.classList.add("pinned");
+  openModal.querySelector(".pin-state").textContent="pinned · click outside to close";
+}
+function closeModal(){
+  if(!openModal)return;
+  if(openModal._bubble)openModal._bubble.style.visibility="visible";
+  openModal.remove(); overlay.querySelectorAll(".bridge").forEach(e=>e.remove());
+  openModal=null; pinned=false;
+}
+
+function wireModal(m,c){
+  const ta=m.querySelector(".compose textarea"), btn=m.querySelector(".compose button");
+  if(ta){
+    ta.addEventListener("input",()=>btn.disabled=!ta.value.trim());
+    btn.addEventListener("click",()=>{
+      if(!ta.value.trim())return;
+      comments.push({id:"r"+Date.now(),author:ME,body:ta.value.trim(),anchor:null,parent_id:c.id,resolved:false,orphaned:false,reactions:[]});
+      const cur=c; closeModal(); applyHighlights(); layoutBubbles();
+      const nb=overlay.querySelector('.bubble[data-cid="'+cur.id+'"]'); if(nb)openThread(cur,nb,true);
+    });
+  }
+  m.querySelectorAll(".chip.add").forEach(ch=>{
+    ch.addEventListener("click",e=>{e.stopPropagation();pinModal();showEmojiPicker(e.pageX,e.pageY,emoji=>{
+      const target = ch.dataset.add;
+      const cm=comments.find(x=>x.id===target);
+      cm.reactions.push({emoji,by:ME});
+      const cur=c; closeModal(); applyHighlights(); layoutBubbles();
+      const nb=overlay.querySelector('.bubble[data-cid="'+cur.id+'"]'); if(nb)openThread(cur,nb,true);
+    });});
+  });
+}
+
+/* close pinned modal on outside click */
+document.addEventListener("click",e=>{
+  if(pinned && openModal && !openModal.contains(e.target) && !e.target.closest(".bubble") && !e.target.closest(".emojibar")) closeModal();
+});
+
+/* ---------- selection toolbar ---------- */
+const seltool=document.getElementById("seltool"), emojibar=document.getElementById("emojibar"),
+      selcompose=document.getElementById("selcompose");
+let savedSel=null;
+
+document.getElementById("scAvatar").src=av(ME,36);
+
+EMOJIS.forEach(e=>{const b=document.createElement("button");b.textContent=e;b.dataset.emoji=e;emojibar.appendChild(b);});
+
+function anchorFromSelection(sel){
+  const r=sel.getRangeAt(0);
+  const exact=sel.toString();
+  // compute prefix/suffix from surrounding text
+  const pre=document.createRange(); pre.setStart(doc,0); pre.setEnd(r.startContainer,r.startOffset);
+  const post=document.createRange(); post.setStart(r.endContainer,r.endOffset);
+  post.setEnd(doc,doc.childNodes.length);
+  const prefix=pre.toString().slice(-32), suffix=post.toString().slice(0,32);
+  return {exact,prefix,suffix};
+}
+
+document.addEventListener("mouseup",e=>{
+  if(e.target.closest(".seltool")||e.target.closest(".selcompose")||e.target.closest(".emojibar")||e.target.closest(".modal"))return;
+  setTimeout(()=>{
+    const sel=window.getSelection();
+    if(!sel.rangeCount||sel.isCollapsed||!sel.toString().trim()||!doc.contains(sel.anchorNode)){hideSel();return;}
+    const r=sel.getRangeAt(0).getBoundingClientRect();
+    savedSel=anchorFromSelection(sel);
+    savedSel._rect={top:r.top+window.scrollY,bottom:r.bottom+window.scrollY,right:r.right,left:r.left};
+    // vertical toolbar off to the RIGHT of the selection
+    const docR=doc.getBoundingClientRect();
+    seltool.style.display="flex";
+    let lx=docR.right+10; if(lx+40>window.innerWidth)lx=r.right+10;
+    seltool.style.left=lx+"px";
+    seltool.style.top=(r.top+window.scrollY)+"px";
+  },10);
+});
+
+function hideSel(){seltool.style.display="none";emojibar.style.display="none";}
+
+seltool.querySelector('[data-act="comment"]').addEventListener("click",()=>{
+  seltool.style.display="none";
+  const r=savedSel._rect;
+  document.getElementById("scQuote").textContent="“"+savedSel.exact.slice(0,80)+(savedSel.exact.length>80?"…":"")+"”";
+  document.getElementById("scText").value="";
+  selcompose.style.display="block";
+  let lx=doc.getBoundingClientRect().right+10; if(lx+250>window.innerWidth)lx=r.left;
+  selcompose.style.left=lx+"px"; selcompose.style.top=r.top+"px";
+  document.getElementById("scText").focus();
+});
+seltool.querySelector('[data-act="react"]').addEventListener("click",()=>{
+  emojibar.style.display="flex";
+  emojibar.style.left=seltool.style.left; emojibar.style.top=(parseFloat(seltool.style.top)+70)+"px";
+});
+emojibar.addEventListener("click",e=>{
+  if(!e.target.dataset.emoji)return;
+  // drop an inline reaction chip at the end of the selection
+  dropInlineReaction(e.target.dataset.emoji);
+  hideSel(); window.getSelection().removeAllRanges();
+});
+function dropInlineReaction(emoji){
+  const sel=window.getSelection(); if(!sel.rangeCount)return;
+  const r=sel.getRangeAt(0); r.collapse(false);
+  const chip=document.createElement("span"); chip.className="inline-react"; chip.textContent=emoji;
+  try{r.insertNode(chip);}catch(e){}
+}
+
+document.getElementById("scGo").addEventListener("click",()=>{
+  const t=document.getElementById("scText").value.trim(); if(!t)return;
+  comments.push({id:"n"+Date.now(),author:ME,body:t,anchor:{exact:savedSel.exact,prefix:savedSel.prefix,suffix:savedSel.suffix},parent_id:null,resolved:false,orphaned:false,reactions:[]});
+  selcompose.style.display="none"; window.getSelection().removeAllRanges();
+  applyHighlights(); layoutBubbles();
+});
+
+/* emoji picker used inside modal */
+function showEmojiPicker(x,y,cb){
+  emojibar.style.display="flex"; emojibar.style.left=x+"px"; emojibar.style.top=y+"px";
+  emojibar._cb=cb;
+  emojibar.querySelectorAll("button").forEach(b=>b.onclick=()=>{emojibar.style.display="none";cb(b.dataset.emoji);});
+}
+
+/* ---------- comments on/off toggle (zero-comments => looks like today) ---------- */
+const toggle=document.getElementById("toggleComments");
+let on=true;
+toggle.addEventListener("click",()=>{
+  on=!on; toggle.setAttribute("aria-pressed",on); toggle.textContent="comments: "+(on?"on":"off");
+  if(on){applyHighlights();layoutBubbles();} else {closeModal();clearOverlay();applyHighlights.off?0:0;
+    doc.querySelectorAll(".hl").forEach(m=>{const p=m.parentNode;while(m.firstChild)p.insertBefore(m.firstChild,m);p.removeChild(m);});doc.normalize();}
+});
+
+/* ---------- highlight click -> open thread ---------- */
+doc.addEventListener("click",e=>{
+  const hl=e.target.closest(".hl"); if(!hl)return;
+  const c=comments.find(x=>x.id===hl.dataset.cid);
+  const b=overlay.querySelector('.bubble[data-cid="'+c.id+'"]');
+  if(b)openThread(c,b,true);
+});
+
+/* ---------- init + reflow ---------- */
+function reflow(){ if(on){layoutBubbles();} }
+applyHighlights(); layoutBubbles();
+stage.addEventListener("scroll",()=>{ if(openModal&&!pinned)closeModal(); });
+window.addEventListener("resize",()=>{applyHighlights();reflow();});
+</script>
+</body>
+</html>
