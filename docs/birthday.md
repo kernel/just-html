@@ -504,18 +504,34 @@ surface is literally just HTML off a handler.
 3. ~~Buy `justhtml.sh`~~ — DONE, purchased in Kernel's Vercel account
    (2026-06-12). Just attach it to the project.
 
-**Phase 1 — core product**
-3. Scaffold Next.js app, schema + migrations.
-4. auth.md flow end-to-end: registration → spec-pure claim ceremony (hosted
-   verification form) → key issuance; plus `/login` magic-link sessions
-   (real Resend email, man-page styled).
-5. Docs CRUD + viewer routes (sandboxed rendering), doc_versions on every write.
-6. Patch engine (vendor pi edit-diff logic) + `/edits` endpoint + FOR UPDATE /
-   base_version concurrency.
-7. Grants API + editor-role enforcement (teammate's-agent sharing).
-8. History API + `/d/:slug/history` page (@pierre/diffs).
-9. Discovery files: llms.txt, spec.yaml, auth.md, .well-known.
-10. Man-page homepage + rate limits.
+**Phase 1 — core product** (re-cut 2026-06-12 into deployable increments;
+each increment ships to production at justhtml.sh, is adversarially reviewed
+against this plan, and live-QA'd before the next begins. Direct pushes to
+main + prod — brand-new project, no backwards compatibility.)
+
+- **B1 Foundation**: Next.js scaffold (route-handler-first), full v1 schema +
+  migrations against PlanetScale, Vercel deploy pipeline (attach justhtml.sh,
+  push env vars, prod deploy), placeholder man-page homepage.
+  QA: https://justhtml.sh serves; schema matches plan.
+- **B2 Auth**: sessions + `/login` magic links (Resend, man-page email),
+  registration + spec-pure claim ceremony, `/oauth2/token` (claim grant) +
+  `/oauth2/revoke`, `.well-known` discovery + `/auth.md`, auth-flow rate
+  limits. Includes an **env-gated QA endpoint** (strong secret) to retrieve
+  login links during automated tests — documented, removable post-launch.
+  QA: full agent registration ceremony against production; negative cases
+  (wrong code ×5, expiry, email mismatch, rate limits).
+- **B3 Documents**: docs CRUD, slugs + view tokens, `/d/:slug` shell +
+  `/d/:slug/raw` sandbox, doc_versions on every write, size/count quotas.
+  QA: private/public doc lifecycle, sandbox CSP headers, token rotation.
+- **B4 Editing**: `/edits` patch engine (vendored pi edit-diff), FOR UPDATE +
+  base_version 409s, history API + `/d/:slug/history` (@pierre/diffs).
+  QA: patches, ambiguity 422s, staleness 409s, concurrent writes, history UI.
+- **B5 Sharing**: grants API (email + domain), editor enforcement,
+  consumer-domain rejection. QA: second agent registers as a teammate
+  (raf+qa-*@kernel.sh) and edits a shared doc.
+- **B6 Discovery & polish**: llms.txt, `/api/spec.yaml` (OpenAPI 3.1),
+  man-page homepage with the copy-pasteable agent prompt, API rate limits,
+  run both acceptance tests end-to-end.
 
 **Acceptance tests**:
 - A fresh Claude session pointed only at `justhtml.sh` can register a user,
