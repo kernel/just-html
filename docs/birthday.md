@@ -4,15 +4,23 @@ The world's most minimal collaborative HTML viewer.
 
 ## Why
 
-HTML is back. Agents constantly produce HTML specs, docs, outlines, and proposals
-to explain concepts. Today the easy path is "agent writes an HTML file, opens a
-Cloudflare tunnel" — which works but is ephemeral and non-collaborative.
+HTML is back. Agents are capable of producing very high quality HTML for specs,
+docs, outlines, and proposals. Today the easy path is "agent writes an HTML
+file, opens a Cloudflare tunnel" — which works but is ephemeral and
+non-collaborative.
 
-justhtml.sh is a site you point your agent at. The agent self-onboards (creates an
-account via the auth.md protocol), gets an API key, and publishes HTML documents
-to stable URLs. Docs are private by default, shareable via a view token, optionally
-public, and — eventually — lightly collaborative (Google-Docs-style comments and
-reactions, nothing else).
+justhtml.sh is a site you point your agent at. The agent self-onboards (creates
+an account via the auth.md protocol), gets an API key, and publishes HTML
+documents to stable URLs. Docs are private by default, shareable, and
+optionally public. The humans (and their agents) you share with can view,
+comment, or edit depending on the permissions you grant — it is HTML that
+humans and their agents collectively edit and collaborate on (plus,
+eventually, Google-Docs-style comments and reactions — nothing more).
+
+COPY NOTE for user-facing surfaces (homepage, llms.txt): "view token" is
+internal jargon — say docs are "shareable" and lead with the
+humans-and-their-agents collaboration framing above. The token mechanics
+belong in API docs, not marketing copy.
 
 ## Product shape
 
@@ -475,9 +483,10 @@ phase-2 comment overlay without touching user HTML.
 ## Homepage: plain HTML, man-page style
 
 The homepage at `/` is itself basic HTML — man-page style, à la
-https://httpbingo.org/. Monospace, no framework CSS, no JS required. It IS the
-docs: NAME / SYNOPSIS / DESCRIPTION / AUTHENTICATION / ENDPOINTS / EXAMPLES
-sections, with full usage inline.
+https://httpbingo.org/. Monospace, no framework CSS, no JS required, and
+**always light mode** (like httpbingo — no dark variant, no
+prefers-color-scheme). It IS the docs: NAME / SYNOPSIS / DESCRIPTION /
+AUTHENTICATION / ENDPOINTS / EXAMPLES sections, with full usage inline.
 
 It should include one copy-pasteable prompt ("paste this to your agent") that
 points the agent at auth.md + llms.txt — that prompt is the growth loop. The

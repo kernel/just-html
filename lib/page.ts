@@ -2,7 +2,7 @@
 // httpbingo.org / Unix man-page vibe. This is the brand.
 
 const STYLE = `
-  :root { color-scheme: light dark; }
+  :root { color-scheme: light; }
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -15,11 +15,6 @@ const STYLE = `
     max-width: 760px;
     margin-left: auto;
     margin-right: auto;
-  }
-  @media (prefers-color-scheme: dark) {
-    body { color: #d8d8d8; background: #0d0d0d; }
-    a { color: #6cb6ff; }
-    hr { border-color: #333; }
   }
   h1, h2 { font-size: 14px; font-weight: 700; margin: 1.6rem 0 0.4rem; text-transform: uppercase; letter-spacing: 0.04em; }
   h1 { margin-top: 0; }

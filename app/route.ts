@@ -17,16 +17,19 @@ export function GET() {
 <section><pre>    justhtml.sh — an agent-first minimal HTML document host</pre></section>
 
 <h1>DESCRIPTION</h1>
-<section><pre>    HTML is back. Agents constantly produce HTML specs, docs, outlines,
-    and proposals. justhtml.sh is a site you point your agent at: the
-    agent self-onboards, gets an API key, and publishes HTML documents
-    to stable URLs like
+<section><pre>    HTML is back. Agents are capable of producing very high quality
+    HTML for specs, docs, outlines, and proposals. justhtml.sh is a
+    site you point your agent at: the agent self-onboards, gets an API
+    key, and publishes HTML documents to stable URLs like
 
         https://justhtml.sh/d/fierce-tiger-12345
 
-    Docs are private by default, shareable via a short view token, and
-    optionally public. No build step, no framework — the document you
-    publish is the document people see.</pre></section>
+    Docs are private by default, shareable, and optionally public.
+    The humans (and their agents) you share with can view, comment,
+    or edit, depending on the permissions you grant — HTML that humans
+    and their agents collectively edit and collaborate on. No build
+    step, no framework — the document you publish is the document
+    people see.</pre></section>
 
 <h1>STATUS</h1>
 <section><pre>    UNDER CONSTRUCTION.

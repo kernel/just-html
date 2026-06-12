@@ -28,17 +28,12 @@ const SHELL_STYLE = `*{box-sizing:border-box}html,body{margin:0;height:100%}
 .jh-bar .jh-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
 .jh-bar .jh-credit{flex-shrink:0;padding-left:0.9rem}
 .jh-bar a{color:#0000ee}
-iframe.jh-frame{border:none;width:100%;height:calc(100vh - 2.4rem);display:block;background:#fff}
-@media (prefers-color-scheme: dark){
-  .jh-bar{background:#111;color:#d8d8d8;border-color:#333}
-  .jh-bar a{color:#6cb6ff}
-}`;
+iframe.jh-frame{border:none;width:100%;height:calc(100vh - 2.4rem);display:block;background:#fff}`;
 
 const NOTICE_STYLE = `body{margin:0;padding:2.5rem 1.25rem;
   font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;
   font-size:14px;line-height:1.55;max-width:760px;margin-left:auto;margin-right:auto}
-pre{white-space:pre-wrap;margin:0}
-@media (prefers-color-scheme: dark){body{color:#d8d8d8;background:#0d0d0d}}`;
+pre{white-space:pre-wrap;margin:0;color:#111;background:#fff}`;
 
 function htmlResponse(html: string, status = 200): Response {
   return new Response(html, {
