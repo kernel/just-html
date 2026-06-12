@@ -2,9 +2,10 @@ import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
 import { getSession } from "@/lib/auth/session";
 import { sanitizeNext, loginLanding, isEmailish } from "@/lib/auth/url";
 import { originOk, clientIp } from "@/lib/auth/request";
-import { checkLimits } from "@/lib/auth/ratelimit";
+import { checkLimits, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
 import { mintLoginToken, sha256Hex } from "@/lib/auth/tokens";
 import { sendLoginEmail } from "@/lib/auth/email";
+import { emailForAttemptToken } from "@/lib/auth/claim";
 import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
 import { LOGIN_TOKEN_TTL_S, ORIGIN } from "@/lib/auth/config";
@@ -13,18 +14,58 @@ export const dynamic = "force-dynamic";
 
 const EXPIRY_MIN = Math.round(LOGIN_TOKEN_TTL_S / 60);
 
-function loginForm(next: string, error?: string): string {
-  const errBlock = error
-    ? `<section><pre style="color:#b00020">    ${esc(error)}</pre></section>\n`
+// Detect a claim-ceremony `next` (the verification_uri routes through /login
+// first → next=/claim?claim_attempt_token=cvt_…) and pull the attempt token out,
+// so the sign-in copy can say what the human is actually confirming. Per the
+// dogfooding copy rule (birthday.md), the generic "this never creates an
+// account" line reads as a contradiction mid-signup.
+function claimAttemptTokenFromNext(next: string): string | null {
+  if (!next.startsWith("/claim")) return null;
+  try {
+    const u = new URL(next, ORIGIN);
+    if (u.pathname !== "/claim") return null;
+    const t = u.searchParams.get("claim_attempt_token");
+    return t && t.startsWith("cvt_") ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+// The sign-in intro copy. Three variants (birthday.md "Copy rule"):
+//   - claim with a resolved email: name the account being registered.
+//   - claim without a resolvable email (stale/superseded link): a generic
+//     "confirming an agent registration" line — still NOT the contradiction.
+//   - generic /login: a softer version of the agent-only line.
+function introCopy(claimEmail: string | null, isClaim: boolean): string {
+  if (isClaim && claimEmail) {
+    return `    Your agent is registering a justhtml.sh account for
+    ${esc(claimEmail)} — sign in to confirm. We'll send a single-use
+    login link; no password.`;
+  }
+  if (isClaim) {
+    return `    You're confirming an agent registration for your account —
+    sign in to authorize it. We'll send a single-use login link; no
+    password.`;
+  }
+  return `    Enter your email and we'll send a single-use login link.
+    No password. Signing in won't create an account on its own —
+    accounts are created when your agent signs you up (see
+    <a href="/auth.md">/auth.md</a>).`;
+}
+
+function loginForm(
+  next: string,
+  opts: { error?: string; claimEmail?: string | null; isClaim?: boolean } = {}
+): string {
+  const errBlock = opts.error
+    ? `<section><pre style="color:#b00020">    ${esc(opts.error)}</pre></section>\n`
     : "";
   return manPage({
     title: "justhtml.sh — login",
     center: "LOGIN",
     bodyHtml: `
 <h1>SIGN IN</h1>
-<section><pre>    Enter your email and we'll send a single-use login link.
-    No password. This never creates an account — sign-up is
-    agent-only (see <a href="/auth.md">/auth.md</a>).</pre></section>
+<section><pre>${introCopy(opts.claimEmail ?? null, opts.isClaim ?? false)}</pre></section>
 ${errBlock}
 <section><form method="POST" action="/login">
 <pre>    email: <input type="email" name="email" required autofocus
@@ -103,7 +144,11 @@ export async function GET(req: Request): Promise<Response> {
   // destination), so the emailed link itself carries next=/docs and post-verify
   // lands on the docs listing, not the homepage (birthday.md "post-verify (no
   // next) → /docs"). A real next (claim form, /d/:slug share link) is preserved.
-  return htmlResponse(loginForm(loginLanding(next)));
+  const attemptToken = claimAttemptTokenFromNext(next);
+  const claimEmail = attemptToken ? await emailForAttemptToken(attemptToken) : null;
+  return htmlResponse(
+    loginForm(loginLanding(next), { isClaim: attemptToken != null, claimEmail })
+  );
 }
 
 // POST /login (form: email, next) — mint + send a magic link. Never creates a
@@ -111,24 +156,32 @@ export async function GET(req: Request): Promise<Response> {
 // exists (no enumeration).
 export async function POST(req: Request): Promise<Response> {
   if (!originOk(req)) {
-    return htmlResponse(loginForm("/", "Request rejected (bad origin)."), { status: 403 });
+    return htmlResponse(loginForm("/", { error: "Request rejected (bad origin)." }), {
+      status: 403,
+    });
   }
   const form = await req.formData();
   const email = String(form.get("email") ?? "").trim();
   const next = sanitizeNext(String(form.get("next") ?? "/"));
 
+  // Preserve the claim-aware copy on a re-rendered form (validation error).
+  const attemptToken = claimAttemptTokenFromNext(next);
+  const claimEmail = attemptToken ? await emailForAttemptToken(attemptToken) : null;
+  const claimCtx = { isClaim: attemptToken != null, claimEmail };
+
   if (!isEmailish(email)) {
-    return htmlResponse(loginForm(next, "Enter a valid email address."), { status: 400 });
+    return htmlResponse(
+      loginForm(next, { ...claimCtx, error: "Enter a valid email address." }),
+      { status: 400 }
+    );
   }
   const lower = email.toLowerCase();
 
   const ip = clientIp(req);
-  const tripped = await checkLimits([
-    ip ? { key: `login:ip:${ip}`, limit: 10, window: "hour" } : null,
-    { key: `login:email:${lower}`, limit: 5, window: "hour" },
-    { key: `login:email:day:${lower}`, limit: 20, window: "day" },
-    { key: "login:global", limit: 50, window: "hour" },
-  ]);
+  // Email-send caps (recalibrated 2026-06-12): per-IP 30/h, per-email 5/h +
+  // 20/day, global 500/h. Shared with B9 claim-email registration so one
+  // recipient/IP draws from a single send budget (see ratelimit.ts).
+  const tripped = await checkLimits(EMAIL_SEND_LIMITS(lower, ip));
   if (tripped) {
     audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     const mins = Math.ceil(tripped.retryAfter / 60);

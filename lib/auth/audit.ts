@@ -11,6 +11,8 @@ export type AuditEvent =
   | "claim.requested"
   | "claim.attempt_failed"
   | "claim.confirmed"
+  | "claim.approved_via_link"
+  | "claim_email.sent"
   | "token.issued"
   | "token.revoked"
   | "registration.expired"

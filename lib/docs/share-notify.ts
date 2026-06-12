@@ -2,7 +2,7 @@ import { query } from "@/lib/db";
 import { mintLoginToken, sha256Hex } from "@/lib/auth/tokens";
 import { sendShareEmail } from "@/lib/auth/email";
 import { audit } from "@/lib/auth/audit";
-import { checkLimits } from "@/lib/auth/ratelimit";
+import { checkLimits, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
 import { clientIp } from "@/lib/auth/request";
 import { ORIGIN, SHARE_TOKEN_TTL_S } from "@/lib/auth/config";
 
@@ -15,8 +15,9 @@ import { ORIGIN, SHARE_TOKEN_TTL_S } from "@/lib/auth/config";
 //   - notify:false on the grant payload suppresses it.
 //   - DOMAIN grants NEVER notify (we don't email a whole company) — the caller
 //     only invokes this for email grants.
-//   - Counts against the per-email magic-link send caps (same caps as /login:
-//     5/h + 20/day per recipient address, plus a global hourly burn cap).
+//   - Counts against the shared email-send caps (same caps as /login and B9
+//     claim-email registration: per-email 5/h + 20/day, per-IP 30/h, global
+//     500/h — recalibrated 2026-06-12; see ratelimit.ts EMAIL_SEND_LIMITS).
 
 export type ShareNotifyResult =
   | { sent: true; resendId: string | null }
@@ -44,13 +45,10 @@ export async function sendShareNotification(opts: {
   const to = opts.granteeEmail.toLowerCase();
   const ip = clientIp(opts.req);
 
-  // Same magic-link send caps as /login (§6 #11–13), keyed by recipient.
-  const tripped = await checkLimits([
-    ip ? { key: `share:ip:${ip}`, limit: 30, window: "hour" } : null,
-    { key: `login:email:${to}`, limit: 5, window: "hour" },
-    { key: `login:email:day:${to}`, limit: 20, window: "day" },
-    { key: "login:global", limit: 50, window: "hour" },
-  ]);
+  // Same email-send caps as /login and B9 claim-email registration (§6 #11–13,
+  // recalibrated 2026-06-12: per-IP 30/h, per-email 5/h + 20/day, global 500/h),
+  // shared via EMAIL_SEND_LIMITS and keyed by recipient.
+  const tripped = await checkLimits(EMAIL_SEND_LIMITS(to, ip));
   if (tripped) {
     audit(opts.req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     return { sent: false, reason: "rate_limited" };

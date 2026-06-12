@@ -3,7 +3,8 @@ import { getSession, type Session } from "@/lib/auth/session";
 import { originOk, clientIp } from "@/lib/auth/request";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { sha256Hex, safeEqualHex } from "@/lib/auth/tokens";
-import { query, getPool } from "@/lib/db";
+import { query } from "@/lib/db";
+import { confirmClaim } from "@/lib/auth/claim";
 import { audit } from "@/lib/auth/audit";
 import { MAX_CODE_ATTEMPTS } from "@/lib/auth/config";
 
@@ -108,8 +109,10 @@ async function formPage(
 <h1>AUTHORIZE AGENT</h1>
 <section><pre>    You're signed in as ${esc(session.email)}.
 
+    Your agent is creating a justhtml.sh account for this email and
+    asking for an API key to publish and edit HTML documents as you.
     The agent should have shown you a 6-digit code — enter it below
-    to authorize it to act on your behalf.</pre></section>
+    to create the account and authorize the agent.</pre></section>
 ${firstBlock}${errBlock}
 <section><form method="POST" action="/claim">
 <input type="hidden" name="claim_attempt_token" value="${esc(attemptToken)}">
@@ -283,45 +286,23 @@ export async function POST(req: Request): Promise<Response> {
 
   // Success: confirm in one transaction — consume code, find-or-create user,
   // bind registration, backfill the session's user_id.
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(`UPDATE claim_codes SET consumed_at = now() WHERE id = $1`, [
-      r.claimCodeId,
-    ]);
-    const { rows: userRows } = await client.query(
-      `INSERT INTO users (email) VALUES ($1)
-       ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-       RETURNING id`,
-      [r.regEmail]
-    );
-    const userId = userRows[0].id as number;
-    await client.query(
-      `UPDATE agent_registrations SET user_id = $1, claimed_at = now() WHERE id = $2`,
-      [userId, r.registrationId]
-    );
-    await client.query(`UPDATE sessions SET user_id = $1 WHERE id = $2`, [
-      userId,
-      session.id,
-    ]);
-    await client.query("COMMIT");
+  const userId = await confirmClaim({
+    claimCodeId: r.claimCodeId,
+    registrationId: r.registrationId,
+    email: r.regEmail,
+    sessionId: session.id,
+  });
 
-    audit(req, "claim.confirmed", {
-      registrationId: r.registrationId,
-      userId,
-      meta: { claimed_by_user_id: userId, session_id: session.id },
-    });
+  audit(req, "claim.confirmed", {
+    registrationId: r.registrationId,
+    userId,
+    meta: { claimed_by_user_id: userId, session_id: session.id, via: "form" },
+  });
 
-    return page(
-      "all set",
-      "ALL SET",
-      "    The agent has been authorized to act on your behalf.\n    You can close this tab; the agent will pick up automatically.",
-      200
-    );
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
-  }
+  return page(
+    "all set",
+    "ALL SET",
+    "    The agent has been authorized to act on your behalf.\n    You can close this tab; the agent will pick up automatically.",
+    200
+  );
 }

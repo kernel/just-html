@@ -35,8 +35,21 @@ paths:
       summary: Start a service_auth registration
       description: |
         Creates a pending registration (no user account is created yet) and
-        returns a claim_token plus a claim ceremony block. Surface the
-        user_code and verification_uri to the human in one message.
+        returns a claim_token plus a claim ceremony block.
+
+        claim_delivery (default "email") selects how the user_code reaches the
+        human:
+          - "email" (DEFAULT): justhtml.sh emails the login_hint a 6-digit code
+            AND a one-click approve link. The user_code is OMITTED from this
+            response (the email is the binding proof). The human either clicks
+            approve (confirms + signs in) or reads the code back to the agent,
+            which submits it to POST /agent/identity/claim/complete.
+          - "agent": the spec-pure flow. The response carries user_code +
+            verification_uri; the agent surfaces both and the human enters the
+            code at the hosted form. Nothing is emailed; there is no
+            /agent/identity/claim/complete.
+        Modes are mutually exclusive and fixed at registration time. Either way
+        the agent polls /oauth2/token for the key.
       operationId: startRegistration
       security: []
       requestBody:
@@ -54,6 +67,14 @@ paths:
                   type: string
                   format: email
                   example: you@example.com
+                claim_delivery:
+                  type: string
+                  enum: [email, agent]
+                  default: email
+                  description: |
+                    email (default): code + approve link emailed; user_code
+                    omitted from the response. agent: spec-pure, user_code +
+                    verification_uri in the response.
       responses:
         "200":
           description: Pending registration created
@@ -73,19 +94,27 @@ paths:
                     type: array
                     items: { type: string }
                   claim:
-                    type: object
-                    properties:
-                      user_code: { type: string, example: "428117" }
-                      expires_in: { type: integer, example: 600 }
-                      verification_uri: { type: string, format: uri }
-                      interval: { type: integer, example: 5 }
+                    description: |
+                      Email mode (default) omits user_code/verification_uri and
+                      carries delivery:"email" + complete_url. Agent mode carries
+                      delivery:"agent" + user_code + verification_uri.
+                    oneOf:
+                      - $ref: "#/components/schemas/ClaimEmailMode"
+                      - $ref: "#/components/schemas/ClaimAgentMode"
         "400":
-          description: Bad body, bad login_hint, or an unsupported registration type
+          description: Bad body, bad login_hint, unsupported type, or bad claim_delivery
           content:
             application/json:
               schema: { $ref: "#/components/schemas/AgentError" }
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: |
+            email_send_failed — claim_delivery=email but the email could not be
+            sent; the registration is voided. Retry registration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentError" }
   /agent/identity/claim:
     post:
       tags: [auth]
@@ -129,6 +158,59 @@ paths:
         "401": { description: Unknown claim_token, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
         "409": { description: Already claimed, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
         "410": { description: Registration window closed, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /agent/identity/claim/complete:
+    post:
+      tags: [auth]
+      summary: Complete a claim by reading the emailed code back (email mode only)
+      description: |
+        For claim_delivery=email registrations only. The human reads the 6-digit
+        code from the emailed claim message back to the agent, which submits it
+        here to confirm the claim WITHOUT a browser session (the binding proof is
+        that the code only reached the human via their inbox). Constant-time
+        compare; shares the code's 5-attempt budget with the approve link and the
+        hosted /claim form. On success the agent's /oauth2/token poll returns the
+        key. (Agent-delivery registrations have no read-back: the human enters the
+        code at the hosted form — calling this returns 409 wrong_delivery_mode.)
+      operationId: completeClaim
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [claim_token, user_code]
+              properties:
+                claim_token: { type: string }
+                user_code: { type: string, example: "428117", pattern: "^[0-9]{6}$" }
+      responses:
+        "200":
+          description: Claim confirmed; poll /oauth2/token for the key
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registration_id: { type: string }
+                  status: { type: string, example: claimed }
+                  message: { type: string }
+        "400": { description: Bad body, content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } } }
+        "401":
+          description: |
+            invalid_claim_token (unknown token) or invalid_user_code (wrong code;
+            message names attempts remaining).
+          content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } }
+        "409":
+          description: |
+            claimed_or_in_flight (already claimed) or wrong_delivery_mode
+            (registration uses the hosted form, claim_delivery=agent).
+          content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } }
+        "410":
+          description: |
+            claim_expired (registration window closed), code_dead (5 wrong
+            attempts), or expired_token (user_code window closed). Re-mint.
+          content: { application/json: { schema: { $ref: "#/components/schemas/AgentError" } } }
         "429": { $ref: "#/components/responses/RateLimited" }
   /oauth2/token:
     post:
@@ -678,6 +760,35 @@ components:
       properties:
         error: { type: string }
         message: { type: string }
+    ClaimEmailMode:
+      type: object
+      description: |
+        The claim block in email mode (claim_delivery=email, the default). The
+        user_code is intentionally omitted — it was emailed to the human along
+        with a one-click approve link. The human clicks approve OR reads the code
+        back to the agent for POST /agent/identity/claim/complete.
+      properties:
+        delivery: { type: string, enum: [email] }
+        code_delivery:
+          type: string
+          description: Human-readable note that the code + approve link were emailed.
+        complete_url:
+          type: string
+          format: uri
+          description: POST {claim_token, user_code} here to complete via read-back.
+        expires_in: { type: integer, example: 600 }
+        interval: { type: integer, example: 5 }
+    ClaimAgentMode:
+      type: object
+      description: |
+        The claim block in spec-pure mode (claim_delivery=agent). Carries the
+        user_code and verification_uri for the agent to surface to the human.
+      properties:
+        delivery: { type: string, enum: [agent] }
+        user_code: { type: string, example: "428117" }
+        verification_uri: { type: string, format: uri }
+        expires_in: { type: integer, example: 600 }
+        interval: { type: integer, example: 5 }
     AgentError:
       type: object
       required: [error, message]

@@ -2,16 +2,21 @@ import { Resend } from "resend";
 import {
   RESEND_FROM,
   LOGIN_SUBJECT,
+  CLAIM_SUBJECT,
   LOGIN_TOKEN_TTL_S,
+  USER_CODE_TTL_S,
   SHARE_TOKEN_TTL_S,
 } from "@/lib/auth/config";
 
-// justhtml.sh sends exactly two kinds of email, both handwritten man-page-style
-// HTML, inline styles only (clients strip <style>), no images, no tracking
-// pixels, no template framework. A matching text/plain part rides alongside.
+// justhtml.sh sends three kinds of email, all handwritten man-page-style HTML,
+// inline styles only (clients strip <style>), no images, no tracking pixels, no
+// template framework. A matching text/plain part rides alongside.
 //   1. the login magic link (§9.5)
 //   2. the share notification (birthday.md "Share notifications") — sent when an
 //      owner creates an email grant; carries a single 7-day login+redirect link.
+//   3. the claim email (B9 hybrid claim, claim_delivery=email) — carries BOTH a
+//      scanner-safe approve link (one click confirms + logs in) and the 6-digit
+//      code to read back to the agent. Binding proof = inbox possession.
 
 let client: Resend | null = null;
 function resend(): Resend {
@@ -87,6 +92,104 @@ export async function sendLoginEmail(email: string, link: string): Promise<strin
     html: htmlBody(email, link, date),
     text: textBody(email, link),
     tags: [{ name: "flow", value: "login_link" }],
+  });
+  if (error) {
+    throw new Error(`resend send failed: ${error.message ?? String(error)}`);
+  }
+  return data?.id ?? null;
+}
+
+// --- Claim email (B9 hybrid claim ceremony, claim_delivery=email) ---
+
+const CLAIM_EXPIRY_MIN = Math.round(USER_CODE_TTL_S / 60);
+
+function claimHtmlBody(opts: {
+  email: string;
+  approveLink: string;
+  code: string;
+  date: string;
+}): string {
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const e = esc(opts.email);
+  const href = esc(opts.approveLink);
+  const code = esc(opts.code);
+  return `<!doctype html>
+<html>
+  <body style="margin:0; padding:24px; background:#ffffff;">
+    <pre style="margin:0; font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.5; color:#111111; white-space:pre-wrap;">
+JUSTHTML.SH(1)                     CLAIM                     JUSTHTML.SH(1)
+
+NAME
+    an agent wants a justhtml.sh API key for you
+
+SYNOPSIS
+    an agent is registering a justhtml.sh account for
+    ${e}
+    and asking for a key that can publish and edit HTML documents
+    as you. approve it one of two ways:
+
+APPROVE (one click)
+    <a href="${href}" style="color:#0000ee;">${href}</a>
+
+    clicking opens a confirm page; one button approves the key AND
+    signs you in on this device.
+
+OR READ THE CODE BACK
+    if your agent asked you for a code, give it this one:
+
+        ${code}
+
+NOTES
+    expires in ${CLAIM_EXPIRY_MIN} minutes. single use.
+
+    only approve if you started this — an agent you trust asked you
+    to sign up for justhtml.sh. if you didn't, ignore this email;
+    nothing happens without your click or the code.
+
+JUSTHTML.SH                      ${opts.date}                  JUSTHTML.SH(1)
+    </pre>
+  </body>
+</html>`;
+}
+
+function claimTextBody(opts: { email: string; approveLink: string; code: string }): string {
+  return `an agent wants a justhtml.sh API key for you
+
+an agent is registering a justhtml.sh account for ${opts.email} and asking for a
+key that can publish and edit HTML documents as you. approve it one of two ways:
+
+APPROVE (one click)
+  ${opts.approveLink}
+  clicking opens a confirm page; one button approves the key AND signs you in.
+
+OR READ THE CODE BACK
+  if your agent asked you for a code, give it this one: ${opts.code}
+
+expires in ${CLAIM_EXPIRY_MIN} minutes. single use. only approve if you started
+this. if you didn't, ignore this email — nothing happens without your click or
+the code.`;
+}
+
+/**
+ * Send the hybrid claim email (claim_delivery=email). Carries both completions:
+ * a scanner-safe approve link and the 6-digit code to read back. Returns the
+ * Resend message id; throws on send failure so the caller can fail the
+ * registration cleanly (the registration is rolled back / not surfaced).
+ */
+export async function sendClaimEmail(opts: {
+  to: string;
+  approveLink: string;
+  code: string;
+}): Promise<string | null> {
+  const date = new Date().toISOString().slice(0, 10);
+  const { data, error } = await resend().emails.send({
+    from: RESEND_FROM,
+    to: opts.to,
+    subject: CLAIM_SUBJECT,
+    html: claimHtmlBody({ email: opts.to, approveLink: opts.approveLink, code: opts.code, date }),
+    text: claimTextBody({ email: opts.to, approveLink: opts.approveLink, code: opts.code }),
+    tags: [{ name: "flow", value: "claim_email" }],
   });
   if (error) {
     throw new Error(`resend send failed: ${error.message ?? String(error)}`);

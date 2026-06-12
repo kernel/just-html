@@ -24,18 +24,27 @@ Machine-readable discovery:
   https://justhtml.sh/.well-known/oauth-protected-resource
   https://justhtml.sh/.well-known/oauth-authorization-server
 
-Short version: you can't self-issue a key. Register with the human's email,
-show them a 6-digit code + a link, they sign in and enter the code, then you
-poll for the key. Steps:
+Short version: you can't self-issue a key. Register with the human's email.
+By default (claim_delivery=email) we email the human a 6-digit code AND a
+one-click approve link — they just check their inbox: click approve, or read
+the code back to you. Either way you poll for the key. Steps:
 
-  # 1. Start registration (no account is created yet)
+  # 1. Start registration (no account is created yet). Default delivery=email.
   curl -s https://justhtml.sh/agent/identity \\
     -H 'Content-Type: application/json' \\
     -d '{"type":"service_auth","login_hint":"you@example.com"}'
-  # -> { claim_token, claim: { user_code, verification_uri, interval } }
+  # -> { claim_token, claim: { delivery:"email", complete_url, expires_in,
+  #      interval } }   # NOTE: user_code is NOT returned in email mode.
 
-  # 2. Show the human BOTH the user_code and verification_uri (in one message).
-  #    They open the link, sign in via emailed magic link, and type the code.
+  # 2. Tell the human: "check your email for a justhtml.sh message — click
+  #    approve, or tell me the 6-digit code." Then EITHER:
+  #    (a) they click approve in the email (one click confirms + signs them in
+  #        — you do nothing), OR
+  #    (b) they read the code back to you; submit it:
+  curl -s https://justhtml.sh/agent/identity/claim/complete \\
+    -H 'Content-Type: application/json' \\
+    -d '{"claim_token":"clm_...","user_code":"428117"}'
+  #    -> 200 {status:"claimed"}; wrong code -> 401 (5 tries, then 410 code_dead)
 
   # 3. Poll for the credential (every claim.interval = 5s). Form-encoded.
   curl -s https://justhtml.sh/oauth2/token \\
@@ -43,10 +52,16 @@ poll for the key. Steps:
     -d claim_token=clm_...
   # -> authorization_pending until they finish; then { access_token: "jh_live_..." }
 
-  # Code expired before they entered it? Re-mint (24h registration window):
+  # Code expired before they acted? Re-mint (24h registration window) — sends a
+  # fresh email (new code + approve link), invalidates the old one:
   curl -s https://justhtml.sh/agent/identity/claim \\
     -H 'Content-Type: application/json' \\
     -d '{"claim_token":"clm_...","email":"you@example.com"}'
+
+  # SPEC-PURE variant: register with "claim_delivery":"agent" to get the
+  # user_code + verification_uri in the response (nothing emailed) and surface
+  # them to the human yourself; they enter the code at the hosted form. No
+  # /claim/complete in that mode. See https://justhtml.sh/auth.md for both.
 
   # Revoke a key (RFC 7009, idempotent):
   curl -s https://justhtml.sh/oauth2/revoke -d token=jh_live_...
@@ -158,7 +173,9 @@ API rate limits (per API key) -> 429 with Retry-After + { error: "rate_limited" 
 Unauthenticated viewer routes (per IP):  300 / min
 
 Auth-flow limits (per IP / per email) protect registration, code attempts (max
-5 wrong attempts per code), and magic-link sends. See /auth.md.
+5 wrong attempts per code, shared across the approve link / read-back / hosted
+form), and email sends (login links + claim emails: 5/h + 20/day per recipient,
+30/h per IP). See /auth.md.
 `;
 
 export function GET() {

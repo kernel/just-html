@@ -32,6 +32,8 @@ export const mintClaimAttemptId = () => token("cla_", 16);
 export const mintClaimToken = () => token("clm_", 19);
 /** cvt_ + 24 random bytes base64url — claim_attempt_token (in verification_uri). */
 export const mintAttemptToken = () => token("cvt_", 24);
+/** cva_ + 24 random bytes base64url — approve-link token (emailed, single-use). */
+export const mintApproveToken = () => token("cva_", 24);
 /** lt_ + 32 random bytes base64url — login magic-link token. */
 export const mintLoginToken = () => token("lt_", 32);
 /** sess_ + 32 random bytes base64url — session cookie token. */

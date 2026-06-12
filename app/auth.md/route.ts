@@ -7,10 +7,12 @@ const AUTH_MD = `# justhtml.sh auth.md
 This file tells agents how to sign up for justhtml.sh and authenticate API requests.
 
 justhtml.sh hosts HTML documents at stable URLs. It supports the auth.md
-user-claimed flow (service_auth variant): you register with the human's email,
-show the human a 6-digit code and a link, and the human confirms in their
-browser. It does not currently support agent-verified ID-JAG registration or
-anonymous accounts.
+user-claimed flow (service_auth variant): you register with the human's email
+and the human confirms in their browser. By default we email the human a
+6-digit code and a one-click approve link — so the human just checks their
+inbox; you don't have to relay anything. (A spec-pure mode where you show the
+human the code is also available; see "Spec-pure variant" below.) It does not
+currently support agent-verified ID-JAG registration or anonymous accounts.
 
 ## Before registering
 
@@ -50,7 +52,7 @@ The authorization server metadata contains:
 Do not hard-code endpoint paths from examples on other services. Use this file and
 the metadata.
 
-## Registration flow
+## Registration flow (default: email delivery)
 
 Ask the human for consent to create or recover justhtml.sh API credentials for
 their email address, and tell them the key will carry scopes \`docs.read docs.write\`
@@ -63,19 +65,45 @@ Start registration:
 
     { "type": "service_auth", "login_hint": "human@example.com" }
 
-The response contains a \`claim_token\` (hold it in memory only; never show it to
-anyone except this service) and a \`claim\` block with a 6-digit \`user_code\` and a
-\`verification_uri\`.
+By default \`claim_delivery\` is \`"email"\`: justhtml.sh emails the human a 6-digit
+code AND a one-click approve link. The response contains a \`claim_token\` (hold
+it in memory only; never show it to anyone except this service) and a \`claim\`
+block — but in email mode the \`user_code\` is **omitted** (the email is the
+binding proof; we don't hand you the code):
 
-Surface both to the human in a single message. Suggested copy:
+    {
+      "claim_token": "clm_...",
+      "claim": {
+        "delivery": "email",
+        "code_delivery": "We emailed the code and an approve link ...",
+        "complete_url": "https://justhtml.sh/agent/identity/claim/complete",
+        "expires_in": 600,
+        "interval": 5
+      }
+    }
 
-> Open this link, sign in (you'll get a login email — click it), and enter this
-> 6-digit code: **428117**
-> https://justhtml.sh/login?next=%2Fclaim%3Fclaim_attempt_token%3D...
+Tell the human, in one message:
 
-Be explicit that the code goes into the page they land on — not back to you.
+> Check your email for a justhtml.sh message — click the approve link to
+> confirm and sign in, OR tell me the 6-digit code from it and I'll finish.
 
-While the human does that, poll for completion:
+There are two ways the claim completes; you support BOTH and just poll either way:
+
+(a) The human clicks the approve link in the email. One click confirms the
+    key and signs them in. You do nothing but poll.
+
+(b) The human reads the 6-digit code back to you. Submit it:
+
+    POST https://justhtml.sh/agent/identity/claim/complete
+    Content-Type: application/json
+
+    { "claim_token": "clm_...", "user_code": "428117" }
+
+    -> 200 { "status": "claimed" } on a correct code. Wrong code -> 401
+       invalid_user_code with attempts remaining; after 5 wrong tries the code
+       is dead (410 code_dead) — re-mint (see below).
+
+While the human does either, poll for completion:
 
     POST https://justhtml.sh/oauth2/token
     Content-Type: application/x-www-form-urlencoded
@@ -88,7 +116,7 @@ retry. On \`slow_down\`, add at least 5 seconds to your interval. On success the
 response contains \`access_token\` — a long-lived API key starting with \`jh_live_\`,
 returned exactly once. There is no refresh ceremony; the key works until revoked.
 
-If the code expires before the human enters it (\`expired_token\` from the token
+If the code expires before the human acts (\`expired_token\` from the token
 endpoint while the registration is still active), mint a fresh one:
 
     POST https://justhtml.sh/agent/identity/claim
@@ -96,8 +124,37 @@ endpoint while the registration is still active), mint a fresh one:
 
     { "claim_token": "clm_...", "email": "human@example.com" }
 
-then surface the new code + link to the human and resume polling. If that returns
-\`410 claim_expired\`, the registration itself has expired — restart registration.
+This sends a fresh email (new code + new approve link) and invalidates the old
+one. Resume polling. If it returns \`410 claim_expired\`, the registration itself
+has expired — restart registration.
+
+## Spec-pure variant (claim_delivery: agent)
+
+If you implement the auth.md spec literally — surface the code to the human
+yourself, nothing emailed — register with \`claim_delivery: "agent"\`:
+
+    POST https://justhtml.sh/agent/identity
+    Content-Type: application/json
+
+    { "type": "service_auth", "login_hint": "human@example.com",
+      "claim_delivery": "agent" }
+
+Now the \`claim\` block carries the \`user_code\` and a \`verification_uri\`:
+
+    { "claim": { "delivery": "agent", "user_code": "428117",
+                 "verification_uri": "https://justhtml.sh/login?next=...",
+                 "expires_in": 600, "interval": 5 } }
+
+Surface both to the human in one message ("open this link, sign in, enter this
+6-digit code: 428117"). The code goes into the page they land on — not back to
+you. There is no \`/agent/identity/claim/complete\` in this mode (the human enters
+the code at the hosted form). Poll \`/oauth2/token\` exactly as above. Re-mint via
+\`/agent/identity/claim\` re-surfaces a fresh code + link (no email).
+
+The delivery mode is fixed at registration time and the two are mutually
+exclusive (the binding proof differs: emailed-inbox possession vs. a code you
+relay). The email default needs the fewest human actions; prefer it unless you
+have a reason to relay the code yourself.
 
 ## Use the credential
 

@@ -338,10 +338,28 @@ Conventions, agent-facing endpoints:
 
 ### 3.1 `POST /agent/identity`
 
-Request (the only supported type):
+> **HYBRID CLAIM (2026-06-12, post-dogfood — NEW DEFAULT).** This endpoint now
+> takes `claim_delivery`: `"email"` (the **new default**) or `"agent"` (the
+> spec-pure behavior described in the rest of this section, kept exactly as-is).
+> Mutually exclusive, fixed at registration time. In `email` mode the `user_code`
+> is **omitted from the response** — justhtml.sh emails the login_hint a 6-digit
+> code AND a one-click approve link (binding proof = inbox possession). The
+> human either clicks approve (→ confirms the claim AND mints a logged-in
+> session, lands on `/docs` — same GET-confirm/POST-consume pattern as
+> `/login/verify`, served at `GET|POST /claim/approve`) or reads the code back
+> to the agent for `POST /agent/identity/claim/complete` (§3.2.1). Either path,
+> the agent's `/oauth2/token` claim-grant poll then returns the key (unchanged).
+> Email-mode registration sends an email, so the email-send caps (§6 rows 11–13)
+> apply on top of the registration caps. The text below documents the spec-pure
+> `agent` mode; `email` mode differs only in the response `claim` block (no
+> `user_code`/`verification_uri`; carries `delivery`, `code_delivery`,
+> `complete_url`) and the email send. See `docs/birthday.md` "Claim delivery
+> modes" for the product rationale.
+
+Request (spec-pure `agent` mode; `email` is the default if `claim_delivery` is omitted):
 
 ```json
-{ "type": "service_auth", "login_hint": "raf@kernel.sh" }
+{ "type": "service_auth", "login_hint": "raf@kernel.sh", "claim_delivery": "agent" }
 ```
 
 Server behavior, in order:
@@ -459,6 +477,44 @@ Errors (statuses exactly as the reference implements them [REPO agent-auth.ts:26
 | 409 | `{ "error": "claimed_or_in_flight", "message": "This registration has already been claimed." }` | Already claimed |
 | 410 | `{ "error": "claim_expired", "message": "Registration has expired." }` | Outer 24 h window closed |
 | 429 | §6 | Per-IP / re-mint caps |
+
+### 3.2.1 `POST /agent/identity/claim/complete` — agent read-back (B9, email mode only)
+
+New endpoint for the hybrid claim's read-back completion. For
+`claim_delivery=email` registrations only: the human reads the 6-digit code from
+the claim email back to the agent, and the agent submits it here. Confirms the
+claim **without a browser session** (the binding proof is that the code reached
+the human only via their inbox). Constant-time compare (§5.2); shares the code's
+**5-attempt budget** with the `/claim` form and the `/claim/approve` link (all
+touch `claim_codes.attempts` / `consumed_at` on the same live attempt row).
+
+Request:
+
+```json
+{ "claim_token": "clm_...", "user_code": "428117" }
+```
+
+Behavior: resolve registration by `sha256(claim_token)`; reject
+`claim_delivery=agent` (the human enters the code at the hosted form, no
+read-back); increment-then-compare the live attempt's code; on match, confirm in
+one transaction (find-or-create user, bind registration, **no session backfill**
+— no browser here). On success the agent's `/oauth2/token` poll returns the key.
+
+| Status | `error` | When |
+|---|---|---|
+| 200 | — | `{ registration_id, status: "claimed", message }` |
+| 400 | `invalid_request` | Bad body / non-6-digit user_code |
+| 401 | `invalid_claim_token` | Unknown `sha256(claim_token)` |
+| 401 | `invalid_user_code` | Wrong code, attempts < 5 (message names remaining) |
+| 409 | `wrong_delivery_mode` | Registration is `claim_delivery=agent` |
+| 409 | `claimed_or_in_flight` | Already claimed |
+| 410 | `code_dead` | 5 wrong attempts — code consumed; re-mint |
+| 410 | `expired_token` | user_code window closed / no live code |
+| 410 | `claim_expired` | Outer 24 h window closed |
+| 429 | §6 | Per-IP read-back cap (30/h) |
+
+The **approve link** completion is at `GET|POST /claim/approve?token=cva_…` (a
+browser surface, §9.3.1), not this endpoint.
 
 ### 3.3 `POST /oauth2/token` — claim grant (polling + credential issuance)
 
@@ -690,9 +746,14 @@ surface is entirely ours — those rows below are all OUR CHOICE.
 
 justhtml.sh is single-tenant, so "per-tenant" becomes a global cap. `service_auth`
 is unauthenticated like `anonymous`, so it gets the anonymous-tier IP cap with a
-small allowance for typo retries. Email-send cost now lives on `/login`
-(magic links via Resend — free tier is 100/day [PLAN], so per-email and global send
-caps protect both inboxes and our quota):
+small allowance for typo retries. Email-send cost lives on **every surface that
+sends a Resend email keyed to a recipient**: `/login` magic links, the **B9
+claim email** (`claim_delivery=email` registration — see §3.1), and share
+notifications. These share one set of send caps (rows 11–13, implemented as
+`EMAIL_SEND_LIMITS()` so one recipient/IP draws from a single budget regardless
+of which surface triggered the send). Note: in B9 email mode, registration
+(`POST /agent/identity`) is checked against BOTH the registration caps (rows 1–3)
+AND the email-send caps (rows 11–13).
 
 | # | Surface | Key | Limit | Window | Source/rationale |
 |---|---------|-----|-------|--------|------------------|
@@ -706,9 +767,9 @@ caps protect both inboxes and our quota):
 | 8 | `POST /oauth2/token` (claim grant) | claim_token | **min 5 s between polls** → `slow_down` | rolling | `pollIntervalSeconds` [REPO config]; enforcement we add per README's note |
 | 9 | `POST /oauth2/token` | IP | **300/h** | 1 h | OUR CHOICE — a compliant 10-min poll loop is 120 calls; 300 allows 2 concurrent ceremonies + retries |
 | 10 | `POST /oauth2/revoke` | IP | **30/h** | 1 h | OUR CHOICE |
-| 11 | `POST /login` (sends magic link) | email (lowercased) | **5/h, 20/day** | 1 h / 24 h | OUR CHOICE — inbox bombing + Resend quota |
-| 12 | `POST /login` | IP | **10/h** | 1 h | OUR CHOICE |
-| 13 | `POST /login` | global | **50/h** | 1 h | OUR CHOICE — Resend free tier is 100/day; this caps burn rate |
+| 11 | email send (`/login`, B9 claim email at `/agent/identity`, share notify) | email (lowercased) | **5/h, 20/day** | 1 h / 24 h | OUR CHOICE — inbox bombing + Resend quota. **UNCHANGED** in the 2026-06-12 recalibration. |
+| 12 | email send (same surfaces) | IP | **30/h** | 1 h | OUR CHOICE. **Recalibrated 2026-06-12 (10/h → 30/h):** offices/NAT share an IP — during dogfooding our own QA and the human shared one IP and the human got 429'd. 30/h tolerates a shared egress IP while still bounding a single host. |
+| 13 | email send (same surfaces) | global | **500/h** | 1 h | OUR CHOICE. **Recalibrated 2026-06-12 (50/h → 500/h):** this cap exists ONLY as a Resend cost / runaway circuit breaker, so it must sit FAR above organic traffic. A global cap at user scale lets one abuser deny login to everyone — "50/hour global is dumb" (founder, 2026-06-12). 500/h is a burn-rate ceiling, not a usage cap. |
 
 Checked in spec order: per-IP first, then per-email, then global [DOCS /apps].
 **Fail open** if the counter query errors; **skip the IP check** when no IP is
@@ -786,7 +847,9 @@ Baseline set from [REPO agent-services/README.md §Recommended Audit Events] /
 | `user_code.minted` | Code minted (registration + every re-mint) | `claim_code_id` |
 | `claim.requested` | `POST /agent/identity/claim` (re-mint) | `email` |
 | `claim.attempt_failed` *(ours)* | Wrong user_code at the `/claim` form | `attempts` |
-| `claim.confirmed` | Code verified at the `/claim` form | `claimed_by_user_id`, `session_id` |
+| `claim_email.sent` *(B9)* | Claim email sent (`claim_delivery=email` registration + re-mint) | `claim_code_id`, `resend_id` |
+| `claim.confirmed` | Code verified at the `/claim` form OR via the agent read-back (`/agent/identity/claim/complete`) | `claimed_by_user_id`, `session_id` (form) / `via` (`form`\|`complete`) |
+| `claim.approved_via_link` *(B9)* | Claim confirmed via the emailed approve link (`POST /claim/approve`) | `claimed_by_user_id`, `session_id`, `via: "approve_link"` |
 | `token.issued` | Claim grant returns the API key | `api_key_id`, `scope: "docs.read docs.write"` |
 | `token.revoked` | `/oauth2/revoke` flips a live key | `api_key_id` |
 | `registration.expired` | First touch of an expired registration (lazy) | — |
@@ -1030,17 +1093,41 @@ being linked to `raf@kernel.sh`") when the email has no prior claimed registrati
    [REPO store.ts `completeClaim` comment].
 6. Audit: `claim.confirmed` or `claim.attempt_failed`.
 
+### 9.3.1 `/claim/approve` — the emailed approve link (B9, email mode)
+
+> **NEW (B9 hybrid claim).** In `claim_delivery=email` mode the claim email
+> carries a scanner-safe one-click approve link, `GET|POST /claim/approve?token=cva_…`.
+> Same GET-confirm / POST-consume shape as `/login/verify`: the GET renders a
+> man-page confirm page ("Approve the API key for `raf@…`? [approve]") and does
+> NOT consume the token (email scanners/prefetchers fetch GETs); the POST
+> consumes it (single-use, hashed at rest in `claim_codes.approve_token_hash`).
+> The approve token is **per-attempt** (TTL = the user_code TTL, 600 s; tied to
+> the specific live attempt — a re-mint supersedes it and emails a fresh one).
+> Unlike `/claim`, this surface needs **no pre-existing session**: inbox
+> possession IS the binding proof, so approving mints a fresh session for the
+> registration email (the human walks away logged in) AND confirms the claim,
+> then 303s to `/docs`. Audit: `claim.approved_via_link`. The approve link and
+> the read-back (§3.2.1) share the one live attempt row, so whichever fires
+> first consumes it.
+
 ### 9.4 CSRF & form transport
 
-- All three POST surfaces (`/login`, `/login/verify`, `/claim`) are protected by
-  **SameSite=Lax + Origin check** [PLAN]: if an `Origin` header is present and is
-  not `https://justhtml.sh`, reject 403. (Lax already blocks cross-site POSTs with
-  cookies; the Origin check is the second factor. No token-based CSRF needed — the
-  forms are stateless HTML.)
+- The browser POST surfaces (`/login`, `/login/verify`, `/claim`, and the B9
+  `/claim/approve`) are protected by **SameSite=Lax + Origin check** [PLAN]: if
+  an `Origin` header is present and is not `https://justhtml.sh`, reject 403.
+  (Lax already blocks cross-site POSTs with cookies; the Origin check is the
+  second factor. No token-based CSRF needed — the forms are stateless HTML.)
 - All pages are served from route handlers as handwritten HTML (man-page style,
   monospace, no JS) [PLAN] — same technique as the homepage.
 
-### 9.5 The login email (the only email justhtml.sh sends)
+### 9.5 The login email
+
+> **NOTE (B9):** "the only email" is no longer accurate. justhtml.sh now sends
+> three handwritten man-page emails: this login magic link, the share
+> notification (birthday.md "Share notifications"), and the **B9 claim email**
+> (`claim_delivery=email` registration — subject `your agent wants a justhtml.sh
+> API key`, carries the approve link + the 6-digit code). All share the sender
+> below, the man-page style, and the §6 rows 11–13 send caps.
 
 **Sender**: `justhtml.sh <login@notify.justhtml.sh>` — dedicated sending subdomain
 so transactional reputation is isolated from the root domain. DONE 2026-06-12:

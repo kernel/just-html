@@ -24,3 +24,6 @@ export const SESSION_COOKIE = "jh_sess";
 
 export const RESEND_FROM = "justhtml.sh <login@notify.justhtml.sh>";
 export const LOGIN_SUBJECT = "justhtml.sh login";
+// B9 hybrid claim ceremony: the claim email (claim_delivery=email) carries both
+// completions — a scanner-safe approve link and the 6-digit code to read back.
+export const CLAIM_SUBJECT = "your agent wants a justhtml.sh API key";

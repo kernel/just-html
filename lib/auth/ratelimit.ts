@@ -74,6 +74,39 @@ export async function bump(check: LimitCheck): Promise<RateResult> {
   }
 }
 
+// Email-send rate caps (authmd-implementation.md §6 #11–13), shared by every
+// surface that sends a Resend email keyed to a recipient address: /login magic
+// links AND B9 email-delivery registration (claim email). Checked in spec order
+// (per-IP, per-email, then global).
+//
+// RECALIBRATED 2026-06-12 (founder directive, post-dogfood) — OUR CHOICE:
+//   - per-IP 10/h -> 30/h: offices/NAT share an IP; our own QA and the human
+//     shared one IP during dogfooding and the human got 429'd.
+//   - global 50/h -> 500/h: the global cap exists ONLY as a Resend cost /
+//     runaway circuit breaker, so it must sit FAR above organic traffic. A
+//     global cap at user scale lets one abuser deny login to everyone.
+//   - per-email 5/h + 20/day: UNCHANGED (inbox-bombing protection).
+export const EMAIL_SEND_PER_IP_PER_H = 30;
+export const EMAIL_SEND_PER_EMAIL_PER_H = 5;
+export const EMAIL_SEND_PER_EMAIL_PER_DAY = 20;
+export const EMAIL_SEND_GLOBAL_PER_H = 500;
+
+/**
+ * The email-send rate-limit checks for a recipient + IP, in spec order. Returns
+ * a list to splice into a checkLimits() call. Keyed on the lowercased email.
+ */
+export function EMAIL_SEND_LIMITS(
+  email: string,
+  ip: string | null
+): Array<LimitCheck | null> {
+  return [
+    ip ? { key: `email:ip:${ip}`, limit: EMAIL_SEND_PER_IP_PER_H, window: "hour" } : null,
+    { key: `email:addr:${email}`, limit: EMAIL_SEND_PER_EMAIL_PER_H, window: "hour" },
+    { key: `email:addr:day:${email}`, limit: EMAIL_SEND_PER_EMAIL_PER_DAY, window: "day" },
+    { key: "email:global", limit: EMAIL_SEND_GLOBAL_PER_H, window: "hour" },
+  ];
+}
+
 /**
  * Run a list of checks in order (spec order: per-IP, per-email, then global —
  * §6). Returns the first failure, or ok. Checks with a null key (e.g. no IP

@@ -14,9 +14,10 @@ export const dynamic = "force-dynamic";
 // The copy-pasteable agent prompt — the growth loop. Points the agent at the two
 // machine-facing files. Kept literal so a human can select-and-copy it.
 const AGENT_PROMPT = `I want to publish an HTML document to justhtml.sh.
-Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then walk
-me through getting an API key (you'll show me a 6-digit code and a link to
-sign in) and publish the doc. Give me back the shareable URL when done.`;
+Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then get me
+an API key and publish the doc. To approve the key: check your email for a
+justhtml.sh message — click the approve link, or tell me the 6-digit code from
+it. Give me back the shareable URL when done.`;
 
 export function GET() {
   const body = `
@@ -50,27 +51,32 @@ export function GET() {
 
 <h1>PASTE THIS TO YOUR AGENT</h1>
 <section><pre>    Drop this into your coding agent and it does the rest. The only
-    human steps: click the login link in your email, type the 6-digit
-    code your agent shows you.
+    human step: check your email for a justhtml.sh message and click
+    the approve link (or read the 6-digit code back to your agent).
 </pre>
 <pre style="background:#f3f3f3;border:1px solid #ccc;padding:0.8rem 1rem;border-radius:4px">${AGENT_PROMPT}</pre></section>
 
 <h1>AUTHENTICATION</h1>
 <section><pre>    Sign-up is agent-only — you cannot self-issue a key from a form. An
-    agent registers with your email, you confirm in your browser, and the
+    agent registers with your email, you confirm from your inbox, and the
     agent receives a long-lived key. The full prose protocol (the auth.md
     "service_auth" flow) is at <a href="/auth.md">/auth.md</a>; machine-readable discovery is
     at <a href="/.well-known/oauth-authorization-server">/.well-known/oauth-authorization-server</a>.
 
-    The flow:
+    The flow (default — emailed approval):
 
       1. Agent:  POST /agent/identity {"type":"service_auth",
                  "login_hint":"you@example.com"}
-                 -> claim_token + a 6-digit user_code + a verification link
-      2. You:    open the link, sign in (magic link by email), type the
-                 6-digit code the agent showed you
+                 -> claim_token (we email YOU a 6-digit code + approve link)
+      2. You:    check your email for a justhtml.sh message — click the
+                 approve link (confirms + signs you in), OR read the
+                 6-digit code back to your agent
       3. Agent:  poll POST /oauth2/token (claim grant) until you finish
                  -> access_token "jh_live_…" (returned exactly once)
+
+    Spec-pure agents can register with "claim_delivery":"agent" to get the
+    code + link in the response and show it to you themselves (nothing
+    emailed); see <a href="/auth.md">/auth.md</a>.
 
     You end up logged in as a side effect. Use the key as a bearer token:
 
