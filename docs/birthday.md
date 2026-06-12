@@ -262,10 +262,13 @@ shows the toolbar/compose.
 
 **Anchored reactions (founder, 2026-06-12: variant A — inline emoji chip)**:
 reactions can target a text span, not just the doc or a comment. Chosen
-rendering from `design/reactions-demo/variant-a.html`: emoji+count chip at
-the END of the reacted span, inline in the text flow; reacted span gets a
-dotted underline (visibly distinct from the yellow comment highlight); chip
-hover shows reactor Gravatars/emails; clicking your own toggles it off.
+rendering from `design/reactions-demo/variant-a.html`, with one founder
+revision (2026-06-12): reacted spans **paint identically to comment
+anchors — the same yellow highlight, NOT the demo's dotted underline**. The
+comment-vs-reaction distinction comes from the attachment, not the paint:
+comments get rail cards; reactions get an emoji+count chip at the END of
+the reacted span, inline in the text flow; chip hover shows reactor
+Gravatars/emails; clicking your own toggles it off.
 **The instant you add a reaction, the span styling appears — no reload**
 (founder hit this as a demo bug; it is a hard requirement). Doc-level
 reactions live de-emphasized in the rail header strip, never inline.
@@ -277,6 +280,32 @@ exclusive). Dedup key extends to (doc, author, emoji, target). Anchored
 reactions ride the SAME tier-1/2/3 re-anchoring as comments on every doc
 write; an orphaned anchored reaction degrades to doc-level (shown in the
 rail header strip).
+
+### Overlap semantics (founder-approved 2026-06-12)
+
+How overlapping anchors (comments and anchored reactions together) render
+and focus. One structural decision drives it all: **paint segments, not
+nested wrappers** — partially-intersecting ranges can't nest in the DOM, so
+the overlay splits text nodes at every anchor boundary and each segment
+knows its covering set.
+
+- **One paint channel**: comments AND reactions both paint background
+  highlight (founder: identical paint). Kind is distinguished by attachment
+  (rail card vs. inline chip), never by paint.
+- **Depth shading**: segment intensity scales with covering-set size,
+  capped at 3 levels. This renders all three cases with no special-casing:
+  *exact-equal* = one region, multiple attachments (rail clamp stacks the
+  cards; chips queue at span end); *subset* = inner region darker, chips at
+  their own spans' ends; *partial intersection* = shared middle darker.
+- **Focus, doc → rail**: click focuses the smallest covering anchor;
+  clicking again cycles outward; focused anchor intensifies, its rail card
+  pins/scrolls, other overlapping highlights dim. 3+ covering anchors at
+  the click point → tiny popover listing them (snippet/emoji) for direct
+  pick. Esc / click-elsewhere clears.
+- **Focus, rail → doc**: hovering any card or chip lights exactly its own
+  span — always unambiguous; the rail is the canonical disambiguator.
+- **Agents unaffected**: GET /comments returns exact anchors; overlap is
+  purely a rendering/UX concern.
 
 **Permission matrix (decided 2026-06-12)**:
 - Comment: owner, editor grant, commenter grant, token-holder with identity,
