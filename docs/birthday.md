@@ -658,6 +658,32 @@ docs):**
   those two must carry genuinely useful descriptions, since they're now the
   canonical docs. Homepage links to them, doesn't duplicate them.
 
+### Site-wide redesign decisions (LOCKED 2026-06-13)
+
+Design iterations done in `design/{home,email,pages}-demo/`. Founder picks:
+
+- **Homepage**: variant B shipped (live). Footer stays as-is (headline token
+  + footer token, the tail.1 convention — NOT stripped).
+- **Chrome system**: variant A from `pages-demo` — single `JUSTHTML.SH(1)`
+  headline, no top bar, no `GENERAL` label, left-aligned hanging-indent
+  sections, one quiet footer. Applied site-wide; replaces `manPage()` in
+  `lib/page.ts`. Every human page adopts it (incl. the private-doc notice,
+  which currently renders chrome-less).
+- **Emails**: **variant B (ultra-spare)** for all three (login, claim,
+  share) — one sentence + the single load-bearing thing (link or code) +
+  one quiet caveat line. Inline CSS, no images, light only.
+- **/login**: variant A, but **add vertical space between the email input
+  and the "send login link" button** (they're too tight as presented).
+- **/docs listing**: **variant C (terse one-line rows)**.
+  - Cut the `account · API` header links (not needed).
+  - Fix the account-less copy: today it says "you don't have a justhtml.sh
+    account yet" right under a "you're signed in" line — confusing. New
+    copy: "You're signed in as <email>, but you haven't set up your account
+    yet. Copy and paste this to your agent:" followed by the same
+    paste-to-agent prompt block as the homepage (with the copy button).
+- **Viewer chrome bar**: variant A (title left + quiet "made with
+  justhtml.sh" right) — effectively unchanged, just on the new chrome.
+
 **Chrome (design direction 2026-06-13):** the man-page header is too busy.
 Current shell renders `JUSTHTML.SH(1)` twice plus a stray `GENERAL` center
 label and a full bottom bar — collapse to a single minimal title. Explore
