@@ -463,10 +463,31 @@ export const OVERLAY_SCRIPT = String.raw`
 
   // ---- selection → anchor ----
   function anchorFromSelection(sel){
+    // Derive exact/prefix/suffix from the SAME clean text model as anchor
+    // resolution (buildText skips SCRIPT/STYLE and our own chips). Using raw
+    // Range.toString() over document.body would sweep the injected overlay
+    // <script> source into the suffix for selections near the doc end, which
+    // poisons tier-2 quote re-finding. Map the selection's DOM endpoints to
+    // offsets in the clean text, then slice context from there.
     var r = sel.getRangeAt(0);
-    var pre = document.createRange(); pre.setStart(document.body,0); pre.setEnd(r.startContainer, r.startOffset);
-    var post = document.createRange(); post.setStart(r.endContainer, r.endOffset); post.setEnd(document.body, document.body.childNodes.length);
-    return { exact: sel.toString(), prefix: pre.toString().slice(-32), suffix: post.toString().slice(0,32) };
+    var tm = buildText();
+    function offsetOf(container, domOffset){
+      for (var i=0;i<tm.nodes.length;i++){
+        if (tm.nodes[i].node === container) return tm.nodes[i].start + domOffset;
+      }
+      // Element (non-text) container: fall back to the first clean text node
+      // that follows it in document order; else end of text.
+      for (var j=0;j<tm.nodes.length;j++){
+        var rel = container.compareDocumentPosition(tm.nodes[j].node);
+        if (rel & Node.DOCUMENT_POSITION_FOLLOWING) return tm.nodes[j].start;
+      }
+      return tm.full.length;
+    }
+    var s = offsetOf(r.startContainer, r.startOffset);
+    var e = offsetOf(r.endContainer, r.endOffset);
+    if (e < s) { var t = s; s = e; e = t; }
+    var exact = (e > s) ? tm.full.slice(s, e) : sel.toString();
+    return { exact: exact, prefix: tm.full.slice(Math.max(0, s-32), s), suffix: tm.full.slice(e, e+32) };
   }
   document.addEventListener("mouseup", function(ev){
     if (ev.target && ev.target.closest && (ev.target.closest("[data-jh-chip]") || ev.target.closest(".jh-pop"))) return;
