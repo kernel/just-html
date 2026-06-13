@@ -17,6 +17,13 @@ import {
 //   3. the claim email (the ONE claim flow) — carries the 6-digit code and
 //      NOTHING else actionable (no links, no buttons). The human reads the code
 //      back to the agent. Binding proof = inbox possession.
+//
+// Variant B (ultra-spare), LOCKED 2026-06-13. SPACING (revised 2026-06-13 after
+// the first send looked wildly over-spaced in Superhuman + airy in Gmail):
+// vertical rhythm is fixed-height table SPACER ROWS, never div margins — some
+// clients (Superhuman) amplify margins between stacked block elements, which is
+// what blew the gaps out. Tight line-height, modest type. color-scheme:light
+// hints clients not to dark-invert.
 
 let client: Resend | null = null;
 function resend(): Resend {
@@ -24,35 +31,56 @@ function resend(): Resend {
   return client;
 }
 
-const EXPIRY_MIN = Math.round(LOGIN_TOKEN_TTL_S / 60);
+const esc = (s: string) =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-// Variant B (ultra-spare), LOCKED 2026-06-13. One sentence + the single
-// load-bearing thing (the link) + one quiet caveat line. Inline CSS only (no
-// <style>), no images, no tracking pixels, light only, ~600px.
-function htmlBody(email: string, link: string, _date: string): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const e = esc(email);
-  const href = esc(link);
+const FONT = "font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace;";
+const LEAD = `${FONT} font-size:14px; line-height:1.5; color:#111111;`;
+const CAVEAT = `${FONT} font-size:13px; line-height:1.5; color:#666666;`;
+const CODE = `${FONT} font-size:34px; font-weight:700; letter-spacing:0.18em; line-height:1; color:#111111;`;
+const LINK = "color:#0000ee; font-size:15px;";
+
+// Bulletproof fixed-height spacer — a table row clients can't collapse or
+// amplify (font-size:1px + matching line-height/height keeps it exact).
+function gap(px: number): string {
+  return `<tr><td style="height:${px}px; line-height:${px}px; font-size:1px;">&nbsp;</td></tr>`;
+}
+
+// Email shell: light-only, left-aligned, max 600px, content laid out as table
+// rows so spacing is exact across clients.
+function shell(title: string, rows: string): string {
   return `<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>justhtml.sh login</title></head>
-<body style="margin:0; padding:0; background:#ffffff;">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
-  <tr><td align="left">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
-  <tr><td style="padding:40px 24px;">
-    <div style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.7; color:#111111;">
-      <div>Sign in to justhtml.sh as <strong>${e}</strong>.</div>
-      <div style="margin-top:24px;"><a href="${href}" style="color:#0000ee; font-size:15px;">Click here to sign in &rarr;</a></div>
-      <div style="margin-top:24px; color:#666666;">Single use, expires in ${EXPIRY_MIN} minutes. Didn't ask for this? Ignore it.</div>
-    </div>
-  </td></tr>
-  </table>
-  </td></tr>
-  </table>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light only">
+<meta name="supported-color-schemes" content="light">
+<title>${title}</title>
+</head>
+<body style="margin:0; padding:0; background:#ffffff; color-scheme:light only;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
+<tr><td align="left">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
+<tr><td style="padding:28px 24px;">
+<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%">
+${rows}
+</table>
+</td></tr>
+</table>
+</td></tr>
+</table>
 </body>
 </html>`;
+}
+
+const EXPIRY_MIN = Math.round(LOGIN_TOKEN_TTL_S / 60);
+
+function htmlBody(email: string, link: string): string {
+  const rows = `<tr><td style="${LEAD}">Sign in to justhtml.sh as <strong>${esc(email)}</strong>.</td></tr>
+${gap(16)}<tr><td style="${LEAD}"><a href="${esc(link)}" style="${LINK}">Click here to sign in &rarr;</a></td></tr>
+${gap(16)}<tr><td style="${CAVEAT}">Single use, expires in ${EXPIRY_MIN} minutes. Didn't ask for this? Ignore it.</td></tr>`;
+  return shell("justhtml.sh login", rows);
 }
 
 function textBody(email: string, link: string): string {
@@ -69,12 +97,11 @@ Single use, expires in ${EXPIRY_MIN} minutes. Didn't ask for this? Ignore it.`;
  * Throws on send failure so the caller can roll back the token row (§9.2 step 6).
  */
 export async function sendLoginEmail(email: string, link: string): Promise<string | null> {
-  const date = new Date().toISOString().slice(0, 10);
   const { data, error } = await resend().emails.send({
     from: RESEND_FROM,
     to: email,
     subject: LOGIN_SUBJECT,
-    html: htmlBody(email, link, date),
+    html: htmlBody(email, link),
     text: textBody(email, link),
     tags: [{ name: "flow", value: "login_link" }],
   });
@@ -92,32 +119,11 @@ export async function sendLoginEmail(email: string, link: string): Promise<strin
 
 const CLAIM_EXPIRY_MIN = Math.round(USER_CODE_TTL_S / 60);
 
-// Variant B (ultra-spare), LOCKED 2026-06-13. NO links — the 6-digit code is the
-// anchor: big and centered. One lead sentence + the code + one quiet caveat line.
-function claimHtmlBody(opts: { email: string; code: string; date: string }): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const e = esc(opts.email);
-  const code = esc(opts.code);
-  return `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>your justhtml.sh code</title></head>
-<body style="margin:0; padding:0; background:#ffffff;">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
-  <tr><td align="left">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
-  <tr><td style="padding:40px 24px;">
-    <div style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.7; color:#111111;">
-      <div>Your justhtml.sh code for ${e}:</div>
-      <div style="margin:24px 0; font-size:48px; font-weight:700; letter-spacing:0.4em; line-height:1;">${code}</div>
-      <div style="color:#666666;">Read it back to the agent registering you. Expires in ${CLAIM_EXPIRY_MIN} minutes. Didn't expect this? Ignore it.</div>
-    </div>
-  </td></tr>
-  </table>
-  </td></tr>
-  </table>
-</body>
-</html>`;
+function claimHtmlBody(opts: { email: string; code: string }): string {
+  const rows = `<tr><td style="${LEAD}">Your justhtml.sh code for ${esc(opts.email)}:</td></tr>
+${gap(18)}<tr><td style="${CODE}">${esc(opts.code)}</td></tr>
+${gap(18)}<tr><td style="${CAVEAT}">Read it back to the agent registering you. Expires in ${CLAIM_EXPIRY_MIN} minutes. Didn't expect this? Ignore it.</td></tr>`;
+  return shell("your justhtml.sh code", rows);
 }
 
 function claimTextBody(opts: { email: string; code: string }): string {
@@ -138,12 +144,11 @@ export async function sendClaimEmail(opts: {
   to: string;
   code: string;
 }): Promise<string | null> {
-  const date = new Date().toISOString().slice(0, 10);
   const { data, error } = await resend().emails.send({
     from: RESEND_FROM,
     to: opts.to,
     subject: CLAIM_SUBJECT,
-    html: claimHtmlBody({ email: opts.to, code: opts.code, date }),
+    html: claimHtmlBody({ email: opts.to, code: opts.code }),
     text: claimTextBody({ email: opts.to, code: opts.code }),
     tags: [{ name: "flow", value: "claim_email" }],
   });
@@ -162,42 +167,16 @@ export function shareSubject(ownerEmail: string, title: string): string {
   return `${ownerEmail} shared "${title}" with you — justhtml.sh`;
 }
 
-// Variant B (ultra-spare), LOCKED 2026-06-13. One sentence + the single 7-day
-// link + one quiet caveat line. The stale-link recovery URL and the agent-edit
-// path stay folded into the caveat (no links dropped) but compressed to one line.
 function shareHtmlBody(opts: {
   ownerEmail: string;
   title: string;
   link: string;
   docUrl: string;
-  granteeEmail: string;
-  date: string;
 }): string {
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const owner = esc(opts.ownerEmail);
-  const title = esc(opts.title);
-  const href = esc(opts.link);
-  const docHref = esc(opts.docUrl);
-  return `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>shared with you on justhtml.sh</title></head>
-<body style="margin:0; padding:0; background:#ffffff;">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
-  <tr><td align="left">
-  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
-  <tr><td style="padding:40px 24px;">
-    <div style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.7; color:#111111;">
-      <div>${owner} shared <strong>"${title}"</strong> with you.</div>
-      <div style="margin-top:24px;"><a href="${href}" style="color:#0000ee; font-size:15px;">Open the document &rarr;</a></div>
-      <div style="margin-top:24px; color:#666666;">Signs you in on this device, no account needed. Good for ${SHARE_EXPIRY_DAYS} days. If it expires, <a href="${docHref}" style="color:#666666;">open the document</a> and choose "was this shared with you? sign in". To edit via API, have your agent register at justhtml.sh/auth.md with this email.</div>
-    </div>
-  </td></tr>
-  </table>
-  </td></tr>
-  </table>
-</body>
-</html>`;
+  const rows = `<tr><td style="${LEAD}">${esc(opts.ownerEmail)} shared <strong>"${esc(opts.title)}"</strong> with you.</td></tr>
+${gap(16)}<tr><td style="${LEAD}"><a href="${esc(opts.link)}" style="${LINK}">Open the document &rarr;</a></td></tr>
+${gap(16)}<tr><td style="${CAVEAT}">Signs you in on this device, no account needed. Good for ${SHARE_EXPIRY_DAYS} days. If it expires, <a href="${esc(opts.docUrl)}" style="color:#666666;">open the document</a> and choose "was this shared with you? sign in". To edit via API, have your agent register at justhtml.sh/auth.md with this email.</td></tr>`;
+  return shell("shared with you on justhtml.sh", rows);
 }
 
 function shareTextBody(opts: {
@@ -205,7 +184,6 @@ function shareTextBody(opts: {
   title: string;
   link: string;
   docUrl: string;
-  granteeEmail: string;
 }): string {
   return `${opts.ownerEmail} shared "${opts.title}" with you on justhtml.sh.
 
@@ -232,7 +210,6 @@ export async function sendShareEmail(opts: {
   link: string;
   docUrl: string; // bare https://justhtml.sh/d/:slug — the stale-link recovery target
 }): Promise<string | null> {
-  const date = new Date().toISOString().slice(0, 10);
   const { data, error } = await resend().emails.send({
     from: RESEND_FROM,
     to: opts.to,
@@ -242,15 +219,12 @@ export async function sendShareEmail(opts: {
       title: opts.title,
       link: opts.link,
       docUrl: opts.docUrl,
-      granteeEmail: opts.to,
-      date,
     }),
     text: shareTextBody({
       ownerEmail: opts.ownerEmail,
       title: opts.title,
       link: opts.link,
       docUrl: opts.docUrl,
-      granteeEmail: opts.to,
     }),
     tags: [{ name: "flow", value: "share_notification" }],
   });
