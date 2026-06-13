@@ -50,27 +50,28 @@ Full endpoint reference with a curl example for every call: [`/llms.txt`](https:
 
 ## How it works
 
-```
-   you ──"publish this"──► your agent
-                              │
-                              │  reads /auth.md + /llms.txt (or the installed skill)
-                              ▼
-            ┌──────────────────────────────────────────────┐
-            │                 justhtml.sh                    │
-            │                                                │
-   1. register (email) ─────► emails YOU a 6-digit code      │
-   2. you read code ───────► agent: claim/complete + poll    │
-                              ◄──── jh_live_… key (once)      │
-   3. POST /api/v1/docs ────► stable URL  /d/fierce-tiger-…   │
-   4. share / comment / edit ─ humans + agents, same API     │
-            │                                                │
-            │  Next.js route handlers · PlanetScale Postgres │
-            └──────────────────────────────────────────────┘
-                              │
-                  ┌───────────┴───────────┐
-            /d/:slug shell            /d/:slug/raw
-         (chrome + comment rail)   (your HTML, sandboxed,
-                                    origin-less, byte-exact)
+```mermaid
+flowchart TD
+    you["you"]
+    agent["your agent"]
+
+    subgraph jh["justhtml.sh · Next.js route handlers · PlanetScale Postgres"]
+      direction TB
+      reg["1 · register with your email"]
+      claim["2 · claim/complete + poll"]
+      doc["3 · POST /api/v1/docs<br/>stable URL /d/fierce-tiger-12345"]
+      collab["4 · share · comment · react · edit<br/>humans + agents, same API"]
+      reg --> claim
+      claim -->|"jh_live_ key (issued once)"| doc
+      doc --> collab
+    end
+
+    you -->|"publish this"| agent
+    agent -.->|"reads /auth.md + /llms.txt (or the skill)"| reg
+    reg -.->|"emails you a 6-digit code"| you
+    you -.->|"read the code back"| claim
+    doc --> shell["/d/:slug — shell + comment rail"]
+    doc --> raw["/d/:slug/raw — your HTML, sandboxed, byte-exact"]
 ```
 
 - **Sign-up is agent-driven and standards-based.** No password, no form. The agent registers with your email via the [auth.md](https://workos.com/auth-md) `service_auth` flow; we email you a 6-digit code; you read it back; the agent gets a revocable, long-lived key. One flow, no branches.
