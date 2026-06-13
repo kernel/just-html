@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "migrate": "node --env-file=.env scripts/migrate.mjs",
-    "migrate:status": "node --env-file=.env scripts/migrate.mjs status"
+    "migrate:status": "node --env-file=.env scripts/migrate.mjs status",
+    "gen:skill": "node scripts/gen-skill.mjs"
   },
   "dependencies": {
     "@pierre/diffs": "^1.2.10",

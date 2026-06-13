@@ -17,6 +17,13 @@ export const dynamic = "force-dynamic";
 const AGENT_PROMPT =
   "I want to publish an HTML document to justhtml.sh. Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then get me an API key and publish the doc. When you register I'll get an email with a 6-digit code — check with me and I'll read it back so you can finish. Give me back the shareable URL when done.";
 
+// The one-line skill install command — the fastest path: install the skill,
+// then the agent already knows how to use justhtml.sh.
+const SKILL_INSTALL = "npx skills add kernel/just-html -g -y";
+
+// Reused clipboard-copy button (one per .promptwrap; wired by the inline script).
+const COPY_BTN = `<button class="copy" type="button" aria-label="Copy to clipboard" title="Copy"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.3"/><path d="M3.5 10.5h-.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v.5"/></svg></button>`;
+
 export function GET() {
   const html = `<!doctype html>
 <html lang="en">
@@ -76,12 +83,15 @@ export function GET() {
 
 <h2>SYNOPSIS</h2>
 <div class="body">
-<p class="hint">Paste this to your agent — it does the rest:</p>
+<p class="hint">Install the skill:</p>
 <div class="promptwrap">
-<button class="copy" id="copy" type="button" aria-label="Copy to clipboard" title="Copy">
-<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.3"/><path d="M3.5 10.5h-.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v.5"/></svg>
-</button>
-<pre class="prompt" id="prompt">${AGENT_PROMPT}</pre>
+${COPY_BTN}
+<pre class="prompt">${SKILL_INSTALL}</pre>
+</div>
+<p class="hint" style="margin-top:1.3rem;">Paste this to your agent — it does the rest:</p>
+<div class="promptwrap">
+${COPY_BTN}
+<pre class="prompt">${AGENT_PROMPT}</pre>
 </div>
 </div>
 
@@ -96,7 +106,8 @@ framework — the document you publish is the document people see.</pre></div>
 <div class="body"><pre><a href="/auth.md">auth.md</a>        how agents sign up + authenticate
 <a href="/llms.txt">llms.txt</a>       terse agent-facing usage, every endpoint
 <a href="/api/spec.yaml">spec.yaml</a>      OpenAPI 3.1
-<a href="/docs">/docs</a>          your documents (sign in: owned + shared)</pre></div>
+<a href="/docs">/docs</a>          your documents (sign in: owned + shared)
+<a href="https://github.com/kernel/just-html">github</a>         source — github.com/kernel/just-html</pre></div>
 
 <footer><pre>justhtml.sh                      2026-06-13                      JUSTHTML.SH(1)</pre></footer>
 
@@ -104,14 +115,20 @@ framework — the document you publish is the document people see.</pre></div>
 // The one intentional bit of JS on this page: a clipboard copy button. The
 // prompt also has user-select:all, so copy works without JS too.
 (function () {
-  var btn = document.getElementById("copy");
-  var pre = document.getElementById("prompt");
-  if (!btn || !pre || !navigator.clipboard) { if (btn) btn.style.display = "none"; return; }
-  btn.addEventListener("click", function () {
-    navigator.clipboard.writeText(pre.textContent).then(function () {
-      var prev = btn.innerHTML;
-      btn.textContent = "ok";
-      setTimeout(function () { btn.innerHTML = prev; }, 1200);
+  if (!navigator.clipboard) {
+    document.querySelectorAll(".copy").forEach(function (b) { b.style.display = "none"; });
+    return;
+  }
+  document.querySelectorAll(".promptwrap").forEach(function (wrap) {
+    var btn = wrap.querySelector(".copy");
+    var pre = wrap.querySelector(".prompt");
+    if (!btn || !pre) return;
+    btn.addEventListener("click", function () {
+      navigator.clipboard.writeText(pre.textContent).then(function () {
+        var prev = btn.innerHTML;
+        btn.textContent = "ok";
+        setTimeout(function () { btn.innerHTML = prev; }, 1200);
+      });
     });
   });
 })();

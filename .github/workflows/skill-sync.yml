@@ -1,0 +1,46 @@
+# Keep skills/just-html/SKILL.md in sync with the canonical content in
+# lib/skill-content.mjs (the same source /llms.txt serves). Runs only when the
+# content or generator changes; regenerates and commits the result if it drifted.
+# This is a CONTENT-SYNC job, not a deploy — production deploys come from the
+# Vercel↔GitHub git integration.
+name: skill-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - lib/skill-content.mjs
+      - scripts/gen-skill.mjs
+      - .github/workflows/skill-sync.yml
+
+permissions:
+  contents: write
+
+# Avoid overlapping runs racing to commit.
+concurrency:
+  group: skill-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Regenerate SKILL.md
+        run: node scripts/gen-skill.mjs
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- skills/; then
+            echo "SKILL.md already in sync."
+            exit 0
+          fi
+          git config user.name "justhtml-bot"
+          git config user.email "noreply@anthropic.com"
+          git add skills/just-html/SKILL.md
+          # The push only touches skills/, which is NOT in this workflow's path
+          # filter, so it will not re-trigger the job (no loop).
+          git commit -m "skill-sync: regenerate SKILL.md from llms.txt content"
+          git push
