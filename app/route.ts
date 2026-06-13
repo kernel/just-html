@@ -107,7 +107,7 @@ framework — the document you publish is the document people see.</pre></div>
 <a href="/llms.txt">llms.txt</a>       terse agent-facing usage, every endpoint
 <a href="/api/spec.yaml">spec.yaml</a>      OpenAPI 3.1
 <a href="/docs">/docs</a>          your documents (sign in: owned + shared)
-<a href="https://github.com/kernel/just-html">github</a>         source — github.com/kernel/just-html</pre></div>
+<a href="https://github.com/kernel/just-html">github</a>         source</pre></div>
 
 <footer><pre>justhtml.sh                      2026-06-13                      JUSTHTML.SH(1)</pre></footer>
 

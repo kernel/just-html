@@ -1,148 +1,98 @@
+<div align="center">
+
 # justhtml.sh
+### An agent-first minimal HTML document host
+**[Why](#why)** · **[Install](#install)** · **[Usage](#usage)** · **[How it works](#how-it-works)** · **[Collaboration](#collaboration)**
 
-An agent-first minimal HTML document host. An agent self-onboards (via the
-[auth.md](https://workos.com/auth-md) `service_auth` flow), gets a long-lived
-API key, and publishes HTML documents to stable URLs like
-`https://justhtml.sh/d/fierce-tiger-12345`. Docs are private by default,
-shareable via a view token, and optionally public. Humans and their agents
-collaborate on the same documents.
+</div>
 
-Single Next.js (App Router) app on Vercel. **Route-handler-first**: every
-surface that can be plain HTML/text/JSON IS, served with `new Response(...)` —
-man-page style, zero React, zero JS. React runs in exactly two places: the
-`/d/:slug` viewer shell and `/d/:slug/history`. Storage is PlanetScale Postgres
-only (docs are `TEXT`, capped at 2 MB). No Go backend, no Redis.
+*Point your agent at justhtml.sh. It self-onboards, gets an API key, and publishes your HTML to a stable URL — private by default, shareable, with Google-Docs-style comments and reactions that humans and their agents share. Even this project's homepage is just HTML.*
 
-Plan of record: [`docs/birthday.md`](docs/birthday.md). Auth spec:
-[`docs/authmd-implementation.md`](docs/authmd-implementation.md).
+HTML is back: agents produce genuinely good HTML for specs, docs, outlines, and proposals. The easy path today — write a file, open a tunnel — is ephemeral and non-collaborative. justhtml.sh is the durable, collaborative home for that HTML, and it's built to be driven by an agent end-to-end: discovery, sign-up, publishing, sharing, and commenting are all reachable with `curl`, no SDK.
 
-## Local development
+---
 
-```sh
-npm install
-cp .env.example .env   # then fill in the values (see below)
-npm run dev            # http://localhost:3000
+## Why
+
+An agent can already write the HTML. What it can't easily do is *give it a home* — a stable URL it can hand back to you, that stays private until you share it, that a teammate (or a teammate's agent) can comment on and edit. Cloudflare-tunnel-style sharing is a dead end: ephemeral, single-viewer, no identity, no collaboration.
+
+justhtml.sh fills that gap and makes the whole loop agent-native. Onboarding uses the open [auth.md](https://workos.com/auth-md) protocol, so an agent discovers how to register, gets a long-lived key, and publishes — the only human step is reading a 6-digit code back from your email. Sharing, comments, and reactions use the same endpoints for humans and agents.
+
+## Install
+
+Install the skill so your agent already knows how to use justhtml.sh:
+
+```bash
+npx skills add kernel/just-html -g -y
 ```
 
-## Environment variables
+That's optional — an agent can also just read [`/llms.txt`](https://justhtml.sh/llms.txt) and [`/auth.md`](https://justhtml.sh/auth.md) cold and figure it out. There's nothing to host and no account to create up front; sign-up is agent-driven (see Usage).
 
-All live in `.env` (never committed). See `.env.example` for the full list.
+## Usage
 
-| Var                  | Purpose                                                  |
-|----------------------|----------------------------------------------------------|
-| `PLANETSCALE_URL`    | Postgres connection string (psql-compatible wire)        |
-| `RESEND_API_KEY`     | Resend key for login magic-link email (`notify.justhtml.sh`) |
-| `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` | Deploy pipeline   |
-| `QA_SECRET`          | Optional, removable QA escape hatch (see below)          |
+Paste this to your agent — it does the rest:
 
-New env vars must be set in **both** `.env` and Vercel production env.
+> I want to publish an HTML document to justhtml.sh. Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then get me an API key and publish the doc. When you register I'll get an email with a 6-digit code — check with me and I'll read it back so you can finish. Give me back the shareable URL when done.
 
-## Migrations
+Your only step is reading the emailed code back to the agent. From there the agent has a long-lived `jh_live_…` key and the full API:
 
-SQL migrations live in `migrations/` (numbered, run in order). They run directly
-against the production PlanetScale database — there is no separate dev DB.
-
-```sh
-npm run migrate          # apply pending migrations (reads .env)
-npm run migrate:status   # show applied / pending
+```bash
+# Publish a private doc
+curl -s https://justhtml.sh/api/v1/docs \
+  -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"html":"<h1>Hello</h1>","title":"Demo"}'
+# -> { "slug":"fierce-tiger-12345", "url":"https://justhtml.sh/d/fierce-tiger-12345",
+#      "view_token":"k7Pq2xWmRb", ... }
+# Share the private link:  <url>?viewtoken=<view_token>
 ```
 
-Current schema: extensions, auth (users, registrations, claim codes, login
-tokens, sessions, api keys), documents + versions, collaboration tables
-(comments with W3C text-quote anchors + re-anchoring, reactions), rate-limit +
-audit tables, and the removable `qa_login_links` table.
+Full endpoint reference with a curl example for every call: [`/llms.txt`](https://justhtml.sh/llms.txt) · OpenAPI 3.1: [`/api/spec.yaml`](https://justhtml.sh/api/spec.yaml).
 
-## Deploy
+## How it works
 
-```sh
-npx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --scope onkernel
+```
+   you ──"publish this"──► your agent
+                              │
+                              │  reads /auth.md + /llms.txt (or the installed skill)
+                              ▼
+            ┌──────────────────────────────────────────────┐
+            │                 justhtml.sh                    │
+            │                                                │
+   1. register (email) ─────► emails YOU a 6-digit code      │
+   2. you read code ───────► agent: claim/complete + poll    │
+                              ◄──── jh_live_… key (once)      │
+   3. POST /api/v1/docs ────► stable URL  /d/fierce-tiger-…   │
+   4. share / comment / edit ─ humans + agents, same API     │
+            │                                                │
+            │  Next.js route handlers · PlanetScale Postgres │
+            └──────────────────────────────────────────────┘
+                              │
+                  ┌───────────┴───────────┐
+            /d/:slug shell            /d/:slug/raw
+         (chrome + comment rail)   (your HTML, sandboxed,
+                                    origin-less, byte-exact)
 ```
 
-The `justhtml.sh` apex is attached + verified on the kernel-team Vercel project
-and serves production. Verify after deploy: `GET https://justhtml.sh/api/health`
-returns `{"ok":true,"db":true}`.
+- **Sign-up is agent-driven and standards-based.** No password, no form. The agent registers with your email via the [auth.md](https://workos.com/auth-md) `service_auth` flow; we email you a 6-digit code; you read it back; the agent gets a revocable, long-lived key. One flow, no branches.
+- **Your HTML renders exactly as written, safely.** `/d/:slug/raw` serves your document byte-for-byte under a sandboxed, origin-less CSP — so a doc can run its own scripts (Mermaid, etc.) but can never touch justhtml.sh's session or other docs. A thin shell wraps it with light chrome.
+- **The document you publish is the document people see.** No build step, no framework, no transform. Stored as text in Postgres, served from a route handler.
+- **Private by default.** A private doc authorizes a viewer in order: owner session → a session whose email matches an email/domain grant → a `?viewtoken=` → public. Share by email and the grantee gets a one-click link that signs them in (no account) and lands them on the doc.
 
-## Surfaces
+## Collaboration
 
-Agent / discovery (plain text or JSON, zero JS):
+Documents are *lightly* collaborative — Google-Docs-style commenting and reactions, nothing heavier.
 
-- `GET /` — homepage / man-page docs (NAME … LIMITS + a copy-pasteable agent prompt).
-- `GET /auth.md` — prose auth protocol.
-- `GET /llms.txt` — terse agent usage: every endpoint with a curl example + limits.
-- `GET /api/spec.yaml` — OpenAPI 3.1 (validated with `@redocly/cli`).
-- `GET /.well-known/oauth-protected-resource`, `GET /.well-known/oauth-authorization-server`.
+- **Comments anchor to text.** A human click-drags to highlight; an agent "highlights" by quoting the passage (a W3C text-quote selector). Same payload, same endpoint. When a doc is edited, anchors re-anchor automatically; if their text is gone they're kept as "orphaned" and restored if the text comes back.
+- **Reactions** target a comment, a text span, or the whole doc — a curated emoji set, attributed, re-post to toggle off. Span reactions paint the same highlight as comments with an inline emoji chip.
+- **Editing is durable and deterministic.** Agents patch with search/replace edits against a base version (conflicts are reported, never guessed); every write snapshots a version you can diff at `/d/:slug/history`.
+- **Sharing carries identity.** Grant a teammate by email or whole domain; their agent registers as that email and the grant authorizes its edits — so two people's agents can collaborate on one document.
 
-Auth:
+## Development
 
-- Agent claim ceremony — **one flow** (no approve link, no hosted form, no
-  `claim_delivery` parameter): `POST /agent/identity` emails the human a 6-digit
-  code; the human reads it back to the agent; `POST /agent/identity/claim/complete`
-  confirms it; `POST /oauth2/token` (claim grant) issues the key once.
-  `POST /agent/identity/claim` re-mints a fresh code; `POST /oauth2/revoke`
-  revokes. The ceremony never mints a browser session.
-- Human (plain-HTML forms): `/login`, `/login/verify` (magic-link sign-in — the
-  only human sign-in; unrelated to the claim ceremony).
-- API 401s carry `WWW-Authenticate: Bearer resource_metadata="…"`.
+Local setup, environment variables, migrations, the deploy pipeline, the full
+surface reference, and operator notes are in [DEVELOPMENT.md](DEVELOPMENT.md).
+The design plan of record is [`docs/birthday.md`](docs/birthday.md).
 
-Documents (`/api/v1`, `Authorization: Bearer jh_live_…`): `docs` CRUD,
-`/edits` (deterministic patches), `/rotate-token`, `/versions`, `/grants`.
-`GET /api/v1/docs` items carry `access` and `comment_count`. Creating an
-**email** grant sends the grantee a share-notification email — one single-use,
-7-day login link (`kind='share'` on `login_tokens`) with `next=/d/:slug` that
-signs them in (email-keyed session, no account) and lands them on the doc.
-`notify:false` suppresses it; **domain grants never notify**.
+## License
 
-Comments & reactions (`/api/v1/docs/:slug/comments`, `/reactions`): humans and
-agents use the same endpoints. A human click-drags to highlight; an agent
-"highlights" by quoting (W3C text-quote anchor `{exact, prefix?, suffix?}`;
-null = doc-level). `GET /comments` returns the complete all-threads view
-(anchored in document order → doc-level → orphaned, resolved behind a flag) plus
-each thread's reactions, any `doc_reactions`, and span reactions as
-`anchored_reactions` (grouped by anchor signature, in document order). Anchors —
-on comments AND anchored reactions — re-anchor in the same transaction as every
-doc write (offset-map through patches → quote re-find → orphan; an orphaned
-anchored reaction degrades to doc-level display). Reactions are
-**attributed-only** (a curated emoji set; unique per target+author+emoji; re-posting
-toggles off) and target one of three things: a comment (`comment_id`), a text
-span (`anchor` — same W3C shape as a comment anchor), or the whole doc (neither;
-supplying both `comment_id` and `anchor` is a 400). In the viewer a reacted span
-gets the same yellow highlight as a comment plus an inline emoji+count chip at the
-span's end (chip hover → reactor gravatars/emails; click your own → toggle off);
-the chip/highlight appear optimistically the instant you react, no reload. Comment:
-owner / editor or commenter grant / view-token holder with identity / any identity
-on a public doc. React: anyone who can view, with identity. Anonymous never writes.
-
-Viewing: `/d/:slug` (shell + sandboxed iframe; the google-docs-style comment
-rail appears once a doc has comments/reactions or the viewer can interact —
-zero comments + non-interacting viewer = zero chrome), `/d/:slug/raw`
-(CSP-sandboxed, origin-less; `?overlay=1` injects the highlight/selection
-overlay only inside the shell's iframe — direct `/raw` stays byte-pristine),
-`/d/:slug/history` (diff view). A private doc
-authorizes in order: owner session → email-grant session → domain-grant
-session → view token → public. The private-doc notice always offers "Was this
-shared with you? Sign in" (`/login?next=/d/:slug`) so an expired share link
-degrades to one extra email round-trip, never a dead end.
-
-## Operator: bulk-revoke a user's keys (incident response)
-
-```sql
-UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL;
-```
-
-## QA escape hatch (REMOVABLE post-launch)
-
-To let automated reviewers complete the magic-link flow without reading a real
-inbox, `GET /internal/qa/latest-login-link?email=…` (header
-`X-QA-Secret: $QA_SECRET`) returns the most recent **unconsumed** login link
-plaintext for an email. The plaintext is stored in the `qa_login_links` table
-**only when `QA_SECRET` is set** — with it unset, nothing is ever written there
-and the endpoint 404s. `QA_SECRET` is a strong random value set in both `.env`
-and Vercel production env.
-
-**To remove before public launch:**
-
-1. Unset `QA_SECRET` in `.env` and Vercel prod (this alone disables both the
-   writes and the endpoint).
-2. Delete `app/internal/qa/` and the QA write blocks in `app/login/route.ts` /
-   `app/login/verify/route.ts`.
-3. `DROP TABLE qa_login_links;`
+MIT
