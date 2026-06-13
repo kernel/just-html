@@ -29,7 +29,6 @@ All live in `.env` (never committed). See `.env.example` for the full list.
 | `PLANETSCALE_URL`    | Postgres connection string (psql-compatible wire)        |
 | `RESEND_API_KEY`     | Resend key for login magic-link email (`notify.justhtml.sh`) |
 | `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` | Deploy pipeline   |
-| `QA_SECRET`          | Optional, removable QA escape hatch (see below)          |
 
 New env vars must be set in **both** `.env` and Vercel production env.
 
@@ -45,8 +44,8 @@ npm run migrate:status   # show applied / pending
 
 Current schema: extensions, auth (users, registrations, claim codes, login
 tokens, sessions, api keys), documents + versions, collaboration tables
-(comments with W3C text-quote anchors + re-anchoring, reactions), rate-limit +
-audit tables, and the removable `qa_login_links` table.
+(comments with W3C text-quote anchors + re-anchoring, reactions), and rate-limit +
+audit tables.
 
 ## The agent skill
 
@@ -142,49 +141,26 @@ degrades to one extra email round-trip, never a dead end.
 
 The only thing that makes justhtml.sh hard to test black-box is the human step:
 registration and login deliberately email a code/link and expect it back, so an
-automated test has to "read the inbox." There are two ways to get past that, and
-we're mid-migration between them:
+automated test has to "read the inbox." The durable mechanism — and the only one
+— is a real test inbox:
 
-- **Interim (current): the QA escape hatch.** A production endpoint guarded by
-  `QA_SECRET` hands the test the emailed code/link directly (see below). It
-  works, but it's a backdoor in prod — it must be removed before public launch.
+- **`npm run e2e`** (`scripts/e2e.ts` via `tsx`) drives the flow exactly as a
+  human would. It creates throwaway **AgentMail** inboxes (provisioned via
+  Stripe Projects; `AGENTMAIL_AGENTMAIL_API_KEY` in `.env`), registers with one,
+  polls the AgentMail API for the 6-digit code, runs `claim/complete` + the token
+  poll, then exercises the core flows against `BASE_URL` (default
+  `https://justhtml.sh`): publish → sandboxed `/raw` → deterministic `/edits` +
+  stale-409 + history → anchored comment + reaction → share-by-email → read the
+  grantee's share-notification email → scanner-safe `/login/verify` (GET confirm,
+  POST consume) → grantee session views the private doc → revoke. 20 assertions.
 
-- **Target (durable, no backdoor): a real test inbox — BUILT.** `npm run e2e`
-  (`scripts/e2e.ts` via `tsx`) drives the flow exactly as a human would. It
-  creates throwaway **AgentMail** inboxes (provisioned via Stripe Projects;
-  `AGENTMAIL_AGENTMAIL_API_KEY` in `.env`), registers with one, polls the
-  AgentMail API for the 6-digit code, runs `claim/complete` + the token poll,
-  then exercises the core flows against `BASE_URL` (default `https://justhtml.sh`):
-  publish → sandboxed `/raw` → deterministic `/edits` + stale-409 + history →
-  anchored comment + reaction → share-by-email → read the grantee's
-  share-notification email → scanner-safe `/login/verify` (GET confirm, POST
-  consume) → grantee session views the private doc → revoke. 20 assertions.
-
-  Because it touches the real email path and needs no app-side secret, **it
-  replaces the QA hatch** — wire it into the build workflow's "live prod QA"
-  step, then delete `/internal/qa/*`, `QA_SECRET`, and `qa_login_links`. Until
-  then both exist; the QA hatch stays the workflow's mechanism.
+  It touches the real email path and needs no app-side secret, so there is no QA
+  backdoor in production: the earlier `QA_SECRET`-guarded escape hatch (the
+  `/internal/qa/*` endpoints and the `qa_login_links` / `qa_claim_emails` mirror
+  tables) has been removed.
 
 ## Operator: bulk-revoke a user's keys (incident response)
 
 ```sql
 UPDATE api_keys SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL;
 ```
-
-## QA escape hatch (REMOVABLE post-launch)
-
-To let automated reviewers complete the magic-link flow without reading a real
-inbox, `GET /internal/qa/latest-login-link?email=…` (header
-`X-QA-Secret: $QA_SECRET`) returns the most recent **unconsumed** login link
-plaintext for an email. The plaintext is stored in the `qa_login_links` table
-**only when `QA_SECRET` is set** — with it unset, nothing is ever written there
-and the endpoint 404s. `QA_SECRET` is a strong random value set in both `.env`
-and Vercel production env.
-
-**To remove before public launch:**
-
-1. Unset `QA_SECRET` in `.env` and Vercel prod (this alone disables both the
-   writes and the endpoint).
-2. Delete `app/internal/qa/` and the QA write blocks in `app/login/route.ts` /
-   `app/login/verify/route.ts`.
-3. `DROP TABLE qa_login_links;`

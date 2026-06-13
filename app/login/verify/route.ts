@@ -81,7 +81,14 @@ export async function POST(req: Request): Promise<Response> {
   if (!originOk(req)) {
     return htmlResponse(deadLinkPage(), { status: 403 });
   }
-  const form = await req.formData();
+  // An empty or unparseable body makes req.formData() throw; treat that as a
+  // missing token (a 4xx dead-link page) rather than letting it surface as a 500.
+  let form: FormData;
+  try {
+    form = await req.formData();
+  } catch {
+    return htmlResponse(deadLinkPage(), { status: 400 });
+  }
   const token = String(form.get("token") ?? "");
   // loginLanding maps a missing/"/" next to /docs (see GET above) so the bare
   // /login human flow lands on /docs, never the homepage.
@@ -96,13 +103,6 @@ export async function POST(req: Request): Promise<Response> {
   );
   const row = rows[0];
   if (!row) return htmlResponse(deadLinkPage(next), { status: 410 });
-
-  // Mirror consumption into the QA table when enabled (best-effort).
-  if (process.env.QA_SECRET) {
-    query(`UPDATE qa_login_links SET consumed_at = now() WHERE login_token_id = $1`, [
-      row.id,
-    ]).catch(() => {});
-  }
 
   const { token: sessionToken, sessionId } = await createSession(row.email);
   audit(req, "session.created", { meta: { email: row.email, session_id: sessionId } });

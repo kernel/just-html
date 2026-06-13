@@ -172,27 +172,12 @@ export async function POST(req: Request): Promise<Response> {
 
   const verifyUrl = `${ORIGIN}/login/verify?token=${token}&next=${encodeURIComponent(next)}`;
 
-  // QA escape hatch (REMOVABLE post-launch): when QA_SECRET is set, store the
-  // plaintext link so automated reviewers can complete the flow. Never write
-  // here when QA mode is off.
-  if (process.env.QA_SECRET) {
-    await query(
-      `INSERT INTO qa_login_links (email, link, login_token_id) VALUES ($1, $2, $3)`,
-      [lower, verifyUrl, tokenId]
-    ).catch(() => {});
-  }
-
   let resendId: string | null = null;
   try {
     resendId = await sendLoginEmail(lower, verifyUrl, `login-${tokenId}`);
   } catch {
     // Roll back the token row so a failed send doesn't leave a live token.
     await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});
-    if (process.env.QA_SECRET) {
-      await query(`DELETE FROM qa_login_links WHERE login_token_id = $1`, [tokenId]).catch(
-        () => {}
-      );
-    }
     return htmlResponse(
       manPage({
         title: "justhtml.sh — email failed",

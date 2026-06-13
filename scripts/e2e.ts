@@ -3,8 +3,7 @@
 // The hard part of testing this product is the human "read the inbox" step. This
 // harness does exactly what a human does: it registers with a REAL throwaway
 // inbox (AgentMail), then reads the 6-digit code / magic link back over the
-// AgentMail API. So it needs no /internal/qa endpoint and no QA_SECRET — once
-// this is trusted, that backdoor can be deleted (see DEVELOPMENT.md "Testing").
+// AgentMail API. It reads real emails, so it needs no app-side test secret.
 //
 //   AGENTMAIL_AGENTMAIL_API_KEY  (in .env; provisioned via Stripe Projects)
 //   BASE_URL                      default https://justhtml.sh

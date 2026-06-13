@@ -123,13 +123,6 @@ export async function POST(req: Request): Promise<Response> {
       "Could not send the confirmation email. Retry the re-mint in a moment."
     );
   }
-  if (process.env.QA_SECRET) {
-    await query(
-      `INSERT INTO qa_claim_emails (email, code, claim_code_id)
-       VALUES ($1, $2, $3)`,
-      [effectiveEmail, attempt.userCode, attempt.claimCodeId]
-    ).catch(() => {});
-  }
   audit(req, "claim_email.sent", {
     registrationId: reg.id,
     meta: { claim_code_id: attempt.claimCodeId, resend_id: resendId, remint: true },

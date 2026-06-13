@@ -136,16 +136,6 @@ export async function POST(req: Request): Promise<Response> {
       "Could not send the confirmation email. Retry registration in a moment."
     );
   }
-  // QA escape hatch (REMOVABLE post-launch): mirror the plaintext code so
-  // automated reviewers can complete the flow (the code is hashed everywhere
-  // else). Only when QA_SECRET is set.
-  if (process.env.QA_SECRET) {
-    await query(
-      `INSERT INTO qa_claim_emails (email, code, claim_code_id)
-       VALUES ($1, $2, $3)`,
-      [email, attempt.userCode, attempt.claimCodeId]
-    ).catch(() => {});
-  }
   audit(req, "claim_email.sent", {
     registrationId: reg.id,
     meta: { claim_code_id: attempt.claimCodeId, resend_id: resendId },

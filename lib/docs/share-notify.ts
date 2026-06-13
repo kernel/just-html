@@ -73,15 +73,6 @@ export async function sendShareNotification(opts: {
   // with you? sign in" link on /d/:slug (which carries next=/d/:slug).
   const docUrl = `${ORIGIN}${next}`;
 
-  // QA escape hatch (REMOVABLE post-launch): mirror the plaintext link so
-  // automated reviewers can complete the share flow. Only when QA_SECRET is set.
-  if (process.env.QA_SECRET) {
-    await query(
-      `INSERT INTO qa_login_links (email, link, login_token_id) VALUES ($1, $2, $3)`,
-      [to, link, tokenId]
-    ).catch(() => {});
-  }
-
   let resendId: string | null = null;
   try {
     resendId = await sendShareEmail({
@@ -94,11 +85,6 @@ export async function sendShareNotification(opts: {
     });
   } catch {
     await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});
-    if (process.env.QA_SECRET) {
-      await query(`DELETE FROM qa_login_links WHERE login_token_id = $1`, [tokenId]).catch(
-        () => {}
-      );
-    }
     return { sent: false, reason: "send_failed" };
   }
 
