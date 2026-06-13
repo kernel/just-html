@@ -8,11 +8,19 @@ import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "r
 // the shell (right) and talks to the injected overlay (raw?overlay=1) via
 // postMessage:
 //
-//   shell → overlay: jh:anchors (resolve+paint), jh:active (hover sync),
+//   shell → overlay: jh:anchors (resolve+paint), jh:reactions (chips+paint),
+//                    jh:active (hover sync), jh:focus (pin/focus a key),
 //                    jh:scrollTo, jh:clearSelection, jh:ping
 //   overlay → shell: jh:ready, jh:positions (highlight y → card alignment),
 //                    jh:selection / jh:selectionCleared (selection toolbar),
-//                    jh:hlClick / jh:hlHover (highlight ↔ card sync)
+//                    jh:focus (segment clicked: focused key + covering set),
+//                    jh:hlHover / jh:hlHoverOut (highlight ↔ card sync),
+//                    jh:reactionToggle (chip click)
+//
+// B14 "Overlap semantics": the overlay paints SEGMENTS (split at every anchor
+// boundary, comments + reactions unified) with depth shading; focus cycles the
+// covering set. The shell only needs to map comment ids ↔ rail cards; reaction
+// focus has no card (chips are inline). See lib/docs/overlay.ts.
 //
 // Reproduces the variant-b.html interaction feel: rail cards aligned to their
 // highlight's vertical position with no-overlap clamping; cards expand in place
@@ -207,12 +215,31 @@ export default function CommentsShell(props: Props) {
         case "jh:selectionCleared":
           setSelection(null);
           break;
-        case "jh:hlClick":
-          setPinnedId(d.id);
-          setActiveId(d.id);
+        case "jh:focus":
+          // B14 focus model (doc → rail): a segment was clicked/cycled in the doc.
+          // d.id is a comment id (number), a reaction key ("r:<sig>"), or null
+          // (focus cleared). Pin + scroll the matching rail card for comments;
+          // reaction-only focus has no rail card (chips live inline) so we just
+          // clear any pinned comment. The overlay already painted the focus/dim.
+          if (d.id == null) {
+            setPinnedId(null);
+            setActiveId(null);
+          } else if (typeof d.id === "number") {
+            setPinnedId(d.id);
+            setActiveId(d.id);
+          } else {
+            // reaction key focused — no rail card to pin
+            setPinnedId(null);
+            setActiveId(null);
+          }
           break;
         case "jh:hlHover":
-          setActiveId(d.id);
+          // d.id: comment id (number) or "r:<sig>" — only comment cards exist in
+          // the rail, so only numeric ids drive the rail's active state.
+          setActiveId(typeof d.id === "number" ? d.id : null);
+          break;
+        case "jh:hlHoverOut":
+          setActiveId(null);
           break;
         case "jh:reactionToggle":
           // A chip was clicked inside the iframe → optimistic toggle (add/remove).
@@ -454,7 +481,10 @@ export default function CommentsShell(props: Props) {
             onPin={(id) => {
               setPinnedId(id);
               setActiveId(id);
-              if (id != null) postToOverlay({ type: "jh:scrollTo", id });
+              // B14 rail → doc: focusing a card focuses its anchor in the document
+              // (intensify + dim others + scroll into view). Unpin clears focus.
+              if (id != null) postToOverlay({ type: "jh:focus", key: `c:${id}` });
+              else postToOverlay({ type: "jh:focus", key: null });
             }}
             onHover={(id) => setActiveId(id)}
             onReply={postComment}
