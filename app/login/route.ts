@@ -184,7 +184,7 @@ export async function POST(req: Request): Promise<Response> {
 
   let resendId: string | null = null;
   try {
-    resendId = await sendLoginEmail(lower, verifyUrl);
+    resendId = await sendLoginEmail(lower, verifyUrl, `login-${tokenId}`);
   } catch {
     // Roll back the token row so a failed send doesn't leave a live token.
     await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});

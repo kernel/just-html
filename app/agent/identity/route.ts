@@ -116,7 +116,11 @@ export async function POST(req: Request): Promise<Response> {
   // whose human never got the code.
   let resendId: string | null = null;
   try {
-    resendId = await sendClaimEmail({ to: email, code: attempt.userCode });
+    resendId = await sendClaimEmail({
+      to: email,
+      code: attempt.userCode,
+      idempotencyKey: `claim-${attempt.claimCodeId}`,
+    });
   } catch {
     await query(
       `UPDATE claim_codes SET superseded_at = now() WHERE id = $1`,

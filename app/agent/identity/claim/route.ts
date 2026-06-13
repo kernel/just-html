@@ -108,7 +108,11 @@ export async function POST(req: Request): Promise<Response> {
   // attempt is already superseded, so it stays dead).
   let resendId: string | null = null;
   try {
-    resendId = await sendClaimEmail({ to: effectiveEmail, code: attempt.userCode });
+    resendId = await sendClaimEmail({
+      to: effectiveEmail,
+      code: attempt.userCode,
+      idempotencyKey: `claim-${attempt.claimCodeId}`,
+    });
   } catch {
     await query(`UPDATE claim_codes SET superseded_at = now() WHERE id = $1`, [
       attempt.claimCodeId,

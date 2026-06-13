@@ -90,6 +90,7 @@ export async function sendShareNotification(opts: {
       title: opts.title,
       link,
       docUrl,
+      idempotencyKey: `share-${tokenId}`,
     });
   } catch {
     await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});

@@ -96,15 +96,22 @@ Single use, expires in ${EXPIRY_MIN} minutes. Didn't ask for this? Ignore it.`;
  * Send the login magic link. Returns the Resend message id on success.
  * Throws on send failure so the caller can roll back the token row (§9.2 step 6).
  */
-export async function sendLoginEmail(email: string, link: string): Promise<string | null> {
-  const { data, error } = await resend().emails.send({
-    from: RESEND_FROM,
-    to: email,
-    subject: LOGIN_SUBJECT,
-    html: htmlBody(email, link),
-    text: textBody(email, link),
-    tags: [{ name: "flow", value: "login_link" }],
-  });
+export async function sendLoginEmail(
+  email: string,
+  link: string,
+  idempotencyKey: string
+): Promise<string | null> {
+  const { data, error } = await resend().emails.send(
+    {
+      from: RESEND_FROM,
+      to: email,
+      subject: LOGIN_SUBJECT,
+      html: htmlBody(email, link),
+      text: textBody(email, link),
+      tags: [{ name: "flow", value: "login_link" }],
+    },
+    { idempotencyKey }
+  );
   if (error) {
     throw new Error(`resend send failed: ${error.message ?? String(error)}`);
   }
@@ -143,15 +150,19 @@ Didn't expect this? Ignore it.`;
 export async function sendClaimEmail(opts: {
   to: string;
   code: string;
+  idempotencyKey: string;
 }): Promise<string | null> {
-  const { data, error } = await resend().emails.send({
-    from: RESEND_FROM,
-    to: opts.to,
-    subject: CLAIM_SUBJECT,
-    html: claimHtmlBody({ email: opts.to, code: opts.code }),
-    text: claimTextBody({ email: opts.to, code: opts.code }),
-    tags: [{ name: "flow", value: "claim_email" }],
-  });
+  const { data, error } = await resend().emails.send(
+    {
+      from: RESEND_FROM,
+      to: opts.to,
+      subject: CLAIM_SUBJECT,
+      html: claimHtmlBody({ email: opts.to, code: opts.code }),
+      text: claimTextBody({ email: opts.to, code: opts.code }),
+      tags: [{ name: "flow", value: "claim_email" }],
+    },
+    { idempotencyKey: opts.idempotencyKey }
+  );
   if (error) {
     throw new Error(`resend send failed: ${error.message ?? String(error)}`);
   }
@@ -209,25 +220,29 @@ export async function sendShareEmail(opts: {
   title: string;
   link: string;
   docUrl: string; // bare https://justhtml.sh/d/:slug — the stale-link recovery target
+  idempotencyKey: string;
 }): Promise<string | null> {
-  const { data, error } = await resend().emails.send({
-    from: RESEND_FROM,
-    to: opts.to,
-    subject: shareSubject(opts.ownerEmail, opts.title),
-    html: shareHtmlBody({
-      ownerEmail: opts.ownerEmail,
-      title: opts.title,
-      link: opts.link,
-      docUrl: opts.docUrl,
-    }),
-    text: shareTextBody({
-      ownerEmail: opts.ownerEmail,
-      title: opts.title,
-      link: opts.link,
-      docUrl: opts.docUrl,
-    }),
-    tags: [{ name: "flow", value: "share_notification" }],
-  });
+  const { data, error } = await resend().emails.send(
+    {
+      from: RESEND_FROM,
+      to: opts.to,
+      subject: shareSubject(opts.ownerEmail, opts.title),
+      html: shareHtmlBody({
+        ownerEmail: opts.ownerEmail,
+        title: opts.title,
+        link: opts.link,
+        docUrl: opts.docUrl,
+      }),
+      text: shareTextBody({
+        ownerEmail: opts.ownerEmail,
+        title: opts.title,
+        link: opts.link,
+        docUrl: opts.docUrl,
+      }),
+      tags: [{ name: "flow", value: "share_notification" }],
+    },
+    { idempotencyKey: opts.idempotencyKey }
+  );
   if (error) {
     throw new Error(`resend send failed: ${error.message ?? String(error)}`);
   }
