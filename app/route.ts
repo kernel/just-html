@@ -1,205 +1,122 @@
-import { manPage, htmlResponse } from "@/lib/page";
+import { htmlResponse } from "@/lib/page";
 
-// Homepage — plain HTML, man-page style (httpbingo.org vibe), zero JS, always
-// light mode. IS the docs: NAME / SYNOPSIS / DESCRIPTION / AUTHENTICATION /
-// ENDPOINTS / EXAMPLES / LIMITS, full usage inline, plus a copy-pasteable
-// "paste this to your agent" prompt — the growth loop.
+// Homepage — plain HTML, true man-page style (tail.1 / httpbingo.org vibe),
+// always light mode, single JUSTHTML.SH(1) header, left-aligned sections with
+// hanging-indent bodies, one quiet footer. The SYNOPSIS *is* the paste-to-your-
+// agent prompt — the single hero element and the growth loop. NO API docs live
+// here; those are canonical at /llms.txt and /api/spec.yaml.
 //
 // Served as a dynamic route-handler response (new Response(html)) per the style
 // rules — NOT force-static (force-static turns handler output into a CDN static
-// asset that Vercel serves with stray access-control / content-disposition
-// headers). force-dynamic keeps it a real handler response.
+// asset with stray headers). force-dynamic keeps it a real handler response.
 export const dynamic = "force-dynamic";
 
-// The copy-pasteable agent prompt — the growth loop. Points the agent at the two
-// machine-facing files. Kept literal so a human can select-and-copy it.
-const AGENT_PROMPT = `I want to publish an HTML document to justhtml.sh.
-Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then get me
-an API key and publish the doc. When you register, I'll get an email with a
-6-digit code — check your email and tell me the 6-digit code so you can finish.
-Give me back the shareable URL when done.`;
+// The copy-pasteable agent prompt. ONE line, no newlines — the box wraps, so
+// embedded newlines would render as hard breaks. The agent reads auth.md +
+// llms.txt and does the rest.
+const AGENT_PROMPT =
+  "I want to publish an HTML document to justhtml.sh. Read https://justhtml.sh/auth.md and https://justhtml.sh/llms.txt, then get me an API key and publish the doc. When you register I'll get an email with a 6-digit code — check with me and I'll read it back so you can finish. Give me back the shareable URL when done.";
 
 export function GET() {
-  const body = `
-<h1>NAME</h1>
-<section><pre>    justhtml.sh — an agent-first minimal HTML document host</pre></section>
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>justhtml.sh(1)</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0 auto;
+    padding: 2rem 1.5rem 3rem;
+    max-width: 760px;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #111;
+    background: #fff;
+  }
+  .headline { font-weight: 700; margin: 0 0 1.5rem; }
+  h2 {
+    font-size: 14px; font-weight: 700; margin: 1.6rem 0 0.3rem;
+    text-transform: uppercase; letter-spacing: 0.03em;
+  }
+  pre { white-space: pre-wrap; margin: 0; }
+  .body { padding-left: 3.5ch; }
+  a { color: #0000ee; }
+  .promptwrap { position: relative; }
+  .prompt {
+    background: #f6f6f6;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 0.8rem 2.6rem 0.8rem 1rem;
+    white-space: pre-wrap;
+    user-select: all;
+  }
+  .copy {
+    position: absolute; top: 0.5rem; right: 0.5rem;
+    width: 1.7rem; height: 1.7rem; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #fff; border: 1px solid #ccc; border-radius: 4px;
+    color: #555; cursor: pointer; font-family: inherit; font-size: 11px;
+    user-select: none;
+  }
+  .copy:hover { border-color: #999; color: #111; }
+  .copy svg { width: 13px; height: 13px; }
+  .hint { color: #666; margin: 0 0 0.5rem; }
+  footer { margin-top: 2.5rem; color: #666; }
+</style>
+</head>
+<body>
+<pre class="headline">JUSTHTML.SH(1)</pre>
 
-<h1>SYNOPSIS</h1>
-<section><pre>    POST   /agent/identity                  register (agent, via auth.md)
-    POST   /api/v1/docs                      publish HTML        -> {slug,url,view_token}
-    GET    /d/:slug[?viewtoken=…]            view a document
-    GET    <a href="/docs">/docs</a>                            your documents (signed-in, owned + shared)
-    GET    <a href="/auth.md">/auth.md</a>  <a href="/llms.txt">/llms.txt</a>  <a href="/api/spec.yaml">/api/spec.yaml</a></pre></section>
+<h2>NAME</h2>
+<div class="body"><pre>justhtml.sh — an agent-first minimal HTML document host</pre></div>
 
-<h1>DESCRIPTION</h1>
-<section><pre>    HTML is back. Agents produce very high quality HTML for specs, docs,
-    outlines, and proposals. The easy path today — write a file, open a
-    tunnel — is ephemeral and non-collaborative.
+<h2>SYNOPSIS</h2>
+<div class="body">
+<p class="hint">Paste this to your agent — it does the rest:</p>
+<div class="promptwrap">
+<button class="copy" id="copy" type="button" aria-label="Copy to clipboard" title="Copy">
+<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.3"/><path d="M3.5 10.5h-.5a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h7a1 1 0 0 1 1 1v.5"/></svg>
+</button>
+<pre class="prompt" id="prompt">${AGENT_PROMPT}</pre>
+</div>
+</div>
 
-    justhtml.sh is a site you point your agent at. The agent self-onboards
-    (creates an account via the auth.md protocol), gets a long-lived API
-    key, and publishes HTML documents to stable URLs like
+<h2>DESCRIPTION</h2>
+<div class="body"><pre>The agent self-onboards, gets an API key, and publishes HTML to stable
+URLs like https://justhtml.sh/d/fierce-tiger-12345. Once published,
+documents can be edited and commented on, by you (via the web UI) or an
+agent (via API). Docs are private by default. There is no build step, no
+framework — the document you publish is the document people see.</pre></div>
 
-        https://justhtml.sh/d/fierce-tiger-12345
+<h2>SEE ALSO</h2>
+<div class="body"><pre><a href="/auth.md">auth.md</a>        how agents sign up + authenticate
+<a href="/llms.txt">llms.txt</a>       terse agent-facing usage, every endpoint
+<a href="/api/spec.yaml">spec.yaml</a>      OpenAPI 3.1
+<a href="/docs">/docs</a>          your documents (sign in: owned + shared)</pre></div>
 
-    Docs are private by default, shareable, and optionally public. The
-    humans (and their agents) you share with can view or edit, depending on
-    the permissions you grant — HTML that humans and their agents
-    collectively edit and collaborate on. No build step, no framework: the
-    document you publish is the document people see. Even this homepage is
-    just HTML.</pre></section>
+<footer><pre>justhtml.sh                      2026-06-13                      JUSTHTML.SH(1)</pre></footer>
 
-<h1>PASTE THIS TO YOUR AGENT</h1>
-<section><pre>    Drop this into your coding agent and it does the rest. The only
-    human step: check your email for a justhtml.sh message and read
-    the 6-digit code back to your agent.
-</pre>
-<pre style="background:#f3f3f3;border:1px solid #ccc;padding:0.8rem 1rem;border-radius:4px">${AGENT_PROMPT}</pre></section>
-
-<h1>AUTHENTICATION</h1>
-<section><pre>    Sign-up is agent-only — you cannot self-issue a key from a form. An
-    agent registers with your email, you confirm from your inbox, and the
-    agent receives a long-lived key. The full prose protocol (the auth.md
-    "service_auth" flow) is at <a href="/auth.md">/auth.md</a>; machine-readable discovery is
-    at <a href="/.well-known/oauth-authorization-server">/.well-known/oauth-authorization-server</a>.
-
-    The flow (exactly one — emailed code):
-
-      1. Agent:  POST /agent/identity {"type":"service_auth",
-                 "login_hint":"you@example.com"}
-                 -> claim_token (we email YOU a 6-digit code)
-      2. You:    check your email and tell your agent the 6-digit code
-      3. Agent:  POST /agent/identity/claim/complete {claim_token, user_code},
-                 then poll POST /oauth2/token (claim grant)
-                 -> access_token "jh_live_…" (returned exactly once)
-
-    No links to click, no forms — the human just reads the code back.
-
-    Use the key as a bearer token:
-
-        Authorization: Bearer jh_live_…
-
-    Keys carry scopes "docs.read docs.write" and do not expire; revoke with
-    POST /oauth2/revoke. Every API 401 carries a WWW-Authenticate header
-    pointing back at the discovery metadata, so a cold agent can bootstrap.</pre></section>
-
-<h1>ENDPOINTS</h1>
-<section><pre>    API base: https://justhtml.sh/api/v1 — Authorization: Bearer jh_live_…
-    Errors are JSON: {"error":"…","message":"…"}. OpenAPI: <a href="/api/spec.yaml">/api/spec.yaml</a>
-
-    POST   /docs                       create      {html, title?, public?}
-    GET    /docs?scope=owned|shared|all list docs (each carries access + title)
-    GET    /docs/:slug                 fetch metadata + html
-    PATCH  /docs/:slug                 update html / title / public
-    DELETE /docs/:slug                 soft-delete
-    POST   /docs/:slug/edits           apply patches {edits:[{oldText,newText}], base_version?}
-    POST   /docs/:slug/rotate-token    new view token (the "un-share")
-    GET    /docs/:slug/versions        version history
-    GET    /docs/:slug/versions/:n     a specific version's html
-    POST   /docs/:slug/grants          share {email|domain, role, notify?}  (owner only)
-    GET    /docs/:slug/grants          list grants                 (owner only)
-    DELETE /docs/:slug/grants/:id      revoke a grant              (owner only)
-
-    Comments &amp; reactions (humans + agents, same endpoints):
-    POST   /docs/:slug/comments        comment {body, anchor?, parent_id?}
-    GET    /docs/:slug/comments        all threads (anchored/doc/orphaned) + reactions
-    PATCH  /docs/:slug/comments/:id    edit body / resolve / unresolve
-    DELETE /docs/:slug/comments/:id    soft-delete (author own, owner any)
-    POST   /docs/:slug/reactions       react {emoji, comment_id?}  (re-post toggles off)
-    DELETE /docs/:slug/reactions/:id   remove your reaction
-
-    Viewing:
-    GET    /d/:slug                    viewer shell (chrome + sandboxed iframe)
-    GET    /d/:slug/raw                zero-chrome HTML (CSP sandbox)
-    GET    /d/:slug?viewtoken=…        private docs, via the view token
-    GET    <a href="/docs">/docs</a>                       signed-in listing of your owned + shared docs
-
-    A private doc is viewable by: its owner (signed in), anyone signed in
-    with an email/domain you granted, anyone holding the view token, or
-    everyone if it's public. Grant someone by email and they get a one-click
-    email that signs them in and drops them on the doc — no account needed.
-    Signed in, you can see and open everything you own or have access to at
-    <a href="/docs">/docs</a>.</pre></section>
-
-<h1>EXAMPLES</h1>
-<section><pre>    # Publish a private doc
-    curl -s https://justhtml.sh/api/v1/docs \\
-      -H "Authorization: Bearer $JUSTHTML_API_KEY" \\
-      -H 'Content-Type: application/json' \\
-      -d '{"html":"&lt;h1&gt;Hello&lt;/h1&gt;","title":"Demo"}'
-    # -> {"slug":"fierce-tiger-12345","url":"https://justhtml.sh/d/fierce-tiger-12345",
-    #     "view_token":"k7Pq2xWmRb", "version":1, "public":false, ...}
-    # Share it:  https://justhtml.sh/d/fierce-tiger-12345?viewtoken=k7Pq2xWmRb
-
-    # Edit it deterministically (always send base_version)
-    curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/edits \\
-      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-      -d '{"edits":[{"oldText":"Hello","newText":"Hi there"}],"base_version":1}'
-
-    # Make it public
-    curl -s -X PATCH https://justhtml.sh/api/v1/docs/fierce-tiger-12345 \\
-      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-      -d '{"public":true}'
-
-    # Share edit access with a teammate. They get a one-click email that signs
-    # them in and lands them on the doc (no account needed); their agent can
-    # register via auth.md with that email to edit. Add "notify":false to skip
-    # the email. Domain grants ({"domain":"co.com"}) never email.
-    curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/grants \\
-      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-      -d '{"email":"teammate@co.com","role":"editor"}'
-    # -> {"slug":"...","grant":{...},"notified":true}
-
-    # Comment on a quote (an agent "highlights" by quoting; omit anchor for a
-    # doc-level comment, add parent_id to reply). GET /comments returns every
-    # thread + its reactions — the same picture a human sees in the rail.
-    curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/comments \\
-      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-      -d '{"body":"tighten this","anchor":{"exact":"Hi there","prefix":"","suffix":""}}'
-    # -> 201 {"comment":{"id":42,"author":"you@co.com","body":"tighten this", ...}}
-
-    # React on the doc (omit comment_id) or a comment. Re-posting the same emoji
-    # toggles it off. Allowed set is curated; others 400 with the list.
-    curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/reactions \\
-      -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
-      -d '{"emoji":"🚀","comment_id":42}'
-    # -> 201 {"reaction":{"id":7,"emoji":"🚀","author":"you@co.com", ...}}</pre></section>
-
-<h1>LIMITS</h1>
-<section><pre>    Resource quotas (per user)
-      Max HTML size per doc        2 MB        -> 413 payload_too_large
-      Docs per user                500         -> 403 quota_exceeded
-      Versions retained per doc    100         oldest snapshots pruned
-      Total storage per user       100 MB      current html + snapshots
-      Grants per doc               50          -> 403 quota_exceeded
-      API keys per user            10
-      Comment body size            10 KB       -> 413 payload_too_large
-      Comments per doc             1,000       -> 403 quota_exceeded
-
-    API rate limits (per API key)  -> 429 with Retry-After
-      Doc creates                  60 / hour
-      Writes (PATCH,/edits,grants,rotate) 60 / min
-      Comment/reaction writes      60 / min    (per key or session)
-      Reads (GET)                  300 / min
-
-    Unauthenticated viewer routes (per IP)   300 / min
-
-    Limits live in one config module; agents can plan around them via
-    <a href="/llms.txt">/llms.txt</a> and <a href="/api/spec.yaml">/api/spec.yaml</a>.</pre></section>
-
-<h1>SEE ALSO</h1>
-<section><pre>    <a href="/auth.md">/auth.md</a>           how agents sign up + authenticate (prose protocol)
-    <a href="/llms.txt">/llms.txt</a>          terse agent-facing usage, every endpoint + curl
-    <a href="/api/spec.yaml">/api/spec.yaml</a>     OpenAPI 3.1
-    <a href="/login">/login</a>             human sign-in (magic link)
-    <a href="/docs">/docs</a>              your documents (signed-in: owned + shared)
-    <a href="/api/health">/api/health</a>        service + database health</pre></section>
-`;
-  return htmlResponse(
-    manPage({
-      title: "justhtml.sh — minimal HTML document host",
-      center: "GENERAL",
-      bodyHtml: body,
-    })
-  );
+<script>
+// The one intentional bit of JS on this page: a clipboard copy button. The
+// prompt also has user-select:all, so copy works without JS too.
+(function () {
+  var btn = document.getElementById("copy");
+  var pre = document.getElementById("prompt");
+  if (!btn || !pre || !navigator.clipboard) { if (btn) btn.style.display = "none"; return; }
+  btn.addEventListener("click", function () {
+    navigator.clipboard.writeText(pre.textContent).then(function () {
+      var prev = btn.innerHTML;
+      btn.textContent = "ok";
+      setTimeout(function () { btn.innerHTML = prev; }, 1200);
+    });
+  });
+})();
+</script>
+</body>
+</html>`;
+  return htmlResponse(html);
 }
