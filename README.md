@@ -90,8 +90,8 @@ Documents are *lightly* collaborative — Google-Docs-style commenting and react
 ## Development
 
 Local setup, environment variables, migrations, the deploy pipeline, the full
-surface reference, and operator notes are in [DEVELOPMENT.md](DEVELOPMENT.md).
-The design plan of record is [`docs/birthday.md`](docs/birthday.md).
+surface reference, testing, and operator notes are in
+[DEVELOPMENT.md](DEVELOPMENT.md).
 
 ## License
 

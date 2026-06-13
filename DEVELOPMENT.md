@@ -12,9 +12,6 @@ man-page style, zero React, zero JS. React runs in exactly two places: the
 `/d/:slug` viewer shell and `/d/:slug/history`. Storage is PlanetScale Postgres
 only (docs are `TEXT`, capped at 2 MB). No Go backend, no Redis.
 
-Plan of record: [`docs/birthday.md`](docs/birthday.md). Auth spec:
-[`docs/authmd-implementation.md`](docs/authmd-implementation.md).
-
 ## Local development
 
 ```sh
@@ -140,6 +137,34 @@ authorizes in order: owner session → email-grant session → domain-grant
 session → view token → public. The private-doc notice always offers "Was this
 shared with you? Sign in" (`/login?next=/d/:slug`) so an expired share link
 degrades to one extra email round-trip, never a dead end.
+
+## Testing core flows end-to-end
+
+The only thing that makes justhtml.sh hard to test black-box is the human step:
+registration and login deliberately email a code/link and expect it back, so an
+automated test has to "read the inbox." There are two ways to get past that, and
+we're mid-migration between them:
+
+- **Interim (current): the QA escape hatch.** A production endpoint guarded by
+  `QA_SECRET` hands the test the emailed code/link directly (see below). It
+  works, but it's a backdoor in prod — it must be removed before public launch.
+
+- **Target (durable, no backdoor): a real test inbox.** Drive the flow exactly
+  as a human would — register with a real address, then *read the email* over an
+  API to extract the code/link. The clean fit is **AgentMail** (provisionable via
+  Stripe Projects; purpose-built for agents to send and receive email): the
+  harness creates a throwaway inbox `qa-<rand>@<agentmail-domain>`, calls
+  `POST /agent/identity` with it, polls the AgentMail API for the 6-digit code,
+  runs `claim/complete` + the token poll, then exercises the core flows (publish
+  → share → the grantee's magic link → comment → react → edit → history) against
+  a base URL. Because it touches the real email path and needs no app-side
+  secret, **it replaces the QA hatch entirely** — once it's in place, delete
+  `/internal/qa/*`, `QA_SECRET`, and `qa_login_links`.
+
+  Shape: `scripts/e2e.ts` (run via `tsx`), `BASE_URL` + `AGENTMAIL_*` from env,
+  pointed at a preview deploy (or prod with `raf+e2e-*` aliases). This is also
+  the right harness for the build workflow's "live prod QA" step, so agents
+  working on core flows get a real regression check instead of the backdoor.
 
 ## Operator: bulk-revoke a user's keys (incident response)
 
