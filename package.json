@@ -9,7 +9,8 @@
     "lint": "next lint",
     "migrate": "node --env-file=.env scripts/migrate.mjs",
     "migrate:status": "node --env-file=.env scripts/migrate.mjs status",
-    "gen:skill": "tsx scripts/gen-skill.ts"
+    "gen:skill": "tsx scripts/gen-skill.ts",
+    "e2e": "node --env-file=.env node_modules/.bin/tsx scripts/e2e.ts"
   },
   "dependencies": {
     "@pierre/diffs": "^1.2.10",

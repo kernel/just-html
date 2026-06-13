@@ -149,22 +149,21 @@ we're mid-migration between them:
   `QA_SECRET` hands the test the emailed code/link directly (see below). It
   works, but it's a backdoor in prod — it must be removed before public launch.
 
-- **Target (durable, no backdoor): a real test inbox.** Drive the flow exactly
-  as a human would — register with a real address, then *read the email* over an
-  API to extract the code/link. The clean fit is **AgentMail** (provisionable via
-  Stripe Projects; purpose-built for agents to send and receive email): the
-  harness creates a throwaway inbox `qa-<rand>@<agentmail-domain>`, calls
-  `POST /agent/identity` with it, polls the AgentMail API for the 6-digit code,
-  runs `claim/complete` + the token poll, then exercises the core flows (publish
-  → share → the grantee's magic link → comment → react → edit → history) against
-  a base URL. Because it touches the real email path and needs no app-side
-  secret, **it replaces the QA hatch entirely** — once it's in place, delete
-  `/internal/qa/*`, `QA_SECRET`, and `qa_login_links`.
+- **Target (durable, no backdoor): a real test inbox — BUILT.** `npm run e2e`
+  (`scripts/e2e.ts` via `tsx`) drives the flow exactly as a human would. It
+  creates throwaway **AgentMail** inboxes (provisioned via Stripe Projects;
+  `AGENTMAIL_AGENTMAIL_API_KEY` in `.env`), registers with one, polls the
+  AgentMail API for the 6-digit code, runs `claim/complete` + the token poll,
+  then exercises the core flows against `BASE_URL` (default `https://justhtml.sh`):
+  publish → sandboxed `/raw` → deterministic `/edits` + stale-409 + history →
+  anchored comment + reaction → share-by-email → read the grantee's
+  share-notification email → scanner-safe `/login/verify` (GET confirm, POST
+  consume) → grantee session views the private doc → revoke. 20 assertions.
 
-  Shape: `scripts/e2e.ts` (run via `tsx`), `BASE_URL` + `AGENTMAIL_*` from env,
-  pointed at a preview deploy (or prod with `raf+e2e-*` aliases). This is also
-  the right harness for the build workflow's "live prod QA" step, so agents
-  working on core flows get a real regression check instead of the backdoor.
+  Because it touches the real email path and needs no app-side secret, **it
+  replaces the QA hatch** — wire it into the build workflow's "live prod QA"
+  step, then delete `/internal/qa/*`, `QA_SECRET`, and `qa_login_links`. Until
+  then both exist; the QA hatch stays the workflow's mechanism.
 
 ## Operator: bulk-revoke a user's keys (incident response)
 
