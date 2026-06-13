@@ -13,8 +13,13 @@ This repository is initialized for the Stripe project "2026-06-11-justhtml".
 - **Database**: PlanetScale Postgres, managed via Stripe Projects (resource
   `justhtml-db`). Credentials in `.env` (`PLANETSCALE_*`).
 - **Hosting**: Vercel project `justhtml` in the **kernel team** (`onkernel`,
-  `team_Uu9t3uNi9jk9ySkscUsrqrvv`) — NOT managed by Stripe Projects. Deploy
-  with `npx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --scope onkernel`.
+  `team_Uu9t3uNi9jk9ySkscUsrqrvv`) — NOT managed by Stripe Projects.
+  **AUTO-DEPLOY IS ON (2026-06-13):** the project is linked to GitHub
+  `kernel/just-html`, production branch `main` — every push to `main`
+  auto-deploys to production, and branches/PRs get preview URLs. So a normal
+  `git push` ships to prod; you usually do NOT need a manual deploy. Only
+  push commits you intend to go live. Manual deploy is still available if
+  needed: `npx vercel deploy --prod --yes --token "$VERCEL_TOKEN" --scope onkernel`.
   `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` in `.env` are
   maintained by hand; `stripe projects env --pull` does NOT manage them.
   The domain justhtml.sh is owned by the same team (attached + verified).
