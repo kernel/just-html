@@ -50,7 +50,15 @@ export default async function ViewerNotFound() {
       }
     })();
   const slugMatch = path && /^\/d\/([^/?]+)/.exec(path);
-  const next = slugMatch ? `/d/${slugMatch[1]}` : null;
+  // Guard the route-pattern placeholder: x-matched-path resolves to the literal
+  // "/d/[slug]" when there's no concrete URL to recover from (e.g. a no-referer
+  // request rendered via notFound()). "next=/d/[slug]" would be a broken link,
+  // so drop to a bare /login rather than promising "right back here".
+  const recovered =
+    slugMatch && !slugMatch[1].includes("[") && !slugMatch[1].includes("%5B")
+      ? slugMatch[1]
+      : null;
+  const next = recovered ? `/d/${recovered}` : null;
   const signinHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
   const date = new Date().toISOString().slice(0, 10);
 
