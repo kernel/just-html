@@ -8,7 +8,7 @@
 // CONTENT lives in lib/skill-content.mjs (the single source of truth), shared
 // with skills/just-html/SKILL.md so `npx skills add kernel/just-html` and
 // /llms.txt never drift. Edit the content there, not here.
-import { LLMS_BODY } from "@/lib/skill-content.mjs";
+import { LLMS_BODY } from "@/lib/skill-content";
 
 export const dynamic = "force-dynamic";
 

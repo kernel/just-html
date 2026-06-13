@@ -9,8 +9,8 @@ on:
   push:
     branches: [main]
     paths:
-      - lib/skill-content.mjs
-      - scripts/gen-skill.mjs
+      - lib/skill-content.ts
+      - scripts/gen-skill.ts
       - .github/workflows/skill-sync.yml
 
 permissions:
@@ -29,8 +29,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+      - run: npm ci
       - name: Regenerate SKILL.md
-        run: node scripts/gen-skill.mjs
+        run: npm run gen:skill
       - name: Commit if changed
         run: |
           if git diff --quiet -- skills/; then

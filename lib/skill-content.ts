@@ -1,11 +1,10 @@
 // Canonical agent-facing usage content — the SINGLE source of truth shared by:
-//   - GET /llms.txt          (app/llms.txt/route.ts serves LLMS_BODY)
-//   - skills/just-html/SKILL.md  (scripts/gen-skill.mjs writes frontmatter + LLMS_BODY)
+//   - GET /llms.txt              (app/llms.txt/route.ts serves LLMS_BODY)
+//   - skills/just-html/SKILL.md  (scripts/gen-skill.ts writes frontmatter + LLMS_BODY)
 //
-// Plain .mjs (no types) so it imports natively from BOTH Next/TS and a bare
-// `node` generator script with zero build tooling. Edit the content HERE; run
-// `npm run gen:skill` (or let the skill-sync GitHub Action do it) to regenerate
-// the committed SKILL.md that `npx skills add kernel/just-html` reads.
+// Edit the content HERE; run `npm run gen:skill` (runs via tsx) — or let the
+// skill-sync GitHub Action do it — to regenerate the committed SKILL.md that
+// `npx skills add kernel/just-html` reads.
 
 export const SKILL_NAME = "just-html";
 
