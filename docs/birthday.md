@@ -643,12 +643,27 @@ phase-2 comment overlay without touching user HTML.
 The homepage at `/` is itself basic HTML — man-page style, à la
 https://httpbingo.org/. Monospace, no framework CSS, no JS required, and
 **always light mode** (like httpbingo — no dark variant, no
-prefers-color-scheme). It IS the docs: NAME / SYNOPSIS / DESCRIPTION /
-AUTHENTICATION / ENDPOINTS / EXAMPLES sections, with full usage inline.
+prefers-color-scheme).
 
-It should include one copy-pasteable prompt ("paste this to your agent") that
-points the agent at auth.md + llms.txt — that prompt is the growth loop. The
-product's homepage being just html is the brand.
+**Content (revised 2026-06-13 — keep it MINIMAL, the homepage is NOT the API
+docs):**
+- A short NAME/what-this-is line.
+- **SYNOPSIS = the copy-pasteable "paste this to your agent" prompt** — this
+  is the single hero element and the growth loop. The agent reads auth.md +
+  llms.txt and does the rest; the human's whole job is pasting that block.
+- A few lines of DESCRIPTION/prose at most.
+- **NO API docs on the homepage** — no ENDPOINTS table, no EXAMPLES, no
+  AUTHENTICATION walkthrough, no LIMITS table. Those live in
+  **`/llms.txt`** (agent-facing) and **`/api/spec.yaml`** (OpenAPI) — and
+  those two must carry genuinely useful descriptions, since they're now the
+  canonical docs. Homepage links to them, doesn't duplicate them.
+
+**Chrome (design direction 2026-06-13):** the man-page header is too busy.
+Current shell renders `JUSTHTML.SH(1)` twice plus a stray `GENERAL` center
+label and a full bottom bar — collapse to a single minimal title. Explore
+left-alignment (vs the centered three-column man layout). Inspiration:
+https://man7.org/linux/man-pages/man1/tail.1.html and httpbingo's restraint.
+Variations explored in `design/home-demo/`; keep it minimal.
 
 **How, in Next.js**: don't use a React page. App Router supports plain route
 handlers (`app/route.ts` for `/`) returning `new Response(htmlString)` —
