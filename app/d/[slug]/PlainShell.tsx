@@ -4,17 +4,19 @@
 // identical to the pre-B10 page. Server component; the root layout supplies
 // <html>/<body> and the monospace brand.
 
+// Viewer chrome bar — variant A (LOCKED 2026-06-13): bold title left, quiet
+// "made with justhtml.sh" right, same weights/colors as the page footer.
 const BAR: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
   height: "2.4rem",
-  padding: "0 0.9rem",
+  padding: "0 1.25rem",
   fontFamily: `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`,
   fontSize: 13,
   borderBottom: "1px solid #ccc",
   color: "#111",
-  background: "#fafafa",
+  background: "#fff",
 };
 
 export default function PlainShell({ title, rawSrc }: { title: string; rawSrc: string }) {
@@ -31,8 +33,11 @@ export default function PlainShell({ title, rawSrc }: { title: string; rawSrc: s
         >
           {title}
         </span>
-        <span style={{ flexShrink: 0, paddingLeft: "0.9rem" }}>
-          made with <a href="/">justhtml.sh</a>
+        <span style={{ flexShrink: 0, paddingLeft: "1.25rem", color: "#666" }}>
+          made with{" "}
+          <a href="/" style={{ color: "#666" }}>
+            justhtml.sh
+          </a>
         </span>
       </div>
       <iframe

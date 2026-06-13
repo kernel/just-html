@@ -26,52 +26,42 @@ function resend(): Resend {
 
 const EXPIRY_MIN = Math.round(LOGIN_TOKEN_TTL_S / 60);
 
-function htmlBody(email: string, link: string, date: string): string {
+// Variant B (ultra-spare), LOCKED 2026-06-13. One sentence + the single
+// load-bearing thing (the link) + one quiet caveat line. Inline CSS only (no
+// <style>), no images, no tracking pixels, light only, ~600px.
+function htmlBody(email: string, link: string, _date: string): string {
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const e = esc(email);
   const href = esc(link);
   return `<!doctype html>
-<html>
-  <body style="margin:0; padding:24px; background:#ffffff;">
-    <pre style="margin:0; font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.5; color:#111111; white-space:pre-wrap;">
-JUSTHTML.SH(1)                     LOGIN                     JUSTHTML.SH(1)
-
-NAME
-    justhtml.sh login link
-
-SYNOPSIS
-    you asked to sign in as
-    ${e}
-
-LINK
-    <a href="${href}" style="color:#0000ee;">${href}</a>
-
-NOTES
-    single use. expires in ${EXPIRY_MIN} minutes.
-
-    clicking signs you in on this device.
-
-    didn't request this? ignore it. nothing happens without the click.
-
-JUSTHTML.SH                      ${date}                  JUSTHTML.SH(1)
-    </pre>
-  </body>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>justhtml.sh login</title></head>
+<body style="margin:0; padding:0; background:#ffffff;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
+  <tr><td align="left">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
+  <tr><td style="padding:40px 24px;">
+    <div style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.7; color:#111111;">
+      <div>Sign in to justhtml.sh as <strong>${e}</strong>.</div>
+      <div style="margin-top:24px;"><a href="${href}" style="color:#0000ee; font-size:15px;">Click here to sign in &rarr;</a></div>
+      <div style="margin-top:24px; color:#666666;">Single use, expires in ${EXPIRY_MIN} minutes. Didn't ask for this? Ignore it.</div>
+    </div>
+  </td></tr>
+  </table>
+  </td></tr>
+  </table>
+</body>
 </html>`;
 }
 
 function textBody(email: string, link: string): string {
-  return `justhtml.sh login link
+  return `Sign in to justhtml.sh as ${email}.
 
-you asked to sign in as ${email}
-
-LINK
+Click here to sign in:
   ${link}
 
-single use. expires in ${EXPIRY_MIN} minutes. clicking signs you in on this
-device.
-
-didn't request this? ignore it. nothing happens without the click.`;
+Single use, expires in ${EXPIRY_MIN} minutes. Didn't ask for this? Ignore it.`;
 }
 
 /**
@@ -102,57 +92,41 @@ export async function sendLoginEmail(email: string, link: string): Promise<strin
 
 const CLAIM_EXPIRY_MIN = Math.round(USER_CODE_TTL_S / 60);
 
+// Variant B (ultra-spare), LOCKED 2026-06-13. NO links — the 6-digit code is the
+// anchor: big and centered. One lead sentence + the code + one quiet caveat line.
 function claimHtmlBody(opts: { email: string; code: string; date: string }): string {
   const esc = (s: string) =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const e = esc(opts.email);
   const code = esc(opts.code);
   return `<!doctype html>
-<html>
-  <body style="margin:0; padding:24px; background:#ffffff;">
-    <pre style="margin:0; font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.5; color:#111111; white-space:pre-wrap;">
-JUSTHTML.SH(1)                     CLAIM                     JUSTHTML.SH(1)
-
-NAME
-    your justhtml.sh code
-
-SYNOPSIS
-    an agent is registering a justhtml.sh account for
-    ${e}
-    and asking for a key that can publish and edit HTML documents
-    as you. read this code back to your agent to authorize it:
-
-CODE
-        ${code}
-
-NOTES
-    expires in ${CLAIM_EXPIRY_MIN} minutes. only give this code to an agent you
-    trust and that you asked to sign you up.
-
-    didn't expect this? ignore it — nothing happens unless you hand
-    the code to an agent.
-
-JUSTHTML.SH                      ${opts.date}                  JUSTHTML.SH(1)
-    </pre>
-  </body>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>your justhtml.sh code</title></head>
+<body style="margin:0; padding:0; background:#ffffff;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
+  <tr><td align="left">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
+  <tr><td style="padding:40px 24px;">
+    <div style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.7; color:#111111;">
+      <div>Your justhtml.sh code for ${e}:</div>
+      <div style="margin:24px 0; font-size:48px; font-weight:700; letter-spacing:0.4em; line-height:1;">${code}</div>
+      <div style="color:#666666;">Read it back to the agent registering you. Expires in ${CLAIM_EXPIRY_MIN} minutes. Didn't expect this? Ignore it.</div>
+    </div>
+  </td></tr>
+  </table>
+  </td></tr>
+  </table>
+</body>
 </html>`;
 }
 
 function claimTextBody(opts: { email: string; code: string }): string {
-  return `your justhtml.sh code
+  return `Your justhtml.sh code for ${opts.email}:
 
-an agent is registering a justhtml.sh account for ${opts.email} and asking for a
-key that can publish and edit HTML documents as you. read this code back to your
-agent to authorize it:
-
-CODE
   ${opts.code}
 
-expires in ${CLAIM_EXPIRY_MIN} minutes. only give this code to an agent you trust
-and that you asked to sign you up.
-
-didn't expect this? ignore it — nothing happens unless you hand the code to an
-agent.`;
+Read it back to the agent registering you. Expires in ${CLAIM_EXPIRY_MIN} minutes.
+Didn't expect this? Ignore it.`;
 }
 
 /**
@@ -188,6 +162,9 @@ export function shareSubject(ownerEmail: string, title: string): string {
   return `${ownerEmail} shared "${title}" with you — justhtml.sh`;
 }
 
+// Variant B (ultra-spare), LOCKED 2026-06-13. One sentence + the single 7-day
+// link + one quiet caveat line. The stale-link recovery URL and the agent-edit
+// path stay folded into the caveat (no links dropped) but compressed to one line.
 function shareHtmlBody(opts: {
   ownerEmail: string;
   title: string;
@@ -200,42 +177,26 @@ function shareHtmlBody(opts: {
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const owner = esc(opts.ownerEmail);
   const title = esc(opts.title);
-  const grantee = esc(opts.granteeEmail);
   const href = esc(opts.link);
   const docHref = esc(opts.docUrl);
   return `<!doctype html>
-<html>
-  <body style="margin:0; padding:24px; background:#ffffff;">
-    <pre style="margin:0; font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.5; color:#111111; white-space:pre-wrap;">
-JUSTHTML.SH(1)                     SHARE                     JUSTHTML.SH(1)
-
-NAME
-    a document was shared with you
-
-SYNOPSIS
-    ${owner} shared the document
-    "${title}" with ${grantee}.
-
-OPEN
-    <a href="${href}" style="color:#0000ee;">${href}</a>
-
-NOTES
-    clicking the link signs you in on this device and takes you
-    straight to the document. no account or password needed.
-
-    single use. expires in ${SHARE_EXPIRY_DAYS} days. if it expires, open the
-    document directly and choose "was this shared with you? sign in":
-    <a href="${docHref}" style="color:#0000ee;">${docHref}</a>
-
-    to edit via API, tell your agent to register at
-    justhtml.sh/auth.md with this email.
-
-    didn't expect this? you can ignore it — nothing happens
-    without the click.
-
-JUSTHTML.SH                      ${opts.date}                  JUSTHTML.SH(1)
-    </pre>
-  </body>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>shared with you on justhtml.sh</title></head>
+<body style="margin:0; padding:0; background:#ffffff;">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="background:#ffffff;">
+  <tr><td align="left">
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="600" style="max-width:600px;">
+  <tr><td style="padding:40px 24px;">
+    <div style="font-family:ui-monospace,Menlo,Consolas,'Courier New',monospace; font-size:13px; line-height:1.7; color:#111111;">
+      <div>${owner} shared <strong>"${title}"</strong> with you.</div>
+      <div style="margin-top:24px;"><a href="${href}" style="color:#0000ee; font-size:15px;">Open the document &rarr;</a></div>
+      <div style="margin-top:24px; color:#666666;">Signs you in on this device, no account needed. Good for ${SHARE_EXPIRY_DAYS} days. If it expires, <a href="${docHref}" style="color:#666666;">open the document</a> and choose "was this shared with you? sign in". To edit via API, have your agent register at justhtml.sh/auth.md with this email.</div>
+    </div>
+  </td></tr>
+  </table>
+  </td></tr>
+  </table>
+</body>
 </html>`;
 }
 
@@ -246,23 +207,16 @@ function shareTextBody(opts: {
   docUrl: string;
   granteeEmail: string;
 }): string {
-  return `${opts.ownerEmail} shared a document with you on justhtml.sh
+  return `${opts.ownerEmail} shared "${opts.title}" with you on justhtml.sh.
 
-"${opts.title}" was shared with ${opts.granteeEmail}.
-
-OPEN
+Open the document:
   ${opts.link}
 
-clicking the link signs you in on this device and takes you straight to the
-document. no account or password needed. single use, expires in ${SHARE_EXPIRY_DAYS} days.
-if it expires, open the document directly and choose "was this shared with you?
-sign in":
+Signs you in on this device, no account needed. Good for ${SHARE_EXPIRY_DAYS} days. If it
+expires, open the document directly and choose "was this shared with you? sign in":
   ${opts.docUrl}
 
-to edit via API, tell your agent to register at justhtml.sh/auth.md with this
-email.
-
-didn't expect this? you can ignore it — nothing happens without the click.`;
+To edit via API, have your agent register at justhtml.sh/auth.md with this email.`;
 }
 
 /**

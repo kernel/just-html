@@ -11,17 +11,21 @@ export const dynamic = "force-dynamic";
 function confirmPage(token: string, next: string): string {
   return manPage({
     title: "justhtml.sh — confirm sign in",
-    center: "LOGIN",
     bodyHtml: `
-<h1>CONFIRM SIGN IN</h1>
-<section><pre>    Click the button to finish signing in on this device.</pre></section>
-<section><form method="POST" action="/login/verify">
+<h2>CONFIRM SIGN IN</h2>
+<div class="body"><pre>Click the button to finish signing in on this device.</pre></div>
+
+<h2>CONTINUE</h2>
+<div class="body">
+<form method="POST" action="/login/verify">
 <input type="hidden" name="token" value="${esc(token)}">
 <input type="hidden" name="next" value="${esc(next)}">
-<pre>    <button type="submit" style="font:inherit;padding:2px 10px">sign in</button></pre>
-</form></section>
-<section><pre>    This link is single-use. If it's expired or already used you'll
-    be asked to <a href="/login">request a new one</a>.</pre></section>
+<pre><button type="submit">sign in</button></pre>
+</form>
+</div>
+
+<div class="body"><pre>This link is single-use. If it's expired or already used you'll
+be asked to <a href="/login">request a new one</a>.</pre></div>
 `,
   });
 }
@@ -40,17 +44,16 @@ function deadLinkPage(next?: string): string {
     : "/login";
   return manPage({
     title: "justhtml.sh — link expired",
-    center: "LOGIN",
     bodyHtml: `
-<h1>LINK EXPIRED OR USED</h1>
-<section><pre>    This login link is expired or already used.
+<h2>LINK EXPIRED OR USED</h2>
+<div class="body"><pre>This login link is expired or already used.
 
-    Request a new one at <a href="${esc(requestHref)}">justhtml.sh/login</a>${
+Request a new one at <a href="${esc(requestHref)}">justhtml.sh/login</a>${
       dest
         ? ` — signing in again
-    will take you straight to where this link was headed.`
+will take you straight to where this link was headed.`
         : "."
-    }</pre></section>
+    }</pre></div>
 `,
   });
 }

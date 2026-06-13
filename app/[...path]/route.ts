@@ -19,14 +19,13 @@ export const dynamic = "force-dynamic";
 
 const PAGE = manPage({
   title: "404 — justhtml.sh",
-  center: "GENERAL",
   bodyHtml: `
-<h1>NOT FOUND</h1>
-<section><pre>    404 — there is nothing at this path.</pre></section>
+<h2>NOT FOUND</h2>
+<div class="body"><pre>404 — there is nothing at this path.</pre></div>
 
-<h1>SEE ALSO</h1>
-<section><pre>    GET <a href="/">/</a>              what justhtml.sh is
-    GET <a href="/api/health">/api/health</a>    service + database health</pre></section>
+<h2>SEE ALSO</h2>
+<div class="body"><pre><a href="/">/</a>              what justhtml.sh is
+<a href="/api/health">/api/health</a>    service + database health</pre></div>
 `,
 });
 

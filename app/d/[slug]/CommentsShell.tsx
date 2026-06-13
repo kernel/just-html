@@ -399,9 +399,9 @@ export default function CommentsShell(props: Props) {
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
           {title}
         </span>
-        <span style={{ flexShrink: 0, paddingLeft: "0.9rem", display: "flex", gap: "0.9rem", alignItems: "center" }}>
-          <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`}>history</a>
-          made with <a href="/">justhtml.sh</a>
+        <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "#666" }}>
+          <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "#666" }}>history</a>
+          <span>made with <a href="/" style={{ color: "#666" }}>justhtml.sh</a></span>
         </span>
       </div>
 
@@ -876,17 +876,19 @@ function Badge({ kind, children }: { kind: "res" | "orp"; children: React.ReactN
 
 // --------------------------- styles ---------------------------
 
+// Viewer chrome bar — variant A (LOCKED 2026-06-13): same weights/colors as the
+// page footer. Matches PlainShell's bar so both viewer paths share one chrome.
 const barStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
   height: "2.4rem",
-  padding: "0 0.9rem",
+  padding: "0 1.25rem",
   fontFamily: MONO,
   fontSize: 13,
   borderBottom: "1px solid #ccc",
   color: "#111",
-  background: "#fafafa",
+  background: "#fff",
 };
 
 const stageStyle: React.CSSProperties = {
