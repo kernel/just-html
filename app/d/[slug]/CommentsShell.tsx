@@ -467,7 +467,7 @@ export default function CommentsShell(props: Props) {
 
           {!signedIn ? (
             <div style={{ padding: "8px 10px", fontSize: 12, color: "#666", borderBottom: "1px solid #eee" }}>
-              <a href={`/login?next=${encodeURIComponent(`/d/${slug}`)}`}>Sign in</a> to comment.
+              <a href={`/login?next=${encodeURIComponent(`/d/${slug}`)}`} target="_blank" rel="noopener">Sign in</a> to comment.
             </div>
           ) : null}
 
