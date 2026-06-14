@@ -9,7 +9,8 @@ import {
   resolveCapability,
   COMMENT_WRITE_RL,
 } from "@/lib/docs/comments";
-import { addOrToggleReaction, isAllowedEmoji, ALLOWED_EMOJI } from "@/lib/docs/reactions";
+import { addOrToggleReaction } from "@/lib/docs/reactions";
+import { CreateReactionBody, emojiBadRequest } from "@/lib/docs/schemas";
 import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 
 export const dynamic = "force-dynamic";
@@ -64,11 +65,16 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   if ("response" in parsed) return parsed.response;
   const b = parsed.obj;
 
-  if (typeof b.emoji !== "string" || !isAllowedEmoji(b.emoji)) {
-    return apiError(400, "invalid_request", "Field 'emoji' must be one of the supported emoji.", {
-      allowed: [...ALLOWED_EMOJI],
-    });
-  }
+  // Zod owns the emoji ALLOWLIST (a z.enum over ALLOWED_EMOJI that generates
+  // into the spec); emojiBadRequest maps any emoji issue (missing/non-string/
+  // out-of-set — the old check 400'd all three identically) to the exact
+  // apiError with the allowed[] array preserved. comment_id (Number() coercion),
+  // the comment_id ⊕ anchor exclusion, and the anchor parse stay route-owned —
+  // ordering and parseAnchor's normalize are load-bearing.
+  const parsedBody = CreateReactionBody.safeParse(b);
+  if (!parsedBody.success) return emojiBadRequest();
+  const emoji = parsedBody.data.emoji;
+
   let commentId: number | null = null;
   if (b.comment_id !== undefined && b.comment_id !== null) {
     const n = Number(b.comment_id);
@@ -100,7 +106,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     commentId,
     anchor,
     authorUserId: principal.userId,
-    emoji: b.emoji,
+    emoji,
   });
   if ("error" in result) {
     return apiError(422, "bad_comment", "comment_id must reference a live comment on this document.");

@@ -277,11 +277,15 @@ components:
       type: object
       properties:
         email:
-          type: string
+          type:
+            - string
+            - 'null'
           format: email
           description: Grantee email (provide exactly one of email or domain).
         domain:
-          type: string
+          type:
+            - string
+            - 'null'
           example: kernel.sh
           description: Grantee email-domain (provide exactly one of email or domain).
         role:
@@ -527,6 +531,416 @@ components:
       description: >-
         Apply deterministic patches. edits is a non-empty list of {oldText,newText}. Always send
         base_version; a mismatch returns 409.
+    TextAnchor:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - text
+        exact:
+          type: string
+          example: deterministic compaction
+        prefix:
+          type: string
+          example: 'record store with '
+        suffix:
+          type: string
+          example: .
+        start:
+          type: integer
+        end:
+          type: integer
+      required:
+        - exact
+      description: >-
+        W3C text-quote selector (TextQuoteSelector + position hint). exact is the verbatim quoted
+        passage; prefix/suffix (~32 chars) disambiguate repeated text and survive surrounding
+        shifts; start/end are offsets into the document's text content (a fast-path hint, not
+        authoritative).
+    CreateCommentBody:
+      type: object
+      properties:
+        body:
+          type: string
+          description: Comment text (<= 10 KB).
+          example: is this right?
+        anchor:
+          description: W3C text-quote selector; null/omitted = doc-level.
+        parent_id:
+          type: integer
+          description: Root comment id to reply to (1-level threads only).
+      required:
+        - body
+      description: >-
+        Comment on a span by QUOTING it (anchor), at the doc level (omit anchor), or reply to a root
+        comment (parent_id).
+    UpdateCommentBody:
+      type: object
+      properties:
+        body:
+          type: string
+          description: Author only. The new comment text (<= 10 KB).
+        resolved:
+          type: boolean
+          description: Resolve/unresolve. Anyone who can comment.
+      description: >-
+        Edit body (author) and/or resolve/unresolve (anyone who can comment). At least one field is
+        required.
+    CreateReactionBody:
+      type: object
+      properties:
+        emoji:
+          type: string
+          enum:
+            - 👍
+            - 👎
+            - 🎉
+            - 🤔
+            - ❤️
+            - 🚀
+            - 👀
+            - 😄
+            - 🙏
+            - 🔥
+            - ✅
+            - 💯
+          description: >-
+            One of the curated set: 👍 👎 🎉 🤔 ❤️ 🚀 👀 😄 🙏 🔥 ✅ 💯. Anything else → 400
+            invalid_request with an "allowed" array listing the full set.
+          example: 🚀
+        comment_id:
+          type: integer
+          description: Target comment; omit/null = not a comment reaction. Mutually exclusive with anchor.
+        anchor:
+          description: >-
+            Target span (W3C text-quote selector). Mutually exclusive with comment_id; omit/null =
+            react on the doc (or comment).
+      required:
+        - emoji
+      description: >-
+        Add an emoji reaction. The target is 3-way and mutually exclusive: comment_id (a comment),
+        anchor (a span), or neither (the whole doc). Supplying both comment_id and anchor → 400.
+    ReactionGroup:
+      type: object
+      properties:
+        emoji:
+          type: string
+        count:
+          type: integer
+        authors:
+          type: array
+          items:
+            type: string
+            description: Author email.
+      required:
+        - emoji
+        - count
+        - authors
+      description: Reactions collapsed by emoji, with the attributed authors.
+    AnchoredReactionGroup:
+      type: object
+      properties:
+        sig:
+          type: string
+          description: Anchor signature (prefix|exact|suffix) — the grouping key.
+        anchor:
+          $ref: '#/components/schemas/TextAnchor'
+        anchored_version:
+          type:
+            - integer
+            - 'null'
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReactionGroup'
+      required:
+        - sig
+        - anchor
+        - anchored_version
+        - reactions
+      description: >-
+        All reactions on one text span, grouped by anchor signature, then collapsed per emoji. The
+        viewer paints one highlight on the span and a chip per emoji at the span's end.
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        parent_id:
+          type:
+            - integer
+            - 'null'
+        author:
+          type:
+            - string
+            - 'null'
+          description: Author email.
+        author_avatar:
+          type:
+            - string
+            - 'null'
+          format: uri
+          description: Gravatar URL.
+        body:
+          type: string
+        anchor:
+          allOf:
+            - $ref: '#/components/schemas/TextAnchor'
+            - type:
+                - object
+                - 'null'
+        anchored_version:
+          type:
+            - integer
+            - 'null'
+        orphaned:
+          type: boolean
+          description: Anchor no longer resolves; kept, shown unanchored.
+        resolved:
+          type: boolean
+        resolved_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        edited_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReactionGroup'
+      required:
+        - id
+        - parent_id
+        - author
+        - author_avatar
+        - body
+        - anchor
+        - anchored_version
+        - orphaned
+        - resolved
+        - resolved_at
+        - created_at
+        - edited_at
+        - reactions
+      description: A single comment (with its aggregated reactions).
+    CommentThread:
+      type: object
+      properties:
+        id:
+          type: integer
+        parent_id:
+          type:
+            - integer
+            - 'null'
+        author:
+          type:
+            - string
+            - 'null'
+        author_avatar:
+          type:
+            - string
+            - 'null'
+        body:
+          type: string
+        anchor:
+          allOf:
+            - $ref: '#/components/schemas/TextAnchor'
+            - type:
+                - object
+                - 'null'
+        anchored_version:
+          type:
+            - integer
+            - 'null'
+        orphaned:
+          type: boolean
+        resolved:
+          type: boolean
+        resolved_at:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type: string
+          format: date-time
+        edited_at:
+          type:
+            - string
+            - 'null'
+        reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReactionGroup'
+        group:
+          type: string
+          enum:
+            - anchored
+            - doc
+            - orphaned
+          description: Which group this thread sorts into in the all-threads view.
+        replies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+      required:
+        - id
+        - parent_id
+        - author
+        - author_avatar
+        - body
+        - anchor
+        - anchored_version
+        - orphaned
+        - resolved
+        - resolved_at
+        - created_at
+        - edited_at
+        - reactions
+        - group
+        - replies
+      description: A root comment with its group tag and 1-level replies.
+    CommentsListResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        version:
+          type: integer
+        total:
+          type: integer
+          description: Live comment + reply count.
+        can_comment:
+          type: boolean
+        can_react:
+          type: boolean
+        threads:
+          type: array
+          items:
+            $ref: '#/components/schemas/CommentThread'
+        doc_reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReactionGroup'
+          description: >-
+            Doc-level reactions (present only when any exist). Includes orphaned anchored reactions
+            degraded to doc-level.
+        anchored_reactions:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnchoredReactionGroup'
+          description: >-
+            Span reactions grouped by anchor signature, in document order, so clients stack/count
+            without re-grouping (present only when any exist).
+      required:
+        - slug
+        - version
+        - total
+        - can_comment
+        - can_react
+        - threads
+      description: The complete all-threads view.
+    CommentCreatedResponse:
+      type: object
+      properties:
+        comment:
+          $ref: '#/components/schemas/Comment'
+      required:
+        - comment
+      description: Comment created.
+    CommentUpdatedResponse:
+      type: object
+      properties:
+        comment:
+          $ref: '#/components/schemas/Comment'
+      required:
+        - comment
+      description: Comment updated.
+    CommentDeletedResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        deleted:
+          type: boolean
+      required:
+        - id
+        - deleted
+      description: Comment soft-deleted.
+    ReactionCreatedResponse:
+      type: object
+      properties:
+        reaction:
+          type: object
+          properties:
+            id:
+              type: integer
+            comment_id:
+              type:
+                - integer
+                - 'null'
+            anchor:
+              allOf:
+                - $ref: '#/components/schemas/TextAnchor'
+                - type:
+                    - object
+                    - 'null'
+            anchored_version:
+              type:
+                - integer
+                - 'null'
+            orphaned:
+              type: boolean
+            emoji:
+              type: string
+            author:
+              type:
+                - string
+                - 'null'
+            created_at:
+              type: string
+              format: date-time
+          required:
+            - id
+            - comment_id
+            - anchor
+            - anchored_version
+            - orphaned
+            - emoji
+            - author
+            - created_at
+      required:
+        - reaction
+      description: Reaction added.
+    ReactionToggledResponse:
+      type: object
+      properties:
+        toggled:
+          type: boolean
+        removed:
+          type: boolean
+      required:
+        - toggled
+        - removed
+      description: Reaction toggled off (the same reaction already existed).
+    ReactionDeletedResponse:
+      type: object
+      properties:
+        id:
+          type: integer
+        deleted:
+          type: boolean
+      required:
+        - id
+        - deleted
+      description: Reaction removed.
     Slug:
       type: string
       example: fierce-tiger-12345
@@ -538,6 +952,14 @@ components:
       type: integer
       minimum: 1
       example: 1
+    CommentId:
+      type: integer
+      minimum: 1
+      example: 42
+    ReactionId:
+      type: integer
+      minimum: 1
+      example: 7
   parameters:
     Slug:
       schema:
@@ -554,6 +976,18 @@ components:
     GrantId:
       schema:
         $ref: '#/components/schemas/GrantId'
+      required: true
+      name: id
+      in: path
+    CommentId:
+      schema:
+        $ref: '#/components/schemas/CommentId'
+      required: true
+      name: id
+      in: path
+    ReactionId:
+      schema:
+        $ref: '#/components/schemas/ReactionId'
       required: true
       name: id
       in: path
@@ -1126,6 +1560,313 @@ paths:
                 $ref: '#/components/schemas/ApiError'
         '429':
           description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/comments:
+    get:
+      tags:
+        - collaboration
+      summary: List all comment threads (the complete all-threads view)
+      description: >-
+        Returns every live thread the caller can see, exactly as the viewer shell shows humans:
+        anchored threads in document order, then doc-level threads, then orphaned threads, each
+        carrying resolved/orphaned flags, 1-level replies, and reactions. Read access required
+        (owner/grant via identity, a valid view token, or a public doc).
+      operationId: listComments
+      security:
+        - bearerApiKey: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - schema:
+            type: string
+            description: >-
+              Present a doc's view token to comment/read as a token-holder (with identity). Not
+              needed for owner/grantee sessions or API keys.
+          required: false
+          description: >-
+            Present a doc's view token to comment/read as a token-holder (with identity). Not needed
+            for owner/grantee sessions or API keys.
+          name: viewtoken
+          in: query
+      responses:
+        '200':
+          description: All threads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentsListResponse'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+        - collaboration
+      summary: Post a comment (anchored to a quote, doc-level, or a reply)
+      description: >-
+        Comment on a span by QUOTING it (anchor), at the doc level (omit anchor), or reply to a root
+        comment (parent_id). Identity required: API key OR signed-in session — anonymous never
+        writes. Permission to comment: owner, editor or commenter grant, view-token holder with
+        identity, or any identity on a public doc.
+      operationId: createComment
+      security:
+        - bearerApiKey: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - schema:
+            type: string
+            description: >-
+              Present a doc's view token to comment/read as a token-holder (with identity). Not
+              needed for owner/grantee sessions or API keys.
+          required: false
+          description: >-
+            Present a doc's view token to comment/read as a token-holder (with identity). Not needed
+            for owner/grantee sessions or API keys.
+          name: viewtoken
+          in: query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentBody'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentCreatedResponse'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Can view but not comment (e.g. a viewer-only grant)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: Comment body exceeds 10 KB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/comments/{id}:
+    patch:
+      tags:
+        - collaboration
+      summary: Edit body (author) and/or resolve/unresolve (anyone who can comment)
+      operationId: updateComment
+      security:
+        - bearerApiKey: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/CommentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateCommentBody'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentUpdatedResponse'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Editing another author's body, or resolving without comment rights
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+        - collaboration
+      summary: Soft-delete a comment (author own, owner any)
+      operationId: deleteComment
+      security:
+        - bearerApiKey: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/CommentId'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentDeletedResponse'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Not the author and not the owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/reactions:
+    post:
+      tags:
+        - collaboration
+      summary: React to a doc, a comment, or a quoted span (attributed; re-post toggles off)
+      description: >-
+        Add an emoji reaction. The target is 3-way and MUTUALLY EXCLUSIVE: comment_id set → react on
+        that comment; anchor set → react on a text span (W3C text-quote, same shape + validation as
+        a comment anchor; an agent "highlights" by quoting); neither set → react on the whole
+        document. Supplying BOTH comment_id and anchor → 400. Attributed-only (identity required);
+        unique per (target, author, emoji) — for span reactions the "target" is the anchor
+        signature, so the same emoji on two different spans are two distinct reactions. Re-posting
+        the same reaction removes it (toggle). Anchored reactions re-anchor on every doc edit
+        exactly like comments (move, or orphan + later un-orphan); an orphaned anchored reaction
+        degrades to doc-level display. React permission: anyone who can view, with identity.
+      operationId: addReaction
+      security:
+        - bearerApiKey: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateReactionBody'
+      responses:
+        '200':
+          description: Reaction toggled off (the same reaction already existed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionToggledResponse'
+        '201':
+          description: Reaction added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionCreatedResponse'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: comment_id does not reference a live comment on this document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/reactions/{id}:
+    delete:
+      tags:
+        - collaboration
+      summary: Remove your own reaction
+      operationId: deleteReaction
+      security:
+        - bearerApiKey: []
+        - {}
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/ReactionId'
+      responses:
+        '200':
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReactionDeletedResponse'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
           content:
             application/json:
               schema:

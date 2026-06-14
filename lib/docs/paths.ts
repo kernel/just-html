@@ -10,7 +10,13 @@
 import { registry, z } from "@/lib/openapi/registry";
 import {
   ApiError,
+  CommentCreatedResponse,
+  CommentDeletedResponse,
+  CommentUpdatedResponse,
+  CommentsListResponse,
+  CreateCommentBody,
   CreateDocBody,
+  CreateReactionBody,
   DeleteDocResponse,
   DocListResponse,
   DocWithHtml,
@@ -21,6 +27,10 @@ import {
   GrantListResponse,
   GrantUnchangedResponse,
   OwnerDoc,
+  ReactionCreatedResponse,
+  ReactionDeletedResponse,
+  ReactionToggledResponse,
+  UpdateCommentBody,
   UpdateDocBody,
   VersionListResponse,
   VersionSnapshot,
@@ -388,5 +398,207 @@ registry.registerPath({
       content: jsonError,
     },
     429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// =========================================================================
+// Z3 — comments + reactions. Summaries + descriptions carried over from the
+// hand-written spec-yaml.ts collaboration section. Both surfaces accept an API
+// key OR a signed-in session, so the security list adds the anonymous/{} option
+// the hand-written spec uses (a session is presented via cookie, not the Bearer
+// scheme), matching the served spec's `security: [{ bearerApiKey: [] }, {}]`.
+// =========================================================================
+
+const commentOrSessionSecurity = [{ [bearerApiKey.name]: [] }, {}];
+
+const commentIdParam = registry.registerParameter(
+  "CommentId",
+  z.number().int().min(1).openapi({
+    param: { name: "id", in: "path" },
+    example: 42,
+  })
+);
+
+const reactionIdParam = registry.registerParameter(
+  "ReactionId",
+  z.number().int().min(1).openapi({
+    param: { name: "id", in: "path" },
+    example: 7,
+  })
+);
+
+const viewtokenQuery = z.object({
+  viewtoken: z
+    .string()
+    .optional()
+    .openapi({
+      param: { name: "viewtoken", in: "query" },
+      description:
+        "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys.",
+    }),
+});
+
+// GET /api/v1/docs/{slug}/comments — the complete all-threads view
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/docs/{slug}/comments",
+  tags: ["collaboration"],
+  summary: "List all comment threads (the complete all-threads view)",
+  description:
+    "Returns every live thread the caller can see, exactly as the viewer shell shows humans: anchored threads in document order, then doc-level threads, then orphaned threads, each carrying resolved/orphaned flags, 1-level replies, and reactions. Read access required (owner/grant via identity, a valid view token, or a public doc).",
+  operationId: "listComments",
+  security: commentOrSessionSecurity,
+  request: { params: z.object({ slug: slugParam }), query: viewtokenQuery },
+  responses: {
+    200: {
+      description: "All threads",
+      content: { "application/json": { schema: CommentsListResponse } },
+    },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+  },
+});
+
+// POST /api/v1/docs/{slug}/comments — post a comment (anchored / doc-level / reply)
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/docs/{slug}/comments",
+  tags: ["collaboration"],
+  summary: "Post a comment (anchored to a quote, doc-level, or a reply)",
+  description:
+    "Comment on a span by QUOTING it (anchor), at the doc level (omit anchor), or reply to a root comment (parent_id). Identity required: API key OR signed-in session — anonymous never writes. Permission to comment: owner, editor or commenter grant, view-token holder with identity, or any identity on a public doc.",
+  operationId: "createComment",
+  security: commentOrSessionSecurity,
+  request: {
+    params: z.object({ slug: slugParam }),
+    query: viewtokenQuery,
+    body: { required: true, content: { "application/json": { schema: CreateCommentBody } } },
+  },
+  responses: {
+    201: {
+      description: "Created",
+      content: { "application/json": { schema: CommentCreatedResponse } },
+    },
+    400: { description: "Invalid request body or parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    403: { description: "Can view but not comment (e.g. a viewer-only grant)", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+    413: { description: "Comment body exceeds 10 KB", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// PATCH /api/v1/docs/{slug}/comments/{id} — edit body / resolve toggle
+registry.registerPath({
+  method: "patch",
+  path: "/api/v1/docs/{slug}/comments/{id}",
+  tags: ["collaboration"],
+  summary: "Edit body (author) and/or resolve/unresolve (anyone who can comment)",
+  operationId: "updateComment",
+  security: commentOrSessionSecurity,
+  request: {
+    params: z.object({ slug: slugParam, id: commentIdParam }),
+    body: { required: true, content: { "application/json": { schema: UpdateCommentBody } } },
+  },
+  responses: {
+    200: {
+      description: "Updated",
+      content: { "application/json": { schema: CommentUpdatedResponse } },
+    },
+    400: { description: "Invalid request body or parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    403: {
+      description: "Editing another author's body, or resolving without comment rights",
+      content: jsonError,
+    },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// DELETE /api/v1/docs/{slug}/comments/{id} — soft-delete (author own, owner any)
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/docs/{slug}/comments/{id}",
+  tags: ["collaboration"],
+  summary: "Soft-delete a comment (author own, owner any)",
+  operationId: "deleteComment",
+  security: commentOrSessionSecurity,
+  request: { params: z.object({ slug: slugParam, id: commentIdParam }) },
+  responses: {
+    200: {
+      description: "Deleted",
+      content: { "application/json": { schema: CommentDeletedResponse } },
+    },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    403: { description: "Not the author and not the owner", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+  },
+});
+
+// POST /api/v1/docs/{slug}/reactions — react to a doc, comment, or span
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/docs/{slug}/reactions",
+  tags: ["collaboration"],
+  summary: "React to a doc, a comment, or a quoted span (attributed; re-post toggles off)",
+  description:
+    "Add an emoji reaction. The target is 3-way and MUTUALLY EXCLUSIVE: comment_id set → react on that comment; anchor set → react on a text span (W3C text-quote, same shape + validation as a comment anchor; an agent \"highlights\" by quoting); neither set → react on the whole document. Supplying BOTH comment_id and anchor → 400. Attributed-only (identity required); unique per (target, author, emoji) — for span reactions the \"target\" is the anchor signature, so the same emoji on two different spans are two distinct reactions. Re-posting the same reaction removes it (toggle). Anchored reactions re-anchor on every doc edit exactly like comments (move, or orphan + later un-orphan); an orphaned anchored reaction degrades to doc-level display. React permission: anyone who can view, with identity.",
+  operationId: "addReaction",
+  security: commentOrSessionSecurity,
+  request: {
+    params: z.object({ slug: slugParam }),
+    body: { required: true, content: { "application/json": { schema: CreateReactionBody } } },
+  },
+  responses: {
+    201: {
+      description: "Reaction added",
+      content: { "application/json": { schema: ReactionCreatedResponse } },
+    },
+    200: {
+      description: "Reaction toggled off (the same reaction already existed)",
+      content: { "application/json": { schema: ReactionToggledResponse } },
+    },
+    400: { description: "Invalid request body or parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+    422: { description: "comment_id does not reference a live comment on this document", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// DELETE /api/v1/docs/{slug}/reactions/{id} — remove your own reaction
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/docs/{slug}/reactions/{id}",
+  tags: ["collaboration"],
+  summary: "Remove your own reaction",
+  operationId: "deleteReaction",
+  security: commentOrSessionSecurity,
+  request: { params: z.object({ slug: slugParam, id: reactionIdParam }) },
+  responses: {
+    200: {
+      description: "Removed",
+      content: { "application/json": { schema: ReactionDeletedResponse } },
+    },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
   },
 });

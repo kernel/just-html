@@ -1,6 +1,7 @@
 import { authenticate } from "@/lib/auth/bearer";
 import { getSession } from "@/lib/auth/session";
 import { apiError, json, parseJsonObject, unauthorizedIdentity } from "@/lib/docs/api";
+import { CreateCommentBody, commentBodyBadRequest } from "@/lib/docs/schemas";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { resolveAccess, type DocAccess } from "@/lib/docs/grants";
@@ -81,10 +82,15 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   if ("response" in parsed) return parsed.response;
   const b = parsed.obj;
 
-  if (typeof b.body !== "string" || b.body.trim().length === 0) {
-    return apiError(400, "invalid_request", "Field 'body' is required and must be a non-empty string.");
-  }
-  if (Buffer.byteLength(b.body, "utf8") > MAX_COMMENT_BODY_BYTES) {
+  // Zod owns the body type/non-empty check (verbatim message via
+  // commentBodyBadRequest). anchor + parent_id stay route-owned (parseAnchor's
+  // normalize + the Number() coercion are not plain type checks); the byte-cap
+  // 413 stays here (Zod can't count UTF-8 bytes), same ordering as before.
+  const parsedBody = CreateCommentBody.safeParse(b);
+  if (!parsedBody.success) return commentBodyBadRequest(parsedBody.error);
+  const body = parsedBody.data.body;
+
+  if (Buffer.byteLength(body, "utf8") > MAX_COMMENT_BODY_BYTES) {
     return apiError(413, "payload_too_large", `Comment body exceeds the ${MAX_COMMENT_BODY_BYTES}-byte limit.`, {
       limit_bytes: MAX_COMMENT_BODY_BYTES,
     });
@@ -116,7 +122,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     authorUserId: principal.userId,
     parentId,
     anchor,
-    body: b.body,
+    body,
   });
   if ("error" in result) {
     if (result.error === "limit") {

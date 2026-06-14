@@ -1,6 +1,7 @@
 import { authenticate } from "@/lib/auth/bearer";
 import { getSession } from "@/lib/auth/session";
 import { apiError, json, parseJsonObject, parsePositiveIntParam, unauthorizedIdentity } from "@/lib/docs/api";
+import { PatchCommentBodyField, PatchResolvedField } from "@/lib/docs/schemas";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { isOwner } from "@/lib/docs/grants";
@@ -77,31 +78,36 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     return apiError(400, "invalid_request", "Provide 'body' (edit) and/or 'resolved' (resolve/unresolve).");
   }
 
-  // Edit body: AUTHOR ONLY.
+  // Edit body: AUTHOR ONLY. The author 403 precedes field validation (ordering
+  // preserved), so the Zod leaf checks run inside each branch — NOT as one
+  // up-front safeParse — exactly as the hand-rolled typeof checks did.
   if (hasBody) {
     if (!isAuthor) {
       return apiError(403, "forbidden", "Only the comment's author can edit its body.");
     }
-    if (typeof b.body !== "string" || b.body.trim().length === 0) {
-      return apiError(400, "invalid_request", "Field 'body' must be a non-empty string.");
+    const bodyParse = PatchCommentBodyField.safeParse(b.body);
+    if (!bodyParse.success) {
+      return apiError(400, "invalid_request", bodyParse.error.issues[0].message);
     }
-    if (Buffer.byteLength(b.body, "utf8") > MAX_COMMENT_BODY_BYTES) {
+    const body = bodyParse.data;
+    if (Buffer.byteLength(body, "utf8") > MAX_COMMENT_BODY_BYTES) {
       return apiError(413, "payload_too_large", `Comment body exceeds the ${MAX_COMMENT_BODY_BYTES}-byte limit.`, {
         limit_bytes: MAX_COMMENT_BODY_BYTES,
       });
     }
-    await editCommentBody(doc.id, commentId, b.body);
+    await editCommentBody(doc.id, commentId, body);
   }
 
   // Resolve / unresolve: ANYONE WHO CAN COMMENT.
   if (hasResolved) {
-    if (typeof b.resolved !== "boolean") {
-      return apiError(400, "invalid_request", "Field 'resolved' must be a boolean.");
+    const resolvedParse = PatchResolvedField.safeParse(b.resolved);
+    if (!resolvedParse.success) {
+      return apiError(400, "invalid_request", resolvedParse.error.issues[0].message);
     }
     if (!cap.canComment) {
       return apiError(403, "forbidden", "You are not allowed to resolve comments on this document.");
     }
-    await setResolved(doc.id, commentId, b.resolved, principal.userId);
+    await setResolved(doc.id, commentId, resolvedParse.data, principal.userId);
   }
 
   const updated = await findComment(doc.id, commentId);

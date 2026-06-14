@@ -252,6 +252,30 @@ const DOCS_OPS: {
     successCodes: ["201", "200"],
   },
   { path: "/api/v1/docs/{slug}/grants/{id}", method: "delete", successCodes: ["200"] },
+  // Z3 — comments + reactions.
+  { path: "/api/v1/docs/{slug}/comments", method: "get", successCodes: ["200"] },
+  {
+    path: "/api/v1/docs/{slug}/comments",
+    method: "post",
+    body: true,
+    bodyRequired: true,
+    successCodes: ["201"],
+  },
+  {
+    path: "/api/v1/docs/{slug}/comments/{id}",
+    method: "patch",
+    body: true,
+    successCodes: ["200"],
+  },
+  { path: "/api/v1/docs/{slug}/comments/{id}", method: "delete", successCodes: ["200"] },
+  {
+    path: "/api/v1/docs/{slug}/reactions",
+    method: "post",
+    body: true,
+    bodyRequired: true,
+    successCodes: ["201", "200"],
+  },
+  { path: "/api/v1/docs/{slug}/reactions/{id}", method: "delete", successCodes: ["200"] },
 ];
 
 function opSchemas(doc: OpenApiDoc, path: string, method: string) {

@@ -6,9 +6,16 @@ import {
   EditsBody,
   editsBadRequest,
   zodBadRequest,
+  CreateCommentBody,
+  commentBodyBadRequest,
+  PatchCommentBodyField,
+  PatchResolvedField,
+  CreateReactionBody,
+  emojiBadRequest,
 } from "@/lib/docs/schemas";
 import { MAX_TITLE_LEN } from "@/lib/docs/config";
 import { GRANT_ROLES } from "@/lib/docs/grants";
+import { ALLOWED_EMOJI } from "@/lib/docs/reactions";
 
 /** Read the `message` out of an apiError Response (sync; body is a JSON string). */
 async function respMessage(res: Response): Promise<{ status: number; message: string; error: string }> {
@@ -330,5 +337,87 @@ describe("EditsBody (POST /api/v1/docs/{slug}/edits)", () => {
     expect(await msg({ edits: [{ oldText: "a", newText: "b" }], base_version: 0 })).toBe(m);
     expect(await msg({ edits: [{ oldText: "a", newText: "b" }], base_version: 1.5 })).toBe(m);
     expect(await msg({ edits: [{ oldText: "a", newText: "b" }], base_version: "3" })).toBe(m);
+  });
+});
+
+// === Z3 — comments + reactions =============================================
+
+describe("CreateCommentBody (POST /api/v1/docs/{slug}/comments — body field)", () => {
+  // The schema OWNS only the body type/non-empty check; anchor (parseAnchor),
+  // parent_id (Number() coercion), the reply-anchor 400, and the byte-cap 413
+  // stay route-owned, so they are NOT exercised here.
+  const bodyMsg = "Field 'body' is required and must be a non-empty string.";
+
+  it("accepts a non-empty body; leaves it UNTRIMMED (route stores the original)", () => {
+    const r = CreateCommentBody.safeParse({ body: "  hi  " });
+    expect(r.success && r.data.body).toBe("  hi  ");
+  });
+
+  it("missing / non-string / empty / whitespace-only body → the one verbatim 400 message", async () => {
+    for (const bad of [{}, { body: 5 }, { body: "" }, { body: "   " }]) {
+      const r = CreateCommentBody.safeParse(bad);
+      expect(r.success).toBe(false);
+      if (!r.success) {
+        expect((await respMessage(commentBodyBadRequest(r.error)))).toMatchObject({
+          status: 400,
+          error: "invalid_request",
+          message: bodyMsg,
+        });
+      }
+    }
+  });
+
+  it("anchor + parent_id are permissive at runtime (route owns them)", () => {
+    // Anything in anchor/parent_id passes the schema — the route validates them.
+    expect(CreateCommentBody.safeParse({ body: "x", anchor: { junk: true }, parent_id: "nope" }).success).toBe(true);
+    expect(CreateCommentBody.safeParse({ body: "x", parent_id: 3 }).success).toBe(true);
+  });
+});
+
+describe("PATCH /comments/{id} leaf field validators", () => {
+  it("body: non-empty string passes (untrimmed); else verbatim 400 message", () => {
+    expect(PatchCommentBodyField.safeParse("  hi ").success).toBe(true);
+    for (const bad of [5, "", "   ", undefined]) {
+      const r = PatchCommentBodyField.safeParse(bad);
+      expect(r.success).toBe(false);
+      if (!r.success) expect(r.error.issues[0].message).toBe("Field 'body' must be a non-empty string.");
+    }
+  });
+
+  it("resolved: boolean passes; else verbatim 400 message", () => {
+    expect(PatchResolvedField.safeParse(true).success).toBe(true);
+    expect(PatchResolvedField.safeParse(false).success).toBe(true);
+    for (const bad of [1, "true", null, undefined]) {
+      const r = PatchResolvedField.safeParse(bad);
+      expect(r.success).toBe(false);
+      if (!r.success) expect(r.error.issues[0].message).toBe("Field 'resolved' must be a boolean.");
+    }
+  });
+});
+
+describe("CreateReactionBody (POST /api/v1/docs/{slug}/reactions — emoji allowlist)", () => {
+  it("accepts every allowed emoji", () => {
+    for (const e of ALLOWED_EMOJI) {
+      expect(CreateReactionBody.safeParse({ emoji: e }).success).toBe(true);
+    }
+  });
+
+  it("missing / non-string / out-of-set emoji → the verbatim 400 with allowed[] preserved", async () => {
+    for (const bad of [{}, { emoji: 5 }, { emoji: "🦄" }, { emoji: "not-an-emoji" }]) {
+      const r = CreateReactionBody.safeParse(bad);
+      expect(r.success).toBe(false);
+      const res = emojiBadRequest();
+      const body = (await res.json()) as { error: string; message: string; allowed: string[] };
+      expect(res.status).toBe(400);
+      expect(body.error).toBe("invalid_request");
+      expect(body.message).toBe("Field 'emoji' must be one of the supported emoji.");
+      expect(body.allowed).toEqual([...ALLOWED_EMOJI]);
+    }
+  });
+
+  it("comment_id + anchor are permissive at runtime (route owns exclusion + parse)", () => {
+    expect(
+      CreateReactionBody.safeParse({ emoji: "🚀", comment_id: "5", anchor: { exact: "" } }).success
+    ).toBe(true);
   });
 });
