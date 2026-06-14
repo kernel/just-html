@@ -234,6 +234,11 @@ export default function CommentsShell(props: Props) {
           } else if (typeof d.id === "number") {
             setPinnedId(d.id);
             setActiveId(d.id);
+            // Tapping a highlight in the doc OPENS the rail focused on that
+            // thread (variant A). On desktop this only matters if the rail was
+            // collapsed; on mobile it's the core open affordance. The setter is
+            // stable so this needs no extra effect deps.
+            setRailOpen(true);
           } else {
             // reaction key focused — no rail card to pin
             setPinnedId(null);
@@ -400,19 +405,54 @@ export default function CommentsShell(props: Props) {
   // stack after. Reproduces variant-b.html's docs-style alignment.
   const railRef = useRef<HTMLDivElement>(null);
 
+  // ---- Responsive rail (variant A — right drawer) ----
+  // DESKTOP (>768px): side-by-side as before; the toggle collapses/expands the
+  // rail to reclaim width (default = open). MOBILE (<=768px): the doc iframe is
+  // full-width and the rail is OFF by default; the toggle slides a full-height
+  // drawer in from the right OVER the doc, with a scrim + ✕ close. The stage's
+  // data-rail="open|closed" attribute drives both via the <style> rules below.
+  // The selection toolbar stays SELECTION-GATED (unchanged) — the drawer/scrim
+  // is the only new chrome.
+  const [railOpen, setRailOpen] = useState(true);
+  const isMobileRef = useRef(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    // Default per breakpoint: desktop open, mobile closed.
+    const applyDefault = () => {
+      isMobileRef.current = mq.matches;
+      setRailOpen(!mq.matches);
+    };
+    applyDefault();
+    mq.addEventListener("change", applyDefault);
+    return () => mq.removeEventListener("change", applyDefault);
+  }, []);
+  // The count shown in the toggle: number of threads (visible roots).
+  const commentCount = threads.length;
+
   return (
     <>
+      <style>{RAIL_CSS}</style>
       <div style={barStyle}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
           {title}
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "#666" }}>
+          <button
+            type="button"
+            className="jh-commentbtn"
+            aria-pressed={railOpen}
+            aria-label={`${railOpen ? "hide" : "show"} comments`}
+            onClick={() => setRailOpen((o) => !o)}
+            style={commentBtnStyle(railOpen)}
+          >
+            💬 {commentCount}
+          </button>
           <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "#666" }}>history</a>
           <span>made with <a href="/" style={{ color: "#666" }}>justhtml.sh</a></span>
         </span>
       </div>
 
-      <div ref={stageRef} style={stageStyle}>
+      <div ref={stageRef} className="jh-stage" data-rail={railOpen ? "open" : "closed"} style={stageStyle}>
         <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
           <iframe
             ref={iframeRef}
@@ -448,13 +488,35 @@ export default function CommentsShell(props: Props) {
           ) : null}
         </div>
 
-        <aside style={railStyle} ref={railRef}>
+        {/* Scrim — only visible on mobile when the drawer is open (CSS-gated to
+            <=768px). Tapping it closes the drawer. */}
+        <div
+          className="jh-scrim"
+          data-open={railOpen ? "1" : undefined}
+          onClick={() => setRailOpen(false)}
+          style={scrimStyle}
+        />
+
+        <aside className="jh-rail" style={railStyle} ref={railRef}>
           <div style={railHeadStyle}>
             <span>
               {visibleThreads.length} comment{visibleThreads.length !== 1 ? "s" : ""}
             </span>
-            <span style={{ cursor: "pointer", color: "#888" }} onClick={() => setShowResolved((s) => !s)}>
-              {showResolved ? "hide resolved" : "show resolved"}
+            <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
+              <span style={{ cursor: "pointer", color: "#888" }} onClick={() => setShowResolved((s) => !s)}>
+                {showResolved ? "hide resolved" : "show resolved"}
+              </span>
+              {/* Close (✕) — the drawer's close affordance. Hidden on desktop
+                  via CSS (the bar toggle is the collapse control there). */}
+              <button
+                type="button"
+                className="jh-railclose"
+                aria-label="close comments"
+                onClick={() => setRailOpen(false)}
+                style={railCloseStyle}
+              >
+                ✕
+              </button>
             </span>
           </div>
 
@@ -881,7 +943,77 @@ function Badge({ kind, children }: { kind: "res" | "orp"; children: React.ReactN
   );
 }
 
+// --------------------------- responsive rail (variant A) ---------------------------
+
+// The ONLY new chrome. Inline styles can't express media queries, so the
+// breakpoint-dependent layout lives here, keyed off the stage's data-rail
+// attribute. Desktop (>768px): collapsing hides the rail to reclaim width; the
+// scrim + ✕ are display:none. Mobile (<=768px): the doc is full-width and the
+// rail is an off-canvas right drawer that slides in over the doc with a scrim.
+// Light mode only, monospace chrome — consistent with the rest of the shell.
+const RAIL_CSS = `
+.jh-stage[data-rail="closed"] .jh-rail { display: none; }
+.jh-railclose { display: none; }
+.jh-scrim { display: none; }
+.jh-scrim[data-open="1"] { opacity: 1 !important; pointer-events: auto !important; }
+
+@media (max-width: 768px) {
+  .jh-stage .jh-rail {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: min(86vw, 340px);
+    transform: translateX(100%);
+    transition: transform .24s ease;
+    border-left: 1px solid #ccc;
+    box-shadow: -6px 0 24px rgba(0,0,0,.18);
+    z-index: 25;
+  }
+  /* Keep the drawer in the DOM when closed (off-screen) so the doc is genuinely
+     full-width — the bug fix. */
+  .jh-stage[data-rail="closed"] .jh-rail { display: block; }
+  .jh-stage[data-rail="open"] .jh-rail { transform: translateX(0); }
+  .jh-railclose { display: inline-block; }
+  .jh-scrim { display: block; }
+}
+`;
+
 // --------------------------- styles ---------------------------
+
+function commentBtnStyle(pressed: boolean): React.CSSProperties {
+  return {
+    font: "inherit",
+    fontSize: 12,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    border: pressed ? "1px solid #111" : "1px solid #ccc",
+    background: pressed ? "#111" : "#fafafa",
+    color: pressed ? "#fff" : "#111",
+    borderRadius: 6,
+    padding: "2px 9px",
+    cursor: "pointer",
+    lineHeight: 1.6,
+  };
+}
+
+const scrimStyle: React.CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  background: "rgba(0,0,0,.32)",
+  zIndex: 20,
+  opacity: 0,
+  pointerEvents: "none",
+  transition: "opacity .2s ease",
+};
+
+const railCloseStyle: React.CSSProperties = {
+  cursor: "pointer",
+  color: "#888",
+  fontSize: 15,
+  lineHeight: 1,
+  border: "none",
+  background: "transparent",
+  padding: "0 2px",
+};
 
 // Viewer chrome bar — variant A (LOCKED 2026-06-13): same weights/colors as the
 // page footer. Matches PlainShell's bar so both viewer paths share one chrome.
