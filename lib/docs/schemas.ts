@@ -278,25 +278,38 @@ export const GrantBody = registry.register(
   "GrantBody",
   z
     .object({
+      // email & domain are NULLISH (optional + nullable), collapsing null →
+      // undefined. The old route only type-checked the field for the CHOSEN
+      // branch and treated `null` as absent in its exactly-one computation
+      // (`b.x !== undefined && b.x !== null`), so an explicit `null` on the
+      // UNUSED field (e.g. {email:null, domain:"kernel.sh", role}) was never
+      // type-checked and the grant succeeded. If email/domain were plain
+      // strings here, that explicit null would fail the string check and 400
+      // — an accept→reject drift. .nullish()+transform restores the old
+      // accept-null-as-absent behavior: a null field becomes undefined, so the
+      // route's exactly-one check (still `!== null`) and the per-branch usage
+      // see it as absent exactly as before. A present non-null non-string
+      // still fails with the old per-field "must be a string" message.
       email: z
         .string({ error: "Field 'email' must be a string." })
+        .nullish()
+        .transform((v) => v ?? undefined)
         .openapi({ format: "email", description: "Grantee email (provide exactly one of email or domain)." }),
       domain: z
         .string({ error: "Field 'domain' must be a string." })
+        .nullish()
+        .transform((v) => v ?? undefined)
         .openapi({ example: "kernel.sh", description: "Grantee email-domain (provide exactly one of email or domain)." }),
       role: roleSchema.openapi({ description: "Grant role." }),
       notify: z
         .boolean({ error: "Field 'notify' must be a boolean." })
+        .optional()
         .openapi({
           default: true,
           description:
             "Email-grants only. Send the grantee a share-notification email (default true). Ignored for domain grants.",
         }),
     })
-    // email & domain are optional+nullable at the type layer (the exactly-one
-    // rule lives in the route); notify is optional. .partial() makes email,
-    // domain, notify optional while role stays required.
-    .partial({ email: true, domain: true, notify: true })
     .openapi("GrantBody", {
       description:
         "Share with an email or a domain. Provide exactly one of email or domain. role is editor, commenter, or viewer. notify (email grants only) defaults to true.",

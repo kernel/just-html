@@ -218,6 +218,40 @@ describe("GrantBody (POST /api/v1/docs/{slug}/grants — field types)", () => {
       data: { email: "a@b.com", role: "viewer" },
     });
   });
+
+  // Regression: explicit null on the UNUSED target field must be treated as
+  // absent, exactly as the old route did. The old code computed hasEmail/
+  // hasDomain with `!== null` (null = absent) and only type-checked the CHOSEN
+  // branch, so {email:null, domain:"kernel.sh", role} created a domain grant
+  // and {email:"a@b.com", domain:null, role} created an email grant. email and
+  // domain are .nullish() so a null collapses to undefined (absent) instead of
+  // failing the string check. Without this, the body would 400 (accept→reject
+  // drift). See the route's exactly-one check (still `!== null`).
+  it("explicit null on the unused target field is treated as absent (no 400)", () => {
+    expect(runGrant({ email: null, domain: "kernel.sh", role: "viewer" })).toEqual({
+      ok: true,
+      data: { domain: "kernel.sh", role: "viewer" },
+    });
+    expect(runGrant({ email: "a@b.com", domain: null, role: "viewer" })).toEqual({
+      ok: true,
+      data: { email: "a@b.com", role: "viewer" },
+    });
+    // null on BOTH still type-passes here; the route's exactly-one 400 (which
+    // runs before safeParse on the raw body) rejects it — not the schema.
+    expect(runGrant({ email: null, domain: null, role: "viewer" })).toEqual({
+      ok: true,
+      data: { role: "viewer" },
+    });
+  });
+
+  // notify is .optional() (NOT nullish): the old parseOptionalBool only treated
+  // `undefined` as absent and 400'd a null. Keep that — notify:null → 400.
+  it("notify:null → old 'must be a boolean' message (not treated as absent)", () => {
+    expect(runGrant({ email: "a@b.com", role: "viewer", notify: null })).toEqual({
+      ok: false,
+      message: "Field 'notify' must be a boolean.",
+    });
+  });
 });
 
 describe("EditsBody (POST /api/v1/docs/{slug}/edits)", () => {
@@ -268,6 +302,21 @@ describe("EditsBody (POST /api/v1/docs/{slug}/edits)", () => {
     expect(
       await msg({ edits: [{ oldText: "a", newText: "b" }, { oldText: 1, newText: "c" }] })
     ).toBe("edits[1].oldText is required and must be a string.");
+  });
+
+  // KNOWN, ACCEPTED message-only divergence for the pathological input
+  // `edits:[[]]` (an ARRAY used as an edit item). The old code's object check
+  // was `typeof e !== "object" || e === null`, and `typeof [] === "object"`,
+  // so an array slipped through to the field check and 400'd with
+  // "edits[0].oldText is required and must be a string." The Zod z.object()
+  // rejects the array up front, so editsBadRequest maps the index-only path to
+  // "edits[0] must be an object." Both are 400 invalid_request (the validation
+  // OUTCOME is identical — the input is rejected either way); only the message
+  // bytes differ, and only for an array-as-edit. String/number/null items
+  // already produce the matching "edits[i] must be an object." Pinned here so
+  // the divergence is explicit.
+  it("array-as-edit-item → 'edits[0] must be an object.' (message-only divergence vs old)", async () => {
+    expect(await msg({ edits: [[]] })).toBe("edits[0] must be an object.");
   });
 
   it("edits-array issue precedes a base_version issue (old top-level ordering)", async () => {
