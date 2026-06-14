@@ -179,6 +179,26 @@ export function resolveQuote(
   return { ok: true, start: bestIdx, end: bestIdx + exact.length };
 }
 
+/**
+ * Resolve an anchor to a TEXT POSITION for document-order sorting (best-effort,
+ * matching what the overlay paints). The ONE definition of the ordering rule
+ * shared by the all-threads root sort and the anchored-reaction grouping in
+ * lib/docs/comments: prefer the stored `start` offset; else re-find the quote
+ * against the current doc text; if neither yields a finite offset, sort last
+ * (Number.MAX_SAFE_INTEGER). For ordering only — never authoritative.
+ */
+export function anchorTextPos(docText: string, anchor: TextAnchor): number {
+  let pos =
+    typeof anchor.start === "number"
+      ? anchor.start
+      : (() => {
+          const r = resolveQuote(docText, anchor, undefined);
+          return r.ok ? r.start : Number.MAX_SAFE_INTEGER;
+        })();
+  if (!Number.isFinite(pos)) pos = Number.MAX_SAFE_INTEGER;
+  return pos;
+}
+
 function commonPrefixLen(a: string, b: string): number {
   const n = Math.min(a.length, b.length);
   let i = 0;

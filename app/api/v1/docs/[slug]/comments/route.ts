@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth/session";
 import { apiError, json, parseJsonObject, unauthorizedIdentity } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
+import { resolveAccess, type DocAccess } from "@/lib/docs/grants";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 import {
@@ -142,8 +143,17 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const doc = await findBySlug(slug);
   if (!doc) return apiError(404, "not_found", "No such document.");
 
+  // Resolve the API principal's access to the doc ONCE (when the caller is an API
+  // key). This single value single-sources both the view gate (principalCanView)
+  // and the capability computation (resolveCapability) below, so one GET /comments
+  // request no longer round-trips resolveAccess twice for the same principal. The
+  // session path doesn't use this (its view check is canViewSession).
+  const apiAccess: DocAccess | undefined = apiPrincipal
+    ? await resolveAccess(doc, apiPrincipal.email, apiPrincipal.userId)
+    : undefined;
+
   // Read requires view access (owner/grant via identity, valid token, or public).
-  const canRead = await principalCanView(doc, apiPrincipal, session, viewtoken);
+  const canRead = await principalCanView(doc, apiPrincipal, session, viewtoken, apiAccess);
   if (!canRead) return apiError(404, "not_found", "No such document.");
 
   // Also report what the caller can do (drives the rail's read-only vs compose UI
@@ -152,7 +162,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   let canReact = false;
   const principal = await resolveCommentPrincipal(apiPrincipal, session);
   if (principal) {
-    const cap = await resolveCapability(doc, principal, canView(doc, viewtoken));
+    const cap = await resolveCapability(doc, principal, canView(doc, viewtoken), apiAccess);
     canComment = cap.canComment;
     canReact = cap.canReact;
   }

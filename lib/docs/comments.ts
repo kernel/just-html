@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { getPool, query } from "@/lib/db";
 import type { DocRow } from "@/lib/docs/store";
 import type { Session } from "@/lib/auth/session";
@@ -6,10 +5,24 @@ import type { ApiPrincipal } from "@/lib/auth/bearer";
 import { resolveAccess, type DocAccess } from "@/lib/docs/grants";
 import { canViewSession } from "@/lib/docs/access";
 import type { TextAnchor } from "@/lib/docs/anchor";
-import { resolveQuote, htmlToText, anchorSignature, resolveInitialAnchor } from "@/lib/docs/anchor";
+import { htmlToText, anchorTextPos, resolveInitialAnchor } from "@/lib/docs/anchor";
+import {
+  commentView,
+  threadView,
+  aggregateReactions,
+  groupAnchoredReactions,
+  type CommentRow,
+  type ReactionRow,
+  type ReactionGroup,
+  type AnchoredReactionGroup,
+} from "@/lib/docs/comments/views";
 
 // Comments persistence + permission resolution (birthday.md "Comment anchoring",
 // "Permission matrix", "All-threads view", "Comments & reactions API").
+//
+// This module is the CRUD + permission GLUE. The pure view-shaping (the GET
+// /comments JSON contract) lives in ./comments/views.ts; the avatar/gravatar
+// helpers in ../avatar.ts; the anchor ordering rule in ../anchor.ts.
 //
 // IDENTITY. A comment/reaction author is always a verified identity:
 //   - an API key (agent) → acts as its user_id, OR
@@ -18,6 +31,14 @@ import { resolveQuote, htmlToText, anchorSignature, resolveInitialAnchor } from 
 // registered an agent) still has a VERIFIED email (magic-link), so when they
 // first author a comment we find-or-create their users row — the email is proven,
 // and authorship needs a stable user id for attribution + reaction dedup.
+
+export type { CommentRow, ReactionRow } from "@/lib/docs/comments/views";
+export {
+  commentView,
+  threadView,
+  type ReactionGroup,
+  type AnchoredReactionGroup,
+} from "@/lib/docs/comments/views";
 
 export const MAX_COMMENT_BODY_BYTES = 10 * 1024; // 10 KB (birthday.md "Limits")
 export const MAX_COMMENTS_PER_DOC = 1000; // (birthday.md "Limits")
@@ -98,9 +119,13 @@ export type CommentCapability = {
 export async function resolveCapability(
   doc: DocRow,
   principal: CommentPrincipal,
-  canViewByToken: boolean
+  canViewByToken: boolean,
+  preResolvedAccess?: DocAccess
 ): Promise<CommentCapability> {
-  const access = await resolveAccess(doc, principal.email, principal.userId);
+  // `preResolvedAccess` lets a caller that already resolved THIS principal's
+  // access (same email + userId) pass it in to avoid a duplicate resolveAccess
+  // round-trip in one request. Same value either way (same inputs).
+  const access = preResolvedAccess ?? (await resolveAccess(doc, principal.email, principal.userId));
   const isOwner = access.kind === "owner";
   const grantRole = access.role; // editor | commenter | viewer | null
 
@@ -124,154 +149,25 @@ export async function resolveCapability(
  * Can this request even VIEW the doc (for the read side of GET /comments and to
  * gate reactions)? Mirrors viewer-route enforcement: owner/grant via session OR
  * API-key identity, valid view token, or public.
+ *
+ * `apiAccess` lets a caller that has ALREADY resolved the API principal's access
+ * (via resolveCapability) pass it in so we don't round-trip resolveAccess again
+ * for the same GET /comments request. When omitted we resolve it here, so the
+ * authorization outcome is identical either way.
  */
 export async function principalCanView(
   doc: DocRow,
   apiPrincipal: ApiPrincipal | null,
   session: Session | null,
-  viewtoken: string | null
+  viewtoken: string | null,
+  apiAccess?: DocAccess
 ): Promise<boolean> {
   if (doc.is_public) return true;
   if (apiPrincipal) {
-    const access = await resolveAccess(doc, apiPrincipal.email, apiPrincipal.userId);
+    const access = apiAccess ?? (await resolveAccess(doc, apiPrincipal.email, apiPrincipal.userId));
     if (access.kind !== "none") return true;
   }
   return canViewSession(doc, session, viewtoken);
-}
-
-// ---------------------------------------------------------------------------
-// Gravatar (birthday.md UI spec: "Gravatar by email hash, identicon fallback").
-// ---------------------------------------------------------------------------
-
-/** Gravatar profile hash = sha256 of the lowercased, trimmed email. */
-export function gravatarHash(email: string): string {
-  return createHash("sha256").update(email.trim().toLowerCase(), "utf8").digest("hex");
-}
-
-export function avatarUrl(email: string, size = 64): string {
-  return `https://gravatar.com/avatar/${gravatarHash(email)}?d=identicon&s=${size}`;
-}
-
-// ---------------------------------------------------------------------------
-// Rows + views.
-// ---------------------------------------------------------------------------
-
-export type CommentRow = {
-  id: number;
-  doc_id: number;
-  author_user_id: number | null;
-  author_email: string | null;
-  parent_id: number | null;
-  anchor: TextAnchor | null;
-  anchored_version: number | null;
-  orphaned: boolean;
-  body: string;
-  created_at: string;
-  edited_at: string | null;
-  resolved_at: string | null;
-  resolved_by_user_id: number | null;
-  deleted_at: string | null;
-};
-
-export type ReactionRow = {
-  id: number;
-  doc_id: number;
-  comment_id: number | null;
-  author_user_id: number | null;
-  author_email: string | null;
-  emoji: string;
-  anchor: TextAnchor | null;
-  anchored_version: number | null;
-  orphaned: boolean;
-  created_at: string;
-};
-
-/** API/JSON view for a single comment (no internal db ids beyond the public id). */
-export function commentView(c: CommentRow, reactions: ReactionRow[]) {
-  return {
-    id: Number(c.id),
-    parent_id: c.parent_id === null ? null : Number(c.parent_id),
-    author: c.author_email,
-    author_avatar: c.author_email ? avatarUrl(c.author_email, 64) : null,
-    body: c.body,
-    anchor: c.anchor,
-    anchored_version: c.anchored_version,
-    orphaned: c.orphaned,
-    resolved: c.resolved_at !== null,
-    resolved_at: c.resolved_at,
-    created_at: c.created_at,
-    edited_at: c.edited_at,
-    reactions: aggregateReactions(reactions),
-  };
-}
-
-/** Aggregated reaction group as returned to clients. */
-export type ReactionGroup = { emoji: string; count: number; authors: string[] };
-
-/**
- * Anchored-reaction group as returned to clients (birthday.md "Anchored
- * reactions": GET /comments includes anchored reactions grouped by anchor
- * signature so clients stack/count without re-grouping). One entry per span:
- * the anchor, its signature, and the per-emoji aggregation for that span.
- */
-export type AnchoredReactionGroup = {
-  sig: string;
-  anchor: TextAnchor;
-  anchored_version: number | null;
-  reactions: ReactionGroup[];
-};
-
-/** Collapse reactions into { emoji, count, authors[] } groups. */
-function aggregateReactions(reactions: ReactionRow[]): ReactionGroup[] {
-  const byEmoji = new Map<string, string[]>();
-  for (const r of reactions) {
-    const arr = byEmoji.get(r.emoji) ?? [];
-    if (r.author_email) arr.push(r.author_email);
-    byEmoji.set(r.emoji, arr);
-  }
-  return [...byEmoji.entries()].map(([emoji, authors]) => ({
-    emoji,
-    count: authors.length,
-    authors,
-  }));
-}
-
-/**
- * Group ANCHORED (non-orphaned) reactions by their anchor signature
- * (prefix|exact|suffix via lib/docs/anchor.ts anchorSignature — the one source
- * shared with the DB index + the overlay), then aggregate per emoji within each
- * span. Ordered by the resolved text position so the client paints/stacks in
- * document order.
- */
-function groupAnchoredReactions(reactions: ReactionRow[], docText: string): AnchoredReactionGroup[] {
-  const bySig = new Map<string, { anchor: TextAnchor; av: number | null; rows: ReactionRow[] }>();
-  for (const r of reactions) {
-    if (!r.anchor || r.orphaned) continue;
-    const a = r.anchor;
-    const sig = anchorSignature(a);
-    const g = bySig.get(sig);
-    if (g) g.rows.push(r);
-    else bySig.set(sig, { anchor: a, av: r.anchored_version, rows: [r] });
-  }
-  const groups = [...bySig.entries()].map(([sig, g]) => {
-    let pos =
-      typeof g.anchor.start === "number"
-        ? g.anchor.start
-        : (() => {
-            const rr = resolveQuote(docText, g.anchor, undefined);
-            return rr.ok ? rr.start : Number.MAX_SAFE_INTEGER;
-          })();
-    if (!Number.isFinite(pos)) pos = Number.MAX_SAFE_INTEGER;
-    return {
-      sig,
-      anchor: g.anchor,
-      anchored_version: g.av,
-      reactions: aggregateReactions(g.rows),
-      _pos: pos,
-    };
-  });
-  groups.sort((a, b) => a._pos - b._pos);
-  return groups.map(({ _pos, ...rest }) => rest);
 }
 
 // ---------------------------------------------------------------------------
@@ -298,10 +194,84 @@ async function countLiveComments(docId: number): Promise<number> {
 }
 
 /**
+ * Split a doc's reactions into the 3-way display target (birthday.md "Anchored
+ * reactions"):
+ *   comment_id set        -> comment-level (attached to a card), keyed by id
+ *   anchor set, resolved  -> span-anchored (grouped by signature; inline chip)
+ *   anchor set, orphaned  -> DEGRADES to doc-level (rail header strip), kept
+ *   both null             -> doc-level
+ * Pure; the row's anchor/orphaned data is preserved on the row for each bucket.
+ */
+function splitReactions(reactionRows: ReactionRow[]): {
+  byComment: Map<number, ReactionRow[]>;
+  docLevel: ReactionRow[];
+  anchored: ReactionRow[];
+} {
+  const byComment = new Map<number, ReactionRow[]>();
+  const docLevel: ReactionRow[] = [];
+  const anchored: ReactionRow[] = [];
+  for (const r of reactionRows) {
+    if (r.comment_id !== null) {
+      const arr = byComment.get(Number(r.comment_id)) ?? [];
+      arr.push(r);
+      byComment.set(Number(r.comment_id), arr);
+    } else if (r.anchor && !r.orphaned) {
+      anchored.push(r);
+    } else {
+      // doc-level (anchor null) OR an orphaned anchored reaction degraded to
+      // doc-level display (its data — anchor/orphaned — is kept on the row).
+      docLevel.push(r);
+    }
+  }
+  return { byComment, docLevel, anchored };
+}
+
+/** Index replies by parent id (1-level model; roots are filtered separately). */
+function buildReplyIndex(commentRows: CommentRow[]): Map<number, CommentRow[]> {
+  const repliesByParent = new Map<number, CommentRow[]>();
+  for (const c of commentRows) {
+    if (c.parent_id !== null) {
+      const arr = repliesByParent.get(Number(c.parent_id)) ?? [];
+      arr.push(c);
+      repliesByParent.set(Number(c.parent_id), arr);
+    }
+  }
+  return repliesByParent;
+}
+
+/**
+ * Order root comments for the all-threads view: anchored (document order) →
+ * doc-level → orphaned. Anchored roots sort by resolved text position (via
+ * anchorTextPos against `docText` — the shared ordering rule); doc-level and
+ * orphaned keep creation order (the query already returns ASC by created_at/id).
+ */
+function orderRoots(
+  roots: CommentRow[],
+  docText: string
+): { root: CommentRow; group: "anchored" | "doc" | "orphaned" }[] {
+  type Ordered = { root: CommentRow; group: "anchored" | "doc" | "orphaned"; pos: number };
+  const ordered: Ordered[] = roots.map((root) => {
+    if (root.orphaned) return { root, group: "orphaned" as const, pos: Number.MAX_SAFE_INTEGER };
+    if (!root.anchor) return { root, group: "doc" as const, pos: Number.MAX_SAFE_INTEGER };
+    return { root, group: "anchored" as const, pos: anchorTextPos(docText, root.anchor) };
+  });
+
+  const groupRank = { anchored: 0, doc: 1, orphaned: 2 };
+  ordered.sort((a, b) => {
+    if (a.group !== b.group) return groupRank[a.group] - groupRank[b.group];
+    if (a.group === "anchored") return a.pos - b.pos;
+    // doc-level + orphaned keep creation order (already ASC from the query).
+    return Number(a.root.id) - Number(b.root.id);
+  });
+
+  return ordered.map(({ root, group }) => ({ root, group }));
+}
+
+/**
  * The complete all-threads picture (birthday.md "All-threads view"): every live
  * thread grouped into anchored (document order) → doc-level → orphaned, with
  * resolved flags and reactions. Returned by GET /comments so agents see exactly
- * what humans see. `docHtml` lets us order anchored threads by their resolved
+ * what humans see. The doc html lets us order anchored threads by their resolved
  * text position (best-effort, matching what the overlay paints).
  */
 export async function allThreads(doc: DocRow): Promise<{
@@ -325,98 +295,30 @@ export async function allThreads(doc: DocRow): Promise<{
     [doc.id]
   );
 
-  // Split reactions into the 3-way target (birthday.md "Anchored reactions"):
-  //   comment_id set        -> comment-level (attached to a card)
-  //   anchor set, resolved  -> span-anchored (grouped by signature; inline chip)
-  //   anchor set, orphaned  -> DEGRADES to doc-level (rail header strip), kept
-  //   both null             -> doc-level
-  const reactionsByComment = new Map<number, ReactionRow[]>();
-  const docLevelReactions: ReactionRow[] = [];
-  const anchoredReactions: ReactionRow[] = [];
-  for (const r of reactionRows) {
-    if (r.comment_id !== null) {
-      const arr = reactionsByComment.get(Number(r.comment_id)) ?? [];
-      arr.push(r);
-      reactionsByComment.set(Number(r.comment_id), arr);
-    } else if (r.anchor && !r.orphaned) {
-      anchoredReactions.push(r);
-    } else {
-      // doc-level (anchor null) OR an orphaned anchored reaction degraded to
-      // doc-level display (its data — anchor/orphaned — is kept on the row).
-      docLevelReactions.push(r);
-    }
-  }
-
-  const roots = commentRows.filter((c) => c.parent_id === null);
-  const repliesByParent = new Map<number, CommentRow[]>();
-  for (const c of commentRows) {
-    if (c.parent_id !== null) {
-      const arr = repliesByParent.get(Number(c.parent_id)) ?? [];
-      arr.push(c);
-      repliesByParent.set(Number(c.parent_id), arr);
-    }
-  }
+  const { byComment, docLevel, anchored } = splitReactions(reactionRows);
+  const repliesByParent = buildReplyIndex(commentRows);
 
   // Resolve anchored roots to a text position for document-order sorting.
   const docText = htmlToText(doc.html);
-  type Ordered = { root: CommentRow; group: "anchored" | "doc" | "orphaned"; pos: number };
-  const ordered: Ordered[] = roots.map((root) => {
-    if (root.orphaned) return { root, group: "orphaned" as const, pos: Number.MAX_SAFE_INTEGER };
-    if (!root.anchor) return { root, group: "doc" as const, pos: Number.MAX_SAFE_INTEGER };
-    // Prefer the stored offset; fall back to a fresh re-find for ordering only.
-    let pos =
-      typeof root.anchor.start === "number"
-        ? root.anchor.start
-        : (() => {
-            const r = resolveQuote(docText, root.anchor!, undefined);
-            return r.ok ? r.start : Number.MAX_SAFE_INTEGER;
-          })();
-    if (!Number.isFinite(pos)) pos = Number.MAX_SAFE_INTEGER;
-    return { root, group: "anchored" as const, pos };
-  });
-
-  const groupRank = { anchored: 0, doc: 1, orphaned: 2 };
-  ordered.sort((a, b) => {
-    if (a.group !== b.group) return groupRank[a.group] - groupRank[b.group];
-    if (a.group === "anchored") return a.pos - b.pos;
-    // doc-level + orphaned keep creation order (already ASC from the query).
-    return Number(a.root.id) - Number(b.root.id);
-  });
+  const roots = commentRows.filter((c) => c.parent_id === null);
+  const ordered = orderRoots(roots, docText);
 
   const threads = ordered.map(({ root, group }) =>
-    threadView(root, repliesByParent.get(Number(root.id)) ?? [], reactionsByComment, group)
+    threadView(root, repliesByParent.get(Number(root.id)) ?? [], byComment, group)
   );
 
-  const anchoredGroups = groupAnchoredReactions(anchoredReactions, docText);
+  const anchoredGroups = groupAnchoredReactions(anchored, docText);
 
   return {
     total: commentRows.length,
     threads,
     // doc-level reactions surfaced alongside (used by reactions UI / agents).
     // Includes orphaned anchored reactions degraded to doc-level (kept).
-    ...(docLevelReactions.length
-      ? { doc_reactions: aggregateReactions(docLevelReactions) }
-      : {}),
+    ...(docLevel.length ? { doc_reactions: aggregateReactions(docLevel) } : {}),
     // Anchored reactions grouped by anchor signature in document order, so
     // clients stack/count + paint the inline chip without re-grouping
     // (birthday.md "Anchored reactions").
     ...(anchoredGroups.length ? { anchored_reactions: anchoredGroups } : {}),
-  };
-}
-
-function threadView(
-  root: CommentRow,
-  replies: CommentRow[],
-  reactionsByComment: Map<number, ReactionRow[]>,
-  group: "anchored" | "doc" | "orphaned"
-) {
-  return {
-    ...commentView(root, reactionsByComment.get(Number(root.id)) ?? []),
-    group,
-    replies: replies
-      .slice()
-      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .map((r) => commentView(r, reactionsByComment.get(Number(r.id)) ?? [])),
   };
 }
 

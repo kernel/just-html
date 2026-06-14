@@ -1,7 +1,7 @@
 import { query } from "@/lib/db";
 import type { DocRow } from "@/lib/docs/store";
 import type { Session } from "@/lib/auth/session";
-import { emailDomain } from "@/lib/docs/grants";
+import { emailDomain, grantFor } from "@/lib/docs/grants";
 import { safeEqualStr } from "@/lib/auth/tokens";
 
 // View access resolution for the viewer routes (/d/:slug, /d/:slug/raw).
@@ -36,13 +36,10 @@ export function canView(doc: DocRow, viewtoken: string | null): boolean {
  */
 async function sessionHasGrant(docId: number, email: string): Promise<boolean> {
   const lower = email.toLowerCase();
-  const domain = emailDomain(lower);
+  const match = grantFor(docId, lower, emailDomain(lower));
   const { rows } = await query<{ n: string }>(
-    `SELECT count(*) AS n FROM doc_grants
-     WHERE doc_id = $1
-       AND ( (grantee_type = 'email'  AND grantee = $2)
-          OR (grantee_type = 'domain' AND grantee = $3) )`,
-    [docId, lower, domain]
+    `SELECT count(*) AS n FROM doc_grants WHERE ${match.where}`,
+    match.params
   );
   return Number(rows[0]?.n ?? 0) > 0;
 }

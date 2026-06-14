@@ -212,6 +212,48 @@ export async function createDoc(opts: {
 }
 
 /**
+ * Storage-quota projection under a write lock — the ONE definition shared by
+ * rewriteDoc and applyPatch. Both replace the locked doc's current html with a
+ * new html AND add a new retained snapshot, so the projected per-owner usage is:
+ *
+ *   other docs' html + other docs' retained snapshots   (everything but THIS doc)
+ *   + new current html (newHtmlBytes)
+ *   + this doc's existing snapshot bytes + new snapshot (newHtmlBytes)
+ *
+ * We can't know exact pruned bytes cheaply pre-insert, so we bound the estimate
+ * by the existing snapshot bytes + the new snapshot; the post-insert prune keeps
+ * the row count capped, which keeps this honest over time.
+ *
+ * Returns the projected total (compare to MAX_STORAGE_BYTES_PER_USER) and the
+ * `current` figure to surface on a quota error (other + this doc's *current* html
+ * + this doc's snapshot bytes). Runs inside the caller's transaction/lock.
+ */
+async function projectStorage(
+  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }> },
+  current: DocRow,
+  newHtmlBytes: number
+): Promise<{ projected: number; current: number }> {
+  const { rows: usageRows } = await client.query(
+    `SELECT
+       COALESCE((SELECT sum(octet_length(html)) FROM documents
+          WHERE owner_id = $1 AND deleted_at IS NULL AND id <> $2), 0)
+     + COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
+          JOIN documents d ON d.id = v.doc_id
+          WHERE d.owner_id = $1 AND d.deleted_at IS NULL AND d.id <> $2), 0) AS other_bytes,
+       COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
+          WHERE v.doc_id = $2), 0) AS this_versions_bytes`,
+    [current.owner_id, current.id]
+  );
+  const u = usageRows[0] as { other_bytes: string | number; this_versions_bytes: string | number };
+  const otherBytes = Number(u?.other_bytes ?? 0);
+  const thisVersionsBytes = Number(u?.this_versions_bytes ?? 0);
+  return {
+    projected: otherBytes + newHtmlBytes + thisVersionsBytes + newHtmlBytes,
+    current: otherBytes + byteLen(current.html) + thisVersionsBytes,
+  };
+}
+
+/**
  * Apply a full-html rewrite (PATCH). Serializes via SELECT ... FOR UPDATE on the
  * documents row, bumps version, writes a full snapshot, prunes old versions past
  * the retention cap. Storage quota re-checked under the lock. Returns the updated
@@ -239,36 +281,13 @@ export async function rewriteDoc(opts: {
     }
 
     // Storage quota under the lock: replacing current.html with the new html, plus
-    // a new retained snapshot (after pruning). Re-derive owner usage minus this
-    // doc's current contribution, add the projected new contribution.
-    const { rows: usageRows } = await client.query(
-      `SELECT
-         COALESCE((SELECT sum(octet_length(html)) FROM documents
-            WHERE owner_id = $1 AND deleted_at IS NULL AND id <> $2), 0)
-       + COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
-            JOIN documents d ON d.id = v.doc_id
-            WHERE d.owner_id = $1 AND d.deleted_at IS NULL AND d.id <> $2), 0) AS other_bytes,
-         COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
-            WHERE v.doc_id = $2), 0) AS this_versions_bytes`,
-      [current.owner_id, current.id]
-    );
-    const otherBytes = Number(usageRows[0]?.other_bytes ?? 0);
+    // a new retained snapshot (after pruning). Shared projection with applyPatch.
     const newHtmlBytes = byteLen(opts.html);
-    // Versions retained for this doc after adding the new snapshot and pruning to
-    // MAX_VERSIONS_PER_DOC. We can't know exact pruned bytes cheaply pre-insert, so
-    // bound the estimate by current snapshot bytes + new snapshot; the post-insert
-    // prune keeps the row count capped which keeps this honest over time.
-    const thisVersionsBytes = Number(usageRows[0]?.this_versions_bytes ?? 0);
-    const projected = otherBytes + newHtmlBytes /* new current html */ +
-      thisVersionsBytes + newHtmlBytes /* new snapshot */;
-    if (projected > MAX_STORAGE_BYTES_PER_USER) {
+    const usage = await projectStorage(client, current, newHtmlBytes);
+    if (usage.projected > MAX_STORAGE_BYTES_PER_USER) {
       await client.query("ROLLBACK");
       return {
-        quota: {
-          kind: "storage",
-          limit: MAX_STORAGE_BYTES_PER_USER,
-          current: otherBytes + Number(byteLen(current.html)) + thisVersionsBytes,
-        },
+        quota: { kind: "storage", limit: MAX_STORAGE_BYTES_PER_USER, current: usage.current },
       };
     }
 
@@ -371,28 +390,11 @@ export async function applyPatch(opts: {
     }
 
     // Storage quota under the lock — same projection as rewriteDoc.
-    const { rows: usageRows } = await client.query(
-      `SELECT
-         COALESCE((SELECT sum(octet_length(html)) FROM documents
-            WHERE owner_id = $1 AND deleted_at IS NULL AND id <> $2), 0)
-       + COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
-            JOIN documents d ON d.id = v.doc_id
-            WHERE d.owner_id = $1 AND d.deleted_at IS NULL AND d.id <> $2), 0) AS other_bytes,
-         COALESCE((SELECT sum(octet_length(v.html)) FROM doc_versions v
-            WHERE v.doc_id = $2), 0) AS this_versions_bytes`,
-      [current.owner_id, current.id]
-    );
-    const otherBytes = Number(usageRows[0]?.other_bytes ?? 0);
-    const thisVersionsBytes = Number(usageRows[0]?.this_versions_bytes ?? 0);
-    const projected = otherBytes + newHtmlBytes + thisVersionsBytes + newHtmlBytes;
-    if (projected > MAX_STORAGE_BYTES_PER_USER) {
+    const usage = await projectStorage(client, current, newHtmlBytes);
+    if (usage.projected > MAX_STORAGE_BYTES_PER_USER) {
       await client.query("ROLLBACK");
       return {
-        quota: {
-          kind: "storage",
-          limit: MAX_STORAGE_BYTES_PER_USER,
-          current: otherBytes + Number(byteLen(current.html)) + thisVersionsBytes,
-        },
+        quota: { kind: "storage", limit: MAX_STORAGE_BYTES_PER_USER, current: usage.current },
       };
     }
 

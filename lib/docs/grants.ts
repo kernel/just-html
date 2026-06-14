@@ -274,6 +274,30 @@ export type DocAccess =
   | { kind: "none"; role: null };
 
 /**
+ * THE grant-match clause — the one SQL builder for "does a grant on `docId`
+ * target this email OR its email-domain?". Shared by resolveAccess (grants.ts,
+ * which reads grantee_type+role) and sessionHasGrant (access.ts, which counts).
+ * Both build on this so the matching predicate and param order are single-sourced;
+ * each wraps it in the SELECT shape it needs (one returns role, one a boolean).
+ *
+ * Returns the WHERE fragment + its three positional params [docId, email, domain]
+ * (email/domain already lowercased here). Callers splice `where` after their own
+ * SELECT and pass `params` straight through.
+ */
+export function grantFor(
+  docId: number,
+  email: string,
+  domain: string
+): { where: string; params: [number, string, string] } {
+  return {
+    where: `doc_id = $1
+       AND ( (grantee_type = 'email'  AND grantee = $2)
+          OR (grantee_type = 'domain' AND grantee = $3) )`,
+    params: [docId, email.toLowerCase(), domain.toLowerCase()],
+  };
+}
+
+/**
  * Resolve an API principal's access to a doc, per the permissions ladder:
  * owner > email grant > domain grant. (View token + public are the viewer-route
  * path, handled separately in lib/docs/access.ts — an API-key holder always acts
@@ -292,14 +316,10 @@ export async function resolveAccess(doc: DocRow, principalEmail: string, princip
   const email = principalEmail.toLowerCase();
   const domain = emailDomain(email);
 
+  const match = grantFor(doc.id, email, domain);
   const { rows } = await query<{ grantee_type: GranteeType; role: GrantRole }>(
-    `SELECT grantee_type, role FROM doc_grants
-     WHERE doc_id = $1
-       AND (
-         (grantee_type = 'email'  AND grantee = $2)
-         OR (grantee_type = 'domain' AND grantee = $3)
-       )`,
-    [doc.id, email, domain]
+    `SELECT grantee_type, role FROM doc_grants WHERE ${match.where}`,
+    match.params
   );
 
   let emailRole: GrantRole | null = null;
