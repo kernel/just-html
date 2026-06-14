@@ -10,6 +10,7 @@
     "migrate": "node --env-file=.env scripts/migrate.mjs",
     "migrate:status": "node --env-file=.env scripts/migrate.mjs status",
     "gen:skill": "tsx scripts/gen-skill.ts",
+    "spec:check": "tsx scripts/spec-check.ts",
     "test": "vitest run",
     "e2e": "node --env-file=.env node_modules/.bin/tsx scripts/e2e.ts"
   },
@@ -22,10 +23,14 @@
     "resend": "^4.8.0"
   },
   "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
+    "js-yaml": "^4.2.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.2",
     "vitest": "^4.1.8"

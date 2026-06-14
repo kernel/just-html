@@ -1,0 +1,40 @@
+# CI — the gate that runs on every PR and on push to main. Fast, hermetic, and
+# does NOT touch production: type-check, build, unit tests, and the static
+# spec:check (the three-way drift guard between the OpenAPI spec, the on-disk
+# route handlers, and the /llms.txt body).
+#
+# e2e is deliberately NOT run here: it exercises the REAL email path against
+# production (AgentMail) and needs the AGENTMAIL_AGENTMAIL_API_KEY secret, so it
+# stays the local / pre-deploy gate (run with `npm run e2e`).
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Type-check
+        run: npx tsc --noEmit
+      - name: Build
+        run: npm run build
+      - name: Unit tests
+        run: npm test
+      - name: Spec drift check
+        run: npm run spec:check

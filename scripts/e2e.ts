@@ -11,6 +11,8 @@
 // Run:  npm run e2e        (tsx scripts/e2e.ts)
 // Exits non-zero if any assertion fails.
 
+import { validateResponseBody } from "@/lib/openapi/response-validator";
+
 const BASE = (process.env.BASE_URL ?? "https://justhtml.sh").replace(/\/$/, "");
 const AM_KEY = process.env.AGENTMAIL_AGENTMAIL_API_KEY;
 const AM = "https://api.agentmail.to/v0";
@@ -32,6 +34,26 @@ function check(name: string, cond: boolean, detail = "") {
     console.log(`  ✗ ${name}${detail ? ` — ${detail}` : ""}`);
   }
 }
+// Runtime contract check: assert a parsed JSON body conforms to the response
+// schema the OpenAPI spec documents for (method, path template, status). A body
+// that violates its documented schema is an e2e failure. When the spec documents
+// no schema for that status, this is a no-op pass (the harness still records it).
+function checkSchema(
+  label: string,
+  method: string,
+  pathTemplate: string,
+  status: number,
+  body: unknown
+) {
+  const r = validateResponseBody(method, pathTemplate, status, body);
+  if (r.ok) {
+    const note = r.documented ? "" : "no documented schema";
+    check(`${label} matches spec schema`, true, note);
+  } else {
+    check(`${label} matches spec schema`, false, r.errors);
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // deterministic-enough unique suffix without Date.now()/Math.random (which are
@@ -122,16 +144,19 @@ async function main() {
   check("owner got a jh_live_ key", ownerKey.startsWith("jh_live_"), ownerKey.slice(0, 12));
   const meRes = await jh("/api/v1/docs", { headers: { Authorization: `Bearer ${ownerKey}` } });
   check("key authenticates GET /api/v1/docs", meRes.status === 200, `status ${meRes.status}`);
+  checkSchema("GET /docs (list)", "GET", "/api/v1/docs", meRes.status, await meRes.clone().json());
 
   // --- Phase 2: publish + fetch + sandboxed raw ---
   console.log("Phase 2 — publish");
   const marker = `e2e-${tag()}`;
   const phrase = `the load-bearing sentence ${marker}`;
-  const created = await (await jh("/api/v1/docs", {
+  const createRes = await jh("/api/v1/docs", {
     method: "POST",
     headers: authJson(ownerKey),
     body: JSON.stringify({ html: `<h1>E2E ${marker}</h1><p>${phrase}.</p>`, title: `E2E ${marker}` }),
-  })).json();
+  });
+  const created = await createRes.json();
+  checkSchema("POST /docs (create)", "POST", "/api/v1/docs", createRes.status, created);
   const slug = created.slug as string;
   check("doc created with slug", !!slug, JSON.stringify(created).slice(0, 80));
   check("create returned a view_token + version 1", !!created.view_token && created.version === 1);
@@ -150,14 +175,19 @@ async function main() {
     body: JSON.stringify({ edits: [{ oldText: "load-bearing", newText: "rewritten" }], base_version: 1 }),
   });
   const editJson = await edit.json();
+  checkSchema("POST /edits", "POST", "/api/v1/docs/{slug}/edits", edit.status, editJson);
   check("edit applied, version -> 2", edit.status === 200 && editJson.version === 2, `status ${edit.status}`);
   const stale = await jh(`/api/v1/docs/${slug}/edits`, {
     method: "POST",
     headers: authJson(ownerKey),
     body: JSON.stringify({ edits: [{ oldText: "rewritten", newText: "x" }], base_version: 1 }),
   });
+  const staleJson = await stale.json();
   check("stale base_version -> 409", stale.status === 409, `status ${stale.status}`);
-  const versions = await (await jh(`/api/v1/docs/${slug}/versions`, { headers: { Authorization: `Bearer ${ownerKey}` } })).json();
+  checkSchema("POST /edits (409 conflict)", "POST", "/api/v1/docs/{slug}/edits", stale.status, staleJson);
+  const versionsRes = await jh(`/api/v1/docs/${slug}/versions`, { headers: { Authorization: `Bearer ${ownerKey}` } });
+  const versions = await versionsRes.json();
+  checkSchema("GET /versions", "GET", "/api/v1/docs/{slug}/versions", versionsRes.status, versions);
   check("history has >= 2 versions", (versions.versions ?? versions).length >= 2);
 
   // --- Phase 4: comment (anchored) + reaction (anchored span) ---
@@ -168,14 +198,19 @@ async function main() {
     body: JSON.stringify({ body: "is this right?", anchor: { exact: `sentence ${marker}`, prefix: "the rewritten ", suffix: "." } }),
   });
   const commentJson = await comment.json();
+  checkSchema("POST /comments", "POST", "/api/v1/docs/{slug}/comments", comment.status, commentJson);
   check("anchored comment created", comment.status === 201 && !!commentJson.comment?.id, `status ${comment.status}`);
   const react = await jh(`/api/v1/docs/${slug}/reactions`, {
     method: "POST",
     headers: authJson(ownerKey),
     body: JSON.stringify({ emoji: "🚀", anchor: { exact: `E2E ${marker}`, prefix: "", suffix: "" } }),
   });
+  const reactJson = await react.json();
+  checkSchema("POST /reactions", "POST", "/api/v1/docs/{slug}/reactions", react.status, reactJson);
   check("anchored reaction created", react.status === 201, `status ${react.status}`);
-  const threads = await (await jh(`/api/v1/docs/${slug}/comments`, { headers: { Authorization: `Bearer ${ownerKey}` } })).json();
+  const threadsRes = await jh(`/api/v1/docs/${slug}/comments`, { headers: { Authorization: `Bearer ${ownerKey}` } });
+  const threads = await threadsRes.json();
+  checkSchema("GET /comments", "GET", "/api/v1/docs/{slug}/comments", threadsRes.status, threads);
   check("GET /comments returns the thread", (threads.threads ?? []).length >= 1);
 
   // --- Phase 5: share by email -> grantee gets a one-click login that lands on the doc ---
@@ -188,6 +223,7 @@ async function main() {
     body: JSON.stringify({ email: granteeInbox, role: "editor" }),
   });
   const grantJson = await grant.json();
+  checkSchema("POST /grants", "POST", "/api/v1/docs/{slug}/grants", grant.status, grantJson);
   check("editor grant created + notified", grant.status === 201 && grantJson.notified === true, `status ${grant.status}`);
   const shareEmail = await waitForEmail(granteeInbox, "shared");
   const link = (shareEmail.text.match(/https:\/\/[^\s)]+\/login\/verify\?[^\s)]+/) ??
@@ -221,6 +257,9 @@ async function main() {
   console.log("Phase 6 — delete + revoke");
   const del = await jh(`/api/v1/docs/${slug}`, { method: "DELETE", headers: { Authorization: `Bearer ${ownerKey}` } });
   check("test doc soft-deleted", del.status === 200 || del.status === 204, `status ${del.status}`);
+  if (del.status === 200) {
+    checkSchema("DELETE /docs/:slug", "DELETE", "/api/v1/docs/{slug}", del.status, await del.clone().json());
+  }
   await jh("/oauth2/revoke", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: ownerKey }) });
   const afterRevoke = await jh("/api/v1/docs", { headers: { Authorization: `Bearer ${ownerKey}` } });
   check("revoked key is rejected (401)", afterRevoke.status === 401, `status ${afterRevoke.status}`);
