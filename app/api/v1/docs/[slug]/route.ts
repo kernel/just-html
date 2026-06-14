@@ -3,12 +3,11 @@ import {
   json,
   notFoundDoc,
   parseJsonObject,
-  parseOptionalBool,
-  parseTitle,
   payloadTooLarge,
   quotaExceeded,
   requireApiKey,
 } from "@/lib/docs/api";
+import { UpdateDocBody, zodBadRequest } from "@/lib/docs/schemas";
 import { MAX_HTML_BYTES } from "@/lib/docs/config";
 import {
   byteLen,
@@ -75,6 +74,9 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   if ("response" in parsed) return parsed.response;
   const b = parsed.obj;
 
+  // Presence checks + the owner-only 403 stay BEFORE field-type validation,
+  // preserving the exact ordering of the hand-parsed version: "at least one
+  // field" → owner-only restriction → field type/length validation (now Zod).
   const hasHtml = b.html !== undefined;
   const hasTitle = b.title !== undefined;
   const hasPublic = b.public !== undefined;
@@ -93,31 +95,20 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     );
   }
 
-  // Validate html (if present).
-  if (hasHtml && typeof b.html !== "string") {
-    return apiError(400, "invalid_request", "Field 'html' must be a string.");
-  }
-  if (hasHtml) {
-    const htmlBytes = byteLen(b.html as string);
+  // The 2 MB byte cap runs after the html-is-a-string check and before title/
+  // public validation (old ordering): a present-but-oversized html string 413s
+  // before any title/public 400. Zod can't measure UTF-8 bytes, so it stays here.
+  if (hasHtml && typeof b.html === "string") {
+    const htmlBytes = byteLen(b.html);
     if (htmlBytes > MAX_HTML_BYTES) return payloadTooLarge(MAX_HTML_BYTES, htmlBytes);
   }
 
-  // Validate title (if present; null clears it). Left undefined when absent so
-  // updateMeta only touches provided fields.
-  let title: string | null | undefined;
-  if (hasTitle) {
-    const titleResult = parseTitle(b.title, { allowNull: true });
-    if ("response" in titleResult) return titleResult.response;
-    title = titleResult.title;
-  }
-
-  // Validate public (if present). Left undefined when absent.
-  let isPublic: boolean | undefined;
-  if (hasPublic) {
-    const publicResult = parseOptionalBool(b.public, "public", false);
-    if ("response" in publicResult) return publicResult.response;
-    isPublic = publicResult.value;
-  }
+  // Validate html/title/public types + title length via Zod. Absent fields stay
+  // absent (title/public left undefined so updateMeta only touches provided ones).
+  const result0 = UpdateDocBody.safeParse(b);
+  if (!result0.success) return zodBadRequest(result0.error, ["html", "title", "public"]);
+  const title: string | null | undefined = result0.data.title;
+  const isPublic: boolean | undefined = result0.data.public;
 
   // Apply metadata changes first (no version bump), then the html rewrite (bump +
   // snapshot) so the returned row reflects both.
@@ -128,7 +119,7 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   if (hasHtml) {
     const result = await rewriteDoc({
       doc: current,
-      html: b.html as string,
+      html: result0.data.html as string,
       authorUserId: principal.userId,
     });
     if ("quota" in result) {

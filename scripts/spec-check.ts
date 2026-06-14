@@ -19,6 +19,7 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
+import { generateSpec } from "./gen-spec";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const APP_DIR = join(ROOT, "app");
@@ -150,6 +151,155 @@ function loadLlmsPaths(): { has: (p: string) => boolean } {
   };
 }
 
+// --- 4. generated (Zod) vs hand-written docs-path equivalence ------------
+//
+// Z1: the docs resource has migrated to Zod schemas that GENERATE a parallel
+// spec (scripts/gen-spec.ts). The route still serves the hand-written
+// lib/openapi/spec-yaml.ts; this sub-step proves the generated docs paths
+// reproduce the hand-written CONTRACT so the eventual cutover (Z5) is safe.
+//
+// Equivalence is checked on the load-bearing shape — not byte-for-byte YAML
+// (the generated spec is intentionally richer: more descriptions/examples, an
+// accurate nullable title, explicit `required` arrays). For each docs operation
+// we compare, after resolving $refs against each doc's own components:
+//   - request-body property-name set + required-field set
+//   - each documented 2xx success response's property-name set
+// A mismatch means the Zod schemas drifted from the documented contract.
+
+type SchemaObj = Record<string, unknown>;
+type OpenApiDoc = {
+  paths?: Record<string, Record<string, unknown>>;
+  components?: { schemas?: Record<string, SchemaObj> };
+};
+
+function resolveRef(doc: OpenApiDoc, schema: unknown): SchemaObj {
+  let s = schema as SchemaObj;
+  // Follow a single-level $ref into components/schemas (our docs schemas don't
+  // chain refs more than one deep for the shapes we compare).
+  for (let i = 0; i < 10 && s && typeof s.$ref === "string"; i++) {
+    const name = (s.$ref as string).split("/").pop()!;
+    s = (doc.components?.schemas ?? {})[name] ?? {};
+  }
+  // allOf: merge member property/required sets (the hand-written error/quota
+  // responses use allOf to extend ApiError).
+  if (s && Array.isArray(s.allOf)) {
+    const merged: SchemaObj = { type: "object", properties: {}, required: [] };
+    for (const member of s.allOf as unknown[]) {
+      const r = resolveRef(doc, member);
+      Object.assign(merged.properties as object, (r.properties as object) ?? {});
+      if (Array.isArray(r.required)) {
+        (merged.required as string[]).push(...(r.required as string[]));
+      }
+    }
+    return merged;
+  }
+  return s ?? {};
+}
+
+/** {props, required} name-sets for a (possibly $ref/allOf) object schema. */
+function shapeOf(doc: OpenApiDoc, schema: unknown): { props: Set<string>; required: Set<string> } {
+  const s = resolveRef(doc, schema);
+  const props = new Set<string>(Object.keys((s.properties as object) ?? {}));
+  const required = new Set<string>(Array.isArray(s.required) ? (s.required as string[]) : []);
+  return { props, required };
+}
+
+function setEq(a: Set<string>, b: Set<string>): boolean {
+  return a.size === b.size && [...a].every((x) => b.has(x));
+}
+
+function diffSets(label: string, hand: Set<string>, gen: Set<string>): string | null {
+  if (setEq(hand, gen)) return null;
+  const onlyHand = [...hand].filter((x) => !gen.has(x)).sort();
+  const onlyGen = [...gen].filter((x) => !hand.has(x)).sort();
+  const bits: string[] = [];
+  if (onlyHand.length) bits.push(`only in hand-written: ${onlyHand.join(", ")}`);
+  if (onlyGen.length) bits.push(`only in generated: ${onlyGen.join(", ")}`);
+  return `${label}: ${bits.join("; ")}`;
+}
+
+// The docs operations to prove equivalent, and which body/response shapes carry
+// the load-bearing contract.
+const DOCS_OPS: {
+  path: string;
+  method: string;
+  body?: boolean;
+  bodyRequired?: boolean;
+  successCodes: string[];
+}[] = [
+  { path: "/api/v1/docs", method: "post", body: true, bodyRequired: true, successCodes: ["201"] },
+  { path: "/api/v1/docs", method: "get", successCodes: ["200"] },
+  { path: "/api/v1/docs/{slug}", method: "get", successCodes: ["200"] },
+  { path: "/api/v1/docs/{slug}", method: "patch", body: true, successCodes: ["200"] },
+  { path: "/api/v1/docs/{slug}", method: "delete", successCodes: ["200"] },
+];
+
+function opSchemas(doc: OpenApiDoc, path: string, method: string) {
+  const op = (doc.paths?.[path]?.[method] ?? {}) as Record<string, unknown>;
+  const body = (
+    (op.requestBody as { content?: Record<string, { schema?: unknown }> })?.content?.[
+      "application/json"
+    ] ?? {}
+  ).schema;
+  const responses = (op.responses ?? {}) as Record<string, { content?: Record<string, { schema?: unknown }> }>;
+  return { op, body, responses };
+}
+
+function checkDocsEquivalence(): string[] {
+  const handYaml = extractTemplateLiteral(join(ROOT, "lib/openapi/spec-yaml.ts"), "SPEC_YAML");
+  const hand = yaml.load(handYaml) as OpenApiDoc;
+
+  // Import + run the same generator gen-spec uses, so the artifact and the check
+  // can never disagree.
+  let gen: OpenApiDoc;
+  try {
+    gen = generateSpec() as OpenApiDoc;
+  } catch (e) {
+    return [`could not generate the Zod spec for the docs equivalence check: ${(e as Error).message}`];
+  }
+
+  const problems: string[] = [];
+  for (const spec of DOCS_OPS) {
+    const h = opSchemas(hand, spec.path, spec.method);
+    const g = opSchemas(gen, spec.path, spec.method);
+    const where = `${spec.method.toUpperCase()} ${spec.path}`;
+
+    if (!g.op || Object.keys(g.op).length === 0) {
+      problems.push(`${where}: missing from the generated (Zod) spec`);
+      continue;
+    }
+
+    if (spec.body) {
+      if (h.body === undefined || g.body === undefined) {
+        problems.push(`${where}: request body present in one spec but not the other`);
+      } else {
+        const hb = shapeOf(hand, h.body);
+        const gb = shapeOf(gen, g.body);
+        const dp = diffSets(`${where} request body properties`, hb.props, gb.props);
+        if (dp) problems.push(dp);
+        if (spec.bodyRequired) {
+          const dr = diffSets(`${where} request body required`, hb.required, gb.required);
+          if (dr) problems.push(dr);
+        }
+      }
+    }
+
+    for (const code of spec.successCodes) {
+      const hs = h.responses[code]?.content?.["application/json"]?.schema;
+      const gs = g.responses[code]?.content?.["application/json"]?.schema;
+      if (hs === undefined || gs === undefined) {
+        problems.push(`${where} ${code}: success response schema present in one spec but not the other`);
+        continue;
+      }
+      const hShape = shapeOf(hand, hs);
+      const gShape = shapeOf(gen, gs);
+      const dp = diffSets(`${where} ${code} response properties`, hShape.props, gShape.props);
+      if (dp) problems.push(dp);
+    }
+  }
+  return problems;
+}
+
 // --- assertions ----------------------------------------------------------
 
 function main() {
@@ -181,6 +331,15 @@ function main() {
     problems.push(
       "Spec paths not referenced anywhere in the /llms.txt body (lib/skill-content.ts):\n" +
         fmtSet(absentFromLlms)
+    );
+  }
+
+  // Z1: prove the generated (Zod) docs paths reproduce the hand-written contract.
+  const docsEquiv = checkDocsEquivalence();
+  if (docsEquiv.length) {
+    problems.push(
+      "Generated (Zod) docs paths are not equivalent to the hand-written spec's docs paths:\n" +
+        docsEquiv.map((p) => `    ${p}`).join("\n")
     );
   }
 

@@ -2,12 +2,11 @@ import {
   apiError,
   json,
   parseJsonObject,
-  parseOptionalBool,
-  parseTitle,
   payloadTooLarge,
   quotaExceeded,
   requireApiKey,
 } from "@/lib/docs/api";
+import { CreateDocBody, zodBadRequest } from "@/lib/docs/schemas";
 import { MAX_HTML_BYTES } from "@/lib/docs/config";
 import {
   byteLen,
@@ -38,22 +37,20 @@ export async function POST(req: Request): Promise<Response> {
   if ("response" in parsed) return parsed.response;
   const b = parsed.obj;
 
-  if (typeof b.html !== "string") {
-    return apiError(400, "invalid_request", "Field 'html' is required and must be a string.");
-  }
-  const html = b.html;
-  const htmlBytes = byteLen(html);
-  if (htmlBytes > MAX_HTML_BYTES) {
-    return payloadTooLarge(MAX_HTML_BYTES, htmlBytes);
+  // Preserve the old ordering exactly: the authoritative byte-length 413 runs
+  // right after the html-is-a-string check and BEFORE title/public validation.
+  // Zod's CreateDocBody validates html/title/public types + the title length cap;
+  // the 2 MB byte cap stays here (Zod can't measure UTF-8 bytes), so a valid
+  // (but oversized) html string still 413s before any title/public 400 — matching
+  // the hand-parsed behavior.
+  if (typeof b.html === "string") {
+    const htmlBytes = byteLen(b.html);
+    if (htmlBytes > MAX_HTML_BYTES) return payloadTooLarge(MAX_HTML_BYTES, htmlBytes);
   }
 
-  const titleResult = parseTitle(b.title, { allowNull: false });
-  if ("response" in titleResult) return titleResult.response;
-  const title = titleResult.title;
-
-  const publicResult = parseOptionalBool(b.public, "public", false);
-  if ("response" in publicResult) return publicResult.response;
-  const isPublic = publicResult.value;
+  const result0 = CreateDocBody.safeParse(b);
+  if (!result0.success) return zodBadRequest(result0.error, ["html", "title", "public"]);
+  const { html, title, public: isPublic } = result0.data;
 
   const result = await createDoc({ ownerId: principal.userId, html, title, isPublic });
   if ("quota" in result) {

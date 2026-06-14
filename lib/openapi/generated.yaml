@@ -1,0 +1,531 @@
+openapi: 3.1.0
+info:
+  title: justhtml.sh API
+  version: 1.0.0
+  description: >-
+    Code-first generated spec (Z1 — docs resource only). Parallel artifact diffed against the
+    hand-written spec; not yet served.
+servers:
+  - url: https://justhtml.sh
+    description: Production
+components:
+  securitySchemes:
+    bearerApiKey:
+      type: http
+      scheme: bearer
+      bearerFormat: jh_live_...
+      description: >-
+        Long-lived API key obtained via the auth.md service_auth flow. Carries scopes docs.read
+        docs.write. 401s include a WWW-Authenticate header pointing at the protected-resource
+        metadata.
+  schemas:
+    CreateDocBody:
+      type: object
+      properties:
+        html:
+          type: string
+          description: The document HTML.
+          example: <h1>Hello</h1>
+        title:
+          type:
+            - string
+            - 'null'
+          maxLength: 300
+          description: Optional document title.
+          example: My doc
+        public:
+          type: boolean
+          default: false
+          description: Whether the document is public.
+      required:
+        - html
+      description: Create a document. html is required; title and public are optional.
+    UpdateDocBody:
+      type: object
+      properties:
+        html:
+          type: string
+          description: Replacement HTML (full rewrite, bumps version).
+          example: <h1>Hi</h1>
+        title:
+          type:
+            - string
+            - 'null'
+          maxLength: 300
+          description: New title, or null to clear it.
+        public:
+          type: boolean
+          description: New visibility flag (owner only).
+      description: >-
+        Update html (full rewrite), title, or visibility. At least one field is required. Editors
+        may rewrite html; only the owner may change title or public.
+    OwnerDoc:
+      type: object
+      properties:
+        slug:
+          type: string
+          example: fierce-tiger-12345
+        url:
+          type: string
+          format: uri
+          example: https://justhtml.sh/d/fierce-tiger-12345
+        title:
+          type:
+            - string
+            - 'null'
+        version:
+          type: integer
+        public:
+          type: boolean
+        view_token:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        html:
+          type: string
+      required:
+        - slug
+        - url
+        - title
+        - version
+        - public
+        - view_token
+        - created_at
+        - updated_at
+      description: Document as seen by its owner (includes view_token).
+    GranteeDoc:
+      type: object
+      properties:
+        slug:
+          type: string
+          example: fierce-tiger-12345
+        url:
+          type: string
+          format: uri
+          example: https://justhtml.sh/d/fierce-tiger-12345
+        title:
+          type:
+            - string
+            - 'null'
+        version:
+          type: integer
+        public:
+          type: boolean
+        role:
+          type: string
+          enum:
+            - editor
+            - commenter
+            - viewer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        html:
+          type: string
+      required:
+        - slug
+        - url
+        - title
+        - version
+        - public
+        - role
+        - created_at
+        - updated_at
+      description: Document as seen by a non-owner grantee (role instead of view_token).
+    DocWithHtml:
+      type: object
+      properties:
+        slug:
+          type: string
+          example: fierce-tiger-12345
+        url:
+          type: string
+          format: uri
+          example: https://justhtml.sh/d/fierce-tiger-12345
+        title:
+          type:
+            - string
+            - 'null'
+        version:
+          type: integer
+        public:
+          type: boolean
+        view_token:
+          type: string
+        role:
+          type: string
+          enum:
+            - editor
+            - commenter
+            - viewer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        html:
+          type: string
+      required:
+        - slug
+        - url
+        - title
+        - version
+        - public
+        - created_at
+        - updated_at
+      description: >-
+        Owner sees view_token; a grantee sees role (editor/commenter/viewer) instead. html is
+        included on single-doc fetches and after writes.
+    DocListItem:
+      type: object
+      properties:
+        slug:
+          type: string
+          example: fierce-tiger-12345
+        url:
+          type: string
+          format: uri
+          example: https://justhtml.sh/d/fierce-tiger-12345
+        title:
+          type:
+            - string
+            - 'null'
+        access:
+          type: string
+          enum:
+            - owner
+            - editor
+            - commenter
+            - viewer
+          description: >-
+            The caller's access to this doc. owner for docs you own; otherwise the resolved grant
+            role (an explicit email grant beats a domain grant for the same email).
+        version:
+          type: integer
+        public:
+          type: boolean
+        comment_count:
+          type: integer
+          description: >-
+            Live (non-deleted) comments + replies on the doc. 0 when there are none. The /docs
+            dashboard surfaces the same count.
+        view_token:
+          type: string
+          description: Present only when access=owner.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - slug
+        - url
+        - title
+        - access
+        - version
+        - public
+        - comment_count
+        - created_at
+        - updated_at
+      description: >-
+        A document as returned by GET /api/v1/docs (any scope). Carries access
+        (owner|editor|commenter|viewer). Owned items (access=owner) additionally carry view_token;
+        shared items omit it.
+    DocListResponse:
+      type: object
+      properties:
+        docs:
+          type: array
+          items:
+            $ref: '#/components/schemas/DocListItem'
+      required:
+        - docs
+      description: The matched documents.
+    DeleteDocResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        deleted:
+          type: boolean
+      required:
+        - slug
+        - deleted
+      description: Soft-delete acknowledgement.
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
+      additionalProperties: {}
+      description: 'Structured API error: { error, message, ...extra }.'
+    Slug:
+      type: string
+      example: fierce-tiger-12345
+  parameters:
+    Slug:
+      schema:
+        $ref: '#/components/schemas/Slug'
+      required: true
+      name: slug
+      in: path
+paths:
+  /api/v1/docs:
+    post:
+      tags:
+        - docs
+      summary: Create a document
+      operationId: createDoc
+      security:
+        - bearerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDocBody'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerDoc'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: A resource quota was exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: HTML exceeds the 2 MB per-document size limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    get:
+      tags:
+        - docs
+      summary: List documents (owned, shared, or both)
+      description: >-
+        Lists documents by scope. Every item carries an access role (owner|editor|commenter|viewer).
+        For a doc matched by both an email grant and a domain grant, the email grant wins
+        (precedence ladder). Owned items additionally carry view_token; shared items do not (the
+        view token is an owner-only capability). The web equivalent for a signed-in human is
+        https://justhtml.sh/docs.
+      operationId: listDocs
+      security:
+        - bearerApiKey: []
+      parameters:
+        - schema:
+            type: string
+            enum:
+              - owned
+              - shared
+              - all
+            default: owned
+            description: >-
+              owned (default): docs the caller owns. shared: docs granted to the caller's email or
+              email-domain, excluding docs the caller owns. all: owned then shared.
+          required: false
+          description: >-
+            owned (default): docs the caller owns. shared: docs granted to the caller's email or
+            email-domain, excluding docs the caller owns. all: owned then shared.
+          name: scope
+          in: query
+        - schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+          required: false
+          name: limit
+          in: query
+      responses:
+        '200':
+          description: The matched documents
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocListResponse'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}:
+    get:
+      tags:
+        - docs
+      summary: Fetch a document (metadata + html)
+      operationId: getDoc
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: Owner sees view_token; a grantee sees role instead of view_token.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocWithHtml'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    patch:
+      tags:
+        - docs
+      summary: Update html (full rewrite), title, or visibility
+      description: >-
+        Owner or editor grant may rewrite html. Only the owner may change title or public
+        (visibility).
+      operationId: updateDoc
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDocBody'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocWithHtml'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Editor tried to change title/visibility
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: HTML exceeds the 2 MB per-document size limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      tags:
+        - docs
+      summary: Soft-delete a document (owner only)
+      operationId: deleteDoc
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteDocResponse'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+webhooks: {}
