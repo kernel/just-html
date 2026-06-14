@@ -3,7 +3,7 @@ info:
   title: justhtml.sh API
   version: 1.0.0
   description: >-
-    Code-first generated spec (Z1 — docs resource only). Parallel artifact diffed against the
+    Code-first generated spec (Z4 — docs + auth surface). Parallel artifact diffed against the
     hand-written spec; not yet served.
 servers:
   - url: https://justhtml.sh
@@ -941,6 +941,222 @@ components:
         - id
         - deleted
       description: Reaction removed.
+    ClaimBlock:
+      type: object
+      properties:
+        complete_url:
+          type: string
+          format: uri
+          description: POST {claim_token, user_code} here to complete the claim.
+        expires_in:
+          type: integer
+          example: 600
+        interval:
+          type: integer
+          example: 5
+      required:
+        - complete_url
+        - expires_in
+        - interval
+      description: >-
+        The claim block. The user_code is intentionally omitted — it is emailed to the human (the
+        only place it appears). The human reads it back to the agent, which POSTs {claim_token,
+        user_code} to complete_url (/agent/identity/claim/complete).
+    AgentError:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+        - message
+      description: 'Agent ceremony error: { error, message }.'
+    OAuthError:
+      type: object
+      properties:
+        error:
+          type: string
+        error_description:
+          type: string
+      required:
+        - error
+      description: 'OAuth error envelope (RFC 6749): { error, error_description? }.'
+    StartRegistrationBody:
+      type: object
+      properties:
+        type:
+          type: string
+          enum:
+            - service_auth
+          description: The registration type.
+        login_hint:
+          type: string
+          format: email
+          example: you@example.com
+          description: The human's email address.
+      required:
+        - type
+        - login_hint
+      description: Start a service_auth registration; the 6-digit code is emailed to login_hint.
+    RemintClaimBody:
+      type: object
+      properties:
+        claim_token:
+          type: string
+        email:
+          type: string
+          format: email
+          description: Corrected email; updates the registration's login_hint.
+      required:
+        - claim_token
+        - email
+      description: Re-mint an expired code; a fresh code is emailed to the human.
+    CompleteClaimBody:
+      type: object
+      properties:
+        claim_token:
+          type: string
+        user_code:
+          type: string
+          pattern: ^[0-9]{6}$
+          example: '428117'
+      required:
+        - claim_token
+        - user_code
+      description: Complete a claim by reading the emailed 6-digit code back to the agent.
+    TokenForm:
+      type: object
+      properties:
+        grant_type:
+          type: string
+          enum:
+            - urn:workos:agent-auth:grant-type:claim
+          description: The claim grant type.
+        claim_token:
+          type: string
+      required:
+        - grant_type
+        - claim_token
+      description: Claim-grant token request (form-encoded).
+    RevokeForm:
+      type: object
+      properties:
+        token:
+          type: string
+        token_type_hint:
+          type: string
+          enum:
+            - access_token
+      required:
+        - token
+      description: RFC 7009 revocation request (form-encoded).
+    StartRegistrationResponse:
+      type: object
+      properties:
+        registration_id:
+          type: string
+        registration_type:
+          type: string
+          enum:
+            - service_auth
+        claim_url:
+          type: string
+          format: uri
+        claim_token:
+          type: string
+          description: Secret; returned once. Hold in memory only.
+        claim_token_expires:
+          type: string
+          format: date-time
+        post_claim_scopes:
+          type: array
+          items:
+            type: string
+          example:
+            - docs.read
+            - docs.write
+        claim:
+          $ref: '#/components/schemas/ClaimBlock'
+      required:
+        - registration_id
+        - registration_type
+        - claim_url
+        - claim_token
+        - claim_token_expires
+        - post_claim_scopes
+        - claim
+      description: Pending registration created; code emailed to the human.
+    RemintClaimResponse:
+      type: object
+      properties:
+        registration_id:
+          type: string
+        claim_attempt_id:
+          type: string
+        status:
+          type: string
+          example: initiated
+        claim_attempt:
+          $ref: '#/components/schemas/ClaimBlock'
+      required:
+        - registration_id
+        - claim_attempt_id
+        - status
+        - claim_attempt
+      description: Fresh code emailed.
+    CompleteClaimResponse:
+      type: object
+      properties:
+        registration_id:
+          type: string
+        status:
+          type: string
+          example: claimed
+        message:
+          type: string
+      required:
+        - registration_id
+        - status
+        - message
+      description: Claim confirmed; poll /oauth2/token for the key.
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          example: jh_live_...
+        token_type:
+          type: string
+          enum:
+            - Bearer
+        scope:
+          type: string
+          example: docs.read docs.write
+        credential_type:
+          type: string
+          enum:
+            - api_key
+        registration_id:
+          type: string
+      required:
+        - access_token
+        - token_type
+        - scope
+        - credential_type
+        - registration_id
+      description: Credential issued (once).
+    ProtectedResourceMetadata:
+      type: object
+      properties: {}
+      additionalProperties: {}
+      description: RFC 9728 protected-resource metadata.
+    AuthServerMetadata:
+      type: object
+      properties: {}
+      additionalProperties: {}
+      description: RFC 8414 authorization-server metadata (with agent_auth block).
     Slug:
       type: string
       example: fierce-tiger-12345
@@ -1871,4 +2087,268 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /agent/identity:
+    post:
+      tags:
+        - auth
+      summary: Start a service_auth registration
+      description: >-
+        Creates a pending registration (no user account is created yet), emails the human a 6-digit
+        code, and returns a claim_token plus a claim block. There is exactly one flow: justhtml.sh
+        emails the login_hint the code (the code and nothing else — no links). The user_code is
+        NEVER returned in the response (the email is the binding proof). The human reads the code
+        back to the agent, which submits it to POST /agent/identity/claim/complete; the agent then
+        polls /oauth2/token for the key. There is no claim_delivery parameter, no approve link, and
+        no hosted claim form.
+      operationId: startRegistration
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartRegistrationBody'
+      responses:
+        '200':
+          description: Pending registration created; code emailed to the human
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StartRegistrationResponse'
+        '400':
+          description: >-
+            Bad body, bad login_hint, unsupported type, or a now-removed parameter (claim_delivery
+            is rejected with invalid_request).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '503':
+          description: >-
+            email_send_failed — the code email could not be sent; the registration is voided. Retry
+            registration.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+  /agent/identity/claim:
+    post:
+      tags:
+        - auth
+      summary: Re-mint an expired code
+      description: >-
+        Invalidates the prior code and emails a fresh 6-digit code (the 24h registration window must
+        still be open). A corrected email updates the registration's login_hint. The new code is NOT
+        returned in the response — it goes to the human's inbox.
+      operationId: remintClaim
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RemintClaimBody'
+      responses:
+        '200':
+          description: Fresh code emailed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RemintClaimResponse'
+        '400':
+          description: Bad body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '401':
+          description: Unknown claim_token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '409':
+          description: Already claimed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '410':
+          description: Registration window closed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+  /agent/identity/claim/complete:
+    post:
+      tags:
+        - auth
+      summary: Complete a claim by reading the emailed code back
+      description: >-
+        The human reads the 6-digit code from the emailed message back to the agent, which submits
+        it here to confirm the claim WITHOUT a browser session (the binding proof is that the code
+        only reached the human via their inbox). Constant-time compare; 5 wrong attempts kill the
+        code (410 code_dead), then re-mint via POST /agent/identity/claim. On success the agent's
+        /oauth2/token poll returns the key.
+      operationId: completeClaim
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteClaimBody'
+      responses:
+        '200':
+          description: Claim confirmed; poll /oauth2/token for the key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteClaimResponse'
+        '400':
+          description: Bad body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '401':
+          description: >-
+            invalid_claim_token (unknown token) or invalid_user_code (wrong code; message names
+            attempts remaining).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '409':
+          description: claimed_or_in_flight (already claimed).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '410':
+          description: >-
+            claim_expired (registration window closed), code_dead (5 wrong attempts), or
+            expired_token (user_code window closed). Re-mint.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentError'
+  /oauth2/token:
+    post:
+      tags:
+        - auth
+      summary: Poll the claim grant for the API key
+      description: >-
+        RFC 8628-style polling. While the human has not finished, returns 400 authorization_pending
+        (or slow_down if polled under 5s apart). On confirm, returns the long-lived API key exactly
+        once.
+      operationId: claimGrantToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TokenForm'
+      responses:
+        '200':
+          description: Credential issued (once)
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+              description: no-store
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '400':
+          description: >-
+            OAuth error envelope. error one of: authorization_pending, slow_down, expired_token,
+            invalid_grant, invalid_request, unsupported_grant_type.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+  /oauth2/revoke:
+    post:
+      tags:
+        - auth
+      summary: Revoke an API key (RFC 7009)
+      description: Idempotent. Returns 200 with an empty body whether or not the token existed.
+      operationId: revokeToken
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RevokeForm'
+      responses:
+        '200':
+          description: Revoked (or no-op); empty body
+        '400':
+          description: Malformed body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OAuthError'
+  /.well-known/oauth-protected-resource:
+    get:
+      tags:
+        - discovery
+      summary: RFC 9728 protected-resource metadata
+      operationId: protectedResourceMetadata
+      security: []
+      responses:
+        '200':
+          description: Resource metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProtectedResourceMetadata'
+  /.well-known/oauth-authorization-server:
+    get:
+      tags:
+        - discovery
+      summary: RFC 8414 authorization-server metadata (with agent_auth block)
+      operationId: authServerMetadata
+      security: []
+      responses:
+        '200':
+          description: Authorization-server metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthServerMetadata'
 webhooks: {}

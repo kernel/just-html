@@ -19,9 +19,13 @@ import yaml from "js-yaml";
 import { OpenApiGeneratorV31 } from "@asteasolutions/zod-to-openapi";
 
 import { registry } from "../lib/openapi/registry";
-// Side-effecting imports: registering the docs schemas + paths into the registry.
+// Side-effecting imports: registering each resource's schemas + paths into the
+// shared registry. Docs (Z1–Z3) + the auth surface (Z4: the agent ceremony,
+// OAuth token/revoke, and the .well-known discovery docs).
 import "../lib/docs/schemas";
 import "../lib/docs/paths";
+import "../lib/auth/schemas";
+import "../lib/auth/paths";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const OUT = join(ROOT, "lib/openapi/generated.yaml");
@@ -34,7 +38,7 @@ export function generateSpec(): Record<string, unknown> {
       title: "justhtml.sh API",
       version: "1.0.0",
       description:
-        "Code-first generated spec (Z1 — docs resource only). Parallel artifact diffed against the hand-written spec; not yet served.",
+        "Code-first generated spec (Z4 — docs + auth surface). Parallel artifact diffed against the hand-written spec; not yet served.",
     },
     servers: [{ url: "https://justhtml.sh", description: "Production" }],
   }) as unknown as Record<string, unknown>;

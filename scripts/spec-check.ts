@@ -278,6 +278,18 @@ const DOCS_OPS: {
   { path: "/api/v1/docs/{slug}/reactions/{id}", method: "delete", successCodes: ["200"] },
 ];
 
+/** PATH+METHOD set of an OpenAPI doc (the keys spec:check compares). */
+function endpointSet(doc: OpenApiDoc): Set<string> {
+  const out = new Set<string>();
+  for (const [path, ops] of Object.entries(doc.paths ?? {})) {
+    for (const key of Object.keys(ops)) {
+      const m = key.toUpperCase();
+      if ((HTTP_METHODS as readonly string[]).includes(m)) out.add(`${m} ${path}`);
+    }
+  }
+  return out;
+}
+
 function opSchemas(doc: OpenApiDoc, path: string, method: string) {
   const op = (doc.paths?.[path]?.[method] ?? {}) as Record<string, unknown>;
   const body = (
@@ -344,6 +356,28 @@ function checkDocsEquivalence(): string[] {
   return problems;
 }
 
+// --- 5. generated (Zod) vs hand-written PATH-SET parity ------------------
+//
+// Z4: the registry now covers EVERY path the served hand-written spec documents
+// (docs + the agent ceremony + OAuth + the .well-known discovery docs). This
+// asserts the generated path+method set equals the hand-written one, so the Zod
+// registry can never silently drift from the served spec's path surface before
+// the Z5 cutover (when the generated spec BECOMES what is served).
+function checkPathSetParity(): string[] {
+  const handYaml = extractTemplateLiteral(join(ROOT, "lib/openapi/spec-yaml.ts"), "SPEC_YAML");
+  const hand = yaml.load(handYaml) as OpenApiDoc;
+  let gen: OpenApiDoc;
+  try {
+    gen = generateSpec() as OpenApiDoc;
+  } catch (e) {
+    return [`could not generate the Zod spec for the path-set parity check: ${(e as Error).message}`];
+  }
+  const h = endpointSet(hand);
+  const g = endpointSet(gen);
+  const d = diffSets("generated vs hand-written path set", h, g);
+  return d ? [d] : [];
+}
+
 // --- assertions ----------------------------------------------------------
 
 function main() {
@@ -384,6 +418,15 @@ function main() {
     problems.push(
       "Generated (Zod) docs paths are not equivalent to the hand-written spec's docs paths:\n" +
         docsEquiv.map((p) => `    ${p}`).join("\n")
+    );
+  }
+
+  // Z4: prove the generated (Zod) registry covers exactly the served spec's path set.
+  const pathParity = checkPathSetParity();
+  if (pathParity.length) {
+    problems.push(
+      "Generated (Zod) registry path set is not equal to the hand-written spec's path set:\n" +
+        pathParity.map((p) => `    ${p}`).join("\n")
     );
   }
 
