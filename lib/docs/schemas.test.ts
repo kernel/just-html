@@ -1,6 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { CreateDocBody, UpdateDocBody, zodBadRequest } from "@/lib/docs/schemas";
+import {
+  CreateDocBody,
+  UpdateDocBody,
+  GrantBody,
+  EditsBody,
+  editsBadRequest,
+  zodBadRequest,
+} from "@/lib/docs/schemas";
 import { MAX_TITLE_LEN } from "@/lib/docs/config";
+import { GRANT_ROLES } from "@/lib/docs/grants";
+
+/** Read the `message` out of an apiError Response (sync; body is a JSON string). */
+async function respMessage(res: Response): Promise<{ status: number; message: string; error: string }> {
+  const body = (await res.json()) as { error: string; message: string };
+  return { status: res.status, message: body.message, error: body.error };
+}
 
 // Pins the Zod docs-body validators to the EXACT wire behavior of the
 // hand-rolled parsers they replaced (lib/docs/api.ts parseTitle /
@@ -127,5 +141,145 @@ describe("UpdateDocBody (PATCH /api/v1/docs/{slug})", () => {
       ok: false,
       message: "Field 'public' must be a boolean.",
     });
+  });
+});
+
+// === Z2 ====================================================================
+
+const GRANT_ORDER = ["role", "notify", "email", "domain"];
+
+/** Run a body through GrantBody; return data or the precedence-mapped message. */
+function runGrant(body: unknown): { ok: true; data: unknown } | { ok: false; message: string } {
+  const r = GrantBody.safeParse(body);
+  if (r.success) return { ok: true, data: r.data };
+  const rank = (p: unknown) => {
+    const i = GRANT_ORDER.indexOf(String((p as { path: unknown[] }).path[0] ?? ""));
+    return i === -1 ? GRANT_ORDER.length : i;
+  };
+  const chosen = [...r.error.issues].sort((a, b) => rank(a) - rank(b))[0];
+  return { ok: false, message: chosen.message };
+}
+
+describe("GrantBody (POST /api/v1/docs/{slug}/grants — field types)", () => {
+  // The schema ONLY type-checks role/notify/email/domain. The exactly-one rule,
+  // the email/domain FORMAT validation, and the consumer-domain 422 stay in the
+  // route, so they are NOT exercised here.
+  const roleMsg = `Field 'role' is required and must be one of: ${GRANT_ROLES.join(", ")}.`;
+
+  it("accepts a valid email grant; notify omitted stays undefined", () => {
+    expect(runGrant({ email: "a@b.com", role: "viewer" })).toEqual({
+      ok: true,
+      data: { email: "a@b.com", role: "viewer" },
+    });
+  });
+
+  it("accepts a valid domain grant with notify:false", () => {
+    expect(runGrant({ domain: "kernel.sh", role: "editor", notify: false })).toEqual({
+      ok: true,
+      data: { domain: "kernel.sh", role: "editor", notify: false },
+    });
+  });
+
+  it("missing / non-string / out-of-enum role → single unified role message", () => {
+    expect(runGrant({ email: "a@b.com" })).toEqual({ ok: false, message: roleMsg });
+    expect(runGrant({ email: "a@b.com", role: 5 })).toEqual({ ok: false, message: roleMsg });
+    expect(runGrant({ email: "a@b.com", role: "boss" })).toEqual({ ok: false, message: roleMsg });
+  });
+
+  it("non-boolean notify → old parseOptionalBool message", () => {
+    expect(runGrant({ email: "a@b.com", role: "viewer", notify: "yes" })).toEqual({
+      ok: false,
+      message: "Field 'notify' must be a boolean.",
+    });
+  });
+
+  it("non-string email / domain → old per-field messages", () => {
+    expect(runGrant({ email: 5, role: "viewer" })).toEqual({
+      ok: false,
+      message: "Field 'email' must be a string.",
+    });
+    expect(runGrant({ domain: 5, role: "viewer" })).toEqual({
+      ok: false,
+      message: "Field 'domain' must be a string.",
+    });
+  });
+
+  it("role precedes notify/email in error precedence (matches old ordering)", () => {
+    // role bad AND notify bad AND email bad → role wins (checked first in the route).
+    expect(runGrant({ email: 5, role: "boss", notify: "x" })).toEqual({
+      ok: false,
+      message: roleMsg,
+    });
+  });
+
+  it("ignores unknown fields", () => {
+    expect(runGrant({ email: "a@b.com", role: "viewer", extra: 1 })).toEqual({
+      ok: true,
+      data: { email: "a@b.com", role: "viewer" },
+    });
+  });
+});
+
+describe("EditsBody (POST /api/v1/docs/{slug}/edits)", () => {
+  const ok = (body: unknown) => {
+    const r = EditsBody.safeParse(body);
+    return r.success ? r.data : null;
+  };
+  const msg = async (body: unknown): Promise<string> => {
+    const r = EditsBody.safeParse(body);
+    if (r.success) throw new Error("expected failure");
+    return (await respMessage(editsBadRequest(r.error))).message;
+  };
+
+  it("accepts a single edit; base_version omitted/null both → undefined", () => {
+    expect(ok({ edits: [{ oldText: "a", newText: "b" }] })).toEqual({
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+    expect(ok({ edits: [{ oldText: "a", newText: "b" }], base_version: null })).toEqual({
+      edits: [{ oldText: "a", newText: "b" }],
+    });
+    expect(ok({ edits: [{ oldText: "a", newText: "b" }], base_version: 3 })).toEqual({
+      edits: [{ oldText: "a", newText: "b" }],
+      base_version: 3,
+    });
+  });
+
+  it("missing / non-array edits → old array message", async () => {
+    expect(await msg({})).toBe("Field 'edits' is required and must be an array.");
+    expect(await msg({ edits: "x" })).toBe("Field 'edits' is required and must be an array.");
+  });
+
+  it("empty edits → old min message; over-200 → old max message", async () => {
+    expect(await msg({ edits: [] })).toBe("Field 'edits' must contain at least one edit.");
+    expect(
+      await msg({ edits: Array.from({ length: 201 }, () => ({ oldText: "a", newText: "b" })) })
+    ).toBe("Field 'edits' must contain at most 200 edits.");
+  });
+
+  it("per-index item messages match the old hand-rolled strings", async () => {
+    expect(await msg({ edits: [5] })).toBe("edits[0] must be an object.");
+    expect(await msg({ edits: [{ newText: "b" }] })).toBe(
+      "edits[0].oldText is required and must be a string."
+    );
+    expect(await msg({ edits: [{ oldText: "a", newText: 5 }] })).toBe(
+      "edits[0].newText is required and must be a string."
+    );
+    // Index is preserved for a later element.
+    expect(
+      await msg({ edits: [{ oldText: "a", newText: "b" }, { oldText: 1, newText: "c" }] })
+    ).toBe("edits[1].oldText is required and must be a string.");
+  });
+
+  it("edits-array issue precedes a base_version issue (old top-level ordering)", async () => {
+    expect(await msg({ edits: [], base_version: 0 })).toBe(
+      "Field 'edits' must contain at least one edit."
+    );
+  });
+
+  it("present non-positive-integer base_version → old message", async () => {
+    const m = "Field 'base_version' must be a positive integer.";
+    expect(await msg({ edits: [{ oldText: "a", newText: "b" }], base_version: 0 })).toBe(m);
+    expect(await msg({ edits: [{ oldText: "a", newText: "b" }], base_version: 1.5 })).toBe(m);
+    expect(await msg({ edits: [{ oldText: "a", newText: "b" }], base_version: "3" })).toBe(m);
   });
 });

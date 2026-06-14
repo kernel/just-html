@@ -232,6 +232,26 @@ const DOCS_OPS: {
   { path: "/api/v1/docs/{slug}", method: "get", successCodes: ["200"] },
   { path: "/api/v1/docs/{slug}", method: "patch", body: true, successCodes: ["200"] },
   { path: "/api/v1/docs/{slug}", method: "delete", successCodes: ["200"] },
+  // Z2 — docs sub-resources.
+  {
+    path: "/api/v1/docs/{slug}/edits",
+    method: "post",
+    body: true,
+    bodyRequired: true,
+    successCodes: ["200"],
+  },
+  { path: "/api/v1/docs/{slug}/rotate-token", method: "post", successCodes: ["200"] },
+  { path: "/api/v1/docs/{slug}/versions", method: "get", successCodes: ["200"] },
+  { path: "/api/v1/docs/{slug}/versions/{n}", method: "get", successCodes: ["200"] },
+  { path: "/api/v1/docs/{slug}/grants", method: "get", successCodes: ["200"] },
+  {
+    path: "/api/v1/docs/{slug}/grants",
+    method: "post",
+    body: true,
+    bodyRequired: true,
+    successCodes: ["201", "200"],
+  },
+  { path: "/api/v1/docs/{slug}/grants/{id}", method: "delete", successCodes: ["200"] },
 ];
 
 function opSchemas(doc: OpenApiDoc, path: string, method: string) {

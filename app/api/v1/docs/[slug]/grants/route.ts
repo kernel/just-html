@@ -4,15 +4,14 @@ import {
   json,
   notFoundDoc,
   parseJsonObject,
-  parseOptionalBool,
   quotaExceeded,
   requireApiKey,
 } from "@/lib/docs/api";
+import { GrantBody, zodBadRequest } from "@/lib/docs/schemas";
 import { findBySlug } from "@/lib/docs/store";
 import { sendShareNotification } from "@/lib/docs/share-notify";
 import {
   createGrant,
-  GRANT_ROLES,
   grantView,
   isConsumerDomain,
   isOwner,
@@ -65,6 +64,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   if ("response" in parsed) return parsed.response;
   const b = parsed.obj;
 
+  // Exactly-one of email|domain stays in business logic (it's not a plain type
+  // check, and its 400 precedes the field type checks below — old ordering).
   const hasEmail = b.email !== undefined && b.email !== null;
   const hasDomain = b.domain !== undefined && b.domain !== null;
   if (hasEmail === hasDomain) {
@@ -75,42 +76,31 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     );
   }
 
-  // Validate role.
-  if (typeof b.role !== "string" || !GRANT_ROLES.includes(b.role as GrantRole)) {
-    return apiError(
-      400,
-      "invalid_request",
-      `Field 'role' is required and must be one of: ${GRANT_ROLES.join(", ")}.`
-    );
-  }
-  const role = b.role as GrantRole;
-
+  // Field-level type checks via Zod (role enum, notify bool, email/domain string).
+  // Precedence order matches the old hand-rolled checks: role, then notify, then
+  // email, then domain. The exactly-one rule (above), the trim/normalize, the
+  // email/domain FORMAT validation, and the consumer-domain 422 stay here.
+  const v = GrantBody.safeParse(b);
+  if (!v.success) return zodBadRequest(v.error, ["role", "notify", "email", "domain"]);
+  const role = v.data.role as GrantRole;
   // notify: suppress the share-notification email (default true). Only ever
   // relevant for EMAIL grants — domain grants never notify (we don't email a
   // whole company), so the flag is silently ignored for domains.
-  const notifyResult = parseOptionalBool(b.notify, "notify", true);
-  if ("response" in notifyResult) return notifyResult.response;
-  const notify = notifyResult.value;
+  const notify = v.data.notify ?? true;
 
   let granteeType: "email" | "domain";
   let grantee: string;
 
   if (hasEmail) {
-    if (typeof b.email !== "string") {
-      return apiError(400, "invalid_request", "Field 'email' must be a string.");
-    }
-    const email = b.email.trim().toLowerCase();
+    const email = (v.data.email as string).trim().toLowerCase();
     if (!isValidEmail(email)) {
       return apiError(400, "invalid_request", "Field 'email' is not a valid email address.");
     }
     granteeType = "email";
     grantee = email;
   } else {
-    if (typeof b.domain !== "string") {
-      return apiError(400, "invalid_request", "Field 'domain' must be a string.");
-    }
     // Accept either 'co.com' or '@co.com'; normalize to the bare domain.
-    let domain = b.domain.trim().toLowerCase();
+    let domain = (v.data.domain as string).trim().toLowerCase();
     if (domain.startsWith("@")) domain = domain.slice(1);
     if (!isValidDomain(domain)) {
       return apiError(

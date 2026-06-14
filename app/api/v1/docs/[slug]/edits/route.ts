@@ -1,5 +1,4 @@
 import {
-  apiError,
   json,
   notFoundDoc,
   parseJsonObject,
@@ -9,6 +8,7 @@ import {
   staleVersion,
   unprocessableEdit,
 } from "@/lib/docs/api";
+import { EditsBody, editsBadRequest } from "@/lib/docs/schemas";
 import { MAX_HTML_BYTES } from "@/lib/docs/config";
 import { applyPatch, findBySlug, granteeView, ownerView } from "@/lib/docs/store";
 import { EditApplyError, type Edit } from "@/lib/docs/edit-diff";
@@ -17,10 +17,6 @@ import { accessRoleLabel, canEdit, resolveAccess } from "@/lib/docs/grants";
 export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string }> };
-
-// Bound the edits array so a single request can't carry an absurd number of
-// patches. Generous; the real protection is the per-doc size cap + rate limits.
-const MAX_EDITS_PER_REQUEST = 200;
 
 // POST /api/v1/docs/:slug/edits — apply deterministic patches (birthday.md
 // "Editing"). Body: { edits: [{ oldText, newText }, ...], base_version? }.
@@ -51,44 +47,15 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   if ("response" in parsed) return parsed.response;
   const b = parsed.obj;
 
-  // Validate edits.
-  if (!Array.isArray(b.edits)) {
-    return apiError(400, "invalid_request", "Field 'edits' is required and must be an array.");
-  }
-  if (b.edits.length === 0) {
-    return apiError(400, "invalid_request", "Field 'edits' must contain at least one edit.");
-  }
-  if (b.edits.length > MAX_EDITS_PER_REQUEST) {
-    return apiError(
-      400,
-      "invalid_request",
-      `Field 'edits' must contain at most ${MAX_EDITS_PER_REQUEST} edits.`
-    );
-  }
-  const edits: Edit[] = [];
-  for (let i = 0; i < b.edits.length; i++) {
-    const e = b.edits[i];
-    if (typeof e !== "object" || e === null) {
-      return apiError(400, "invalid_request", `edits[${i}] must be an object.`);
-    }
-    const ee = e as Record<string, unknown>;
-    if (typeof ee.oldText !== "string") {
-      return apiError(400, "invalid_request", `edits[${i}].oldText is required and must be a string.`);
-    }
-    if (typeof ee.newText !== "string") {
-      return apiError(400, "invalid_request", `edits[${i}].newText is required and must be a string.`);
-    }
-    edits.push({ oldText: ee.oldText, newText: ee.newText });
-  }
-
-  // Validate base_version (optional — but agents should always send it).
-  let baseVersion: number | undefined;
-  if (b.base_version !== undefined && b.base_version !== null) {
-    if (typeof b.base_version !== "number" || !Number.isInteger(b.base_version) || b.base_version < 1) {
-      return apiError(400, "invalid_request", "Field 'base_version' must be a positive integer.");
-    }
-    baseVersion = b.base_version;
-  }
+  // Validate the edits payload via Zod (array shape, 1–200 items, {oldText,
+  // newText} strings, optional positive-integer base_version). editsBadRequest
+  // reproduces the old hand-rolled per-index / array messages byte-for-byte and
+  // their precedence. The 409 stale + 422 ambiguous/no-match/overlap outcomes are
+  // produced by the edit engine below (applyPatch / EditApplyError), not here.
+  const v = EditsBody.safeParse(b);
+  if (!v.success) return editsBadRequest(v.error);
+  const edits: Edit[] = v.data.edits.map((e) => ({ oldText: e.oldText, newText: e.newText }));
+  const baseVersion: number | undefined = v.data.base_version;
 
   let result;
   try {

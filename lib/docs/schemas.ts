@@ -17,6 +17,7 @@
 import { z, registry } from "@/lib/openapi/registry";
 import { MAX_HTML_BYTES, MAX_TITLE_LEN } from "@/lib/docs/config";
 import { apiError } from "@/lib/docs/api";
+import { GRANT_ROLES, MAX_GRANTS_PER_DOC, type GrantRole } from "@/lib/docs/grants";
 
 // --- error helpers -------------------------------------------------------
 
@@ -240,3 +241,284 @@ export const ApiError = registry.register(
     .looseObject({ error: z.string(), message: z.string() })
     .openapi("ApiError", { description: "Structured API error: { error, message, ...extra }." })
 );
+
+// =========================================================================
+// Z2 — docs sub-resources: grants, versions, rotate-token, edits.
+// Same contract as Z1: every 400 maps to the SAME apiError(400,
+// "invalid_request", <message>) the old hand-rolled checks emitted (messages
+// copied verbatim). Business-logic outcomes stay in the route, NOT the schema:
+//   - grants: the exactly-one-of-email/domain 400, the email/domain FORMAT 400s
+//     (isValidEmail/isValidDomain), and the consumer-domain 422 are kept in the
+//     route (they were never plain type checks). The schema only type-checks
+//     role (enum), notify (bool), and email/domain (string-if-present).
+//   - edits: the array/min/max/item-shape/base_version checks ARE schema-shaped
+//     and move to Zod. The 409 stale + 422 ambiguous/no-match/overlap come from
+//     the edit engine (applyPatch / EditApplyError) and stay in the route.
+// =========================================================================
+
+// --- grants --------------------------------------------------------------
+
+// role: required, one of editor|commenter|viewer. The old check emitted ONE
+// message for both "missing/non-string" and "not in the enum", so we map any
+// role issue to that single message via a custom error.
+const roleSchema = z.enum(["editor", "commenter", "viewer"] as [GrantRole, ...GrantRole[]], {
+  error: `Field 'role' is required and must be one of: ${GRANT_ROLES.join(", ")}.`,
+});
+
+// POST /api/v1/docs/{slug}/grants body: { email?, domain?, role, notify? }.
+// The schema validates the FIELD-LEVEL types only:
+//   - role: required enum (single unified message, matching the old check).
+//   - notify: optional boolean (present-but-not-bool → old parseOptionalBool msg).
+//   - email / domain: if present (and non-null), must be a string (old per-field
+//     "must be a string" messages). The exactly-one rule, the trim/normalize, the
+//     email/domain FORMAT validation, and the consumer-domain 422 all stay in the
+//     route — they run AFTER these type checks and are not plain type checks.
+// .openapi() carries the hand-written spec's grants POST body description.
+export const GrantBody = registry.register(
+  "GrantBody",
+  z
+    .object({
+      email: z
+        .string({ error: "Field 'email' must be a string." })
+        .openapi({ format: "email", description: "Grantee email (provide exactly one of email or domain)." }),
+      domain: z
+        .string({ error: "Field 'domain' must be a string." })
+        .openapi({ example: "kernel.sh", description: "Grantee email-domain (provide exactly one of email or domain)." }),
+      role: roleSchema.openapi({ description: "Grant role." }),
+      notify: z
+        .boolean({ error: "Field 'notify' must be a boolean." })
+        .openapi({
+          default: true,
+          description:
+            "Email-grants only. Send the grantee a share-notification email (default true). Ignored for domain grants.",
+        }),
+    })
+    // email & domain are optional+nullable at the type layer (the exactly-one
+    // rule lives in the route); notify is optional. .partial() makes email,
+    // domain, notify optional while role stays required.
+    .partial({ email: true, domain: true, notify: true })
+    .openapi("GrantBody", {
+      description:
+        "Share with an email or a domain. Provide exactly one of email or domain. role is editor, commenter, or viewer. notify (email grants only) defaults to true.",
+    })
+);
+
+// Grant — a single grant row (matches lib/docs/grants.ts grantView + the
+// hand-written Grant schema).
+export const Grant = registry.register(
+  "Grant",
+  z
+    .object({
+      id: z.number().int(),
+      grantee_type: z.enum(["email", "domain"]),
+      grantee: z.string(),
+      role: z.enum(["editor", "commenter", "viewer"]),
+      created_at: dateTime,
+    })
+    .openapi("Grant", { description: "A single grant (email or domain) on a document." })
+);
+
+// GET /api/v1/docs/{slug}/grants response: { slug, grants[], count, max }.
+export const GrantListResponse = registry.register(
+  "GrantListResponse",
+  z
+    .object({
+      slug: z.string(),
+      grants: z.array(Grant),
+      count: z.number().int(),
+      max: z.number().int().openapi({ example: MAX_GRANTS_PER_DOC }),
+    })
+    .openapi("GrantListResponse", { description: "Grants on the document (owner only)." })
+);
+
+// POST /api/v1/docs/{slug}/grants 201: { slug, grant, notified? }.
+export const GrantCreatedResponse = registry.register(
+  "GrantCreatedResponse",
+  z
+    .object({
+      slug: z.string(),
+      grant: Grant,
+      notified: z.boolean().optional().openapi({
+        description:
+          "Present only for email grants: true if the share-notification email was sent, false if suppressed (notify:false) or skipped (rate-limited / send failed).",
+      }),
+    })
+    .openapi("GrantCreatedResponse", { description: "Grant created." })
+);
+
+// POST /api/v1/docs/{slug}/grants 200: { slug, grant, unchanged }.
+export const GrantUnchangedResponse = registry.register(
+  "GrantUnchangedResponse",
+  z
+    .object({
+      slug: z.string(),
+      grant: Grant,
+      unchanged: z.boolean(),
+    })
+    .openapi("GrantUnchangedResponse", { description: "Idempotent re-grant (same target + role)." })
+);
+
+// DELETE /api/v1/docs/{slug}/grants/{id} 200: { slug, grant_id, deleted }.
+export const GrantDeletedResponse = registry.register(
+  "GrantDeletedResponse",
+  z
+    .object({
+      slug: z.string(),
+      grant_id: z.number().int(),
+      deleted: z.boolean(),
+    })
+    .openapi("GrantDeletedResponse", { description: "Grant revoked." })
+);
+
+// --- versions ------------------------------------------------------------
+
+// VersionMeta — one retained version's metadata (matches store.versionView with
+// includeHtml=false). patch present only when edit_kind=patch.
+export const VersionMeta = registry.register(
+  "VersionMeta",
+  z
+    .object({
+      version: z.number().int(),
+      edit_kind: z.enum(["create", "patch", "rewrite"]),
+      author_user_id: z.number().int().nullable().openapi({
+        description: "User who authored this version (null for legacy/system writes).",
+      }),
+      patch: z
+        .array(z.object({ oldText: z.string(), newText: z.string() }))
+        .optional()
+        .openapi({
+          description:
+            "The edits payload as requested, present only when edit_kind=patch (the list of {oldText,newText} applied). Omitted otherwise.",
+        }),
+      bytes: z.number().int(),
+      created_at: dateTime,
+    })
+    .openapi("VersionMeta", { description: "Metadata for one retained version (no html)." })
+);
+
+// GET /api/v1/docs/{slug}/versions 200: { slug, current_version, versions[] }.
+export const VersionListResponse = registry.register(
+  "VersionListResponse",
+  z
+    .object({
+      slug: z.string(),
+      current_version: z.number().int(),
+      versions: z.array(VersionMeta),
+    })
+    .openapi("VersionListResponse", { description: "Version metadata (no html), newest first." })
+);
+
+// GET /api/v1/docs/{slug}/versions/{n} 200: VersionMeta + { slug, html }.
+// store returns { slug, ...versionView(v, true) } so the snapshot carries every
+// VersionMeta field plus slug + html.
+export const VersionSnapshot = registry.register(
+  "VersionSnapshot",
+  z
+    .object({
+      slug: z.string(),
+      version: z.number().int(),
+      edit_kind: z.enum(["create", "patch", "rewrite"]),
+      author_user_id: z.number().int().nullable(),
+      patch: z.array(z.object({ oldText: z.string(), newText: z.string() })).optional(),
+      bytes: z.number().int(),
+      created_at: dateTime,
+      html: z.string(),
+    })
+    .openapi("VersionSnapshot", { description: "A version's metadata plus its full html snapshot." })
+);
+
+// --- edits ---------------------------------------------------------------
+
+// MAX_EDITS_PER_REQUEST mirrors the route's bound. Kept in sync via the explicit
+// constant export so the schema and the route agree.
+export const MAX_EDITS_PER_REQUEST = 200;
+
+// POST /api/v1/docs/{slug}/edits body: { edits: [{oldText, newText}], base_version? }.
+// Every per-field message is copied verbatim from the route's hand-rolled checks
+// so the wire bytes are identical. The PER-INDEX item messages (edits[i].oldText
+// …) are reproduced by the route's editsBadRequest mapper using the issue path.
+export const EditsBody = registry.register(
+  "EditsBody",
+  z
+    .object({
+      edits: z
+        .array(
+          z.object({
+            oldText: z.string(),
+            newText: z.string(),
+          }),
+          { error: "Field 'edits' is required and must be an array." }
+        )
+        .min(1, { error: "Field 'edits' must contain at least one edit." })
+        .max(MAX_EDITS_PER_REQUEST, {
+          error: `Field 'edits' must contain at most ${MAX_EDITS_PER_REQUEST} edits.`,
+        })
+        .openapi({ description: "The patches to apply, in order. 1–200 edits." }),
+      // The old route treated BOTH undefined and null as "not provided"
+      // (`!== undefined && !== null`), then required a positive integer. .nullish()
+      // = optional + nullable; the transform collapses null → undefined so the
+      // route sees `undefined` (absent) exactly as before. A present non-positive
+      // -integer fails with the unified message below.
+      base_version: z
+        .number({ error: "Field 'base_version' must be a positive integer." })
+        .int({ error: "Field 'base_version' must be a positive integer." })
+        .min(1, { error: "Field 'base_version' must be a positive integer." })
+        .nullish()
+        .transform((v) => v ?? undefined)
+        .openapi({ description: "The version the edits were derived against; a mismatch returns 409." }),
+    })
+    .openapi("EditsBody", {
+      description:
+        "Apply deterministic patches. edits is a non-empty list of {oldText,newText}. Always send base_version; a mismatch returns 409.",
+    })
+);
+
+/**
+ * Map a failed EditsBody safeParse to the EXACT apiError(400, "invalid_request",
+ * <message>) the hand-rolled /edits route emitted, preserving its precedence:
+ *   1. edits-array issues (not-array / empty / too-many) — top-level path "edits".
+ *   2. per-INDEX item issues, in ascending index order, oldText before newText:
+ *        edits[i] must be an object.
+ *        edits[i].oldText is required and must be a string.
+ *        edits[i].newText is required and must be a string.
+ *   3. base_version — "Field 'base_version' must be a positive integer."
+ * The per-index messages are rebuilt from the issue path here (Zod's default
+ * item messages don't carry the index), so the wire bytes match byte-for-byte.
+ */
+export function editsBadRequest(error: z.ZodError): Response {
+  const issues = error.issues;
+
+  // 1. Top-level edits issues (path === ["edits"]) — array type / min / max. The
+  // .array() custom error, .min(1), and .max() messages already match verbatim.
+  const topEdits = issues.find((i) => i.path.length === 1 && i.path[0] === "edits");
+  if (topEdits) return apiError(400, "invalid_request", topEdits.message);
+
+  // 2. Per-index item issues. Path shape: ["edits", <index>, ("oldText"|"newText")?].
+  //    Pick the lowest index; within an index, an object-type failure (path stops
+  //    at the index) precedes a missing/typed oldText, which precedes newText.
+  const itemIssues = issues.filter((i) => i.path[0] === "edits" && typeof i.path[1] === "number");
+  if (itemIssues.length) {
+    const fieldRank = (field: unknown): number =>
+      field === undefined ? 0 : field === "oldText" ? 1 : 2;
+    const sorted = [...itemIssues].sort((a, b) => {
+      const ai = a.path[1] as number;
+      const bi = b.path[1] as number;
+      if (ai !== bi) return ai - bi;
+      return fieldRank(a.path[2]) - fieldRank(b.path[2]);
+    });
+    const chosen = sorted[0];
+    const i = chosen.path[1] as number;
+    const field = chosen.path[2];
+    const msg =
+      field === "oldText"
+        ? `edits[${i}].oldText is required and must be a string.`
+        : field === "newText"
+          ? `edits[${i}].newText is required and must be a string.`
+          : `edits[${i}] must be an object.`;
+    return apiError(400, "invalid_request", msg);
+  }
+
+  // 3. base_version (or any remaining issue) — its schema message already matches.
+  const bv = issues.find((i) => i.path[0] === "base_version");
+  return apiError(400, "invalid_request", (bv ?? issues[0]).message);
+}

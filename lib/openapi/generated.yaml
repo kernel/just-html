@@ -273,15 +273,289 @@ components:
         - message
       additionalProperties: {}
       description: 'Structured API error: { error, message, ...extra }.'
+    GrantBody:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          description: Grantee email (provide exactly one of email or domain).
+        domain:
+          type: string
+          example: kernel.sh
+          description: Grantee email-domain (provide exactly one of email or domain).
+        role:
+          type: string
+          enum:
+            - editor
+            - commenter
+            - viewer
+          description: Grant role.
+        notify:
+          type: boolean
+          default: true
+          description: >-
+            Email-grants only. Send the grantee a share-notification email (default true). Ignored
+            for domain grants.
+      required:
+        - role
+      description: >-
+        Share with an email or a domain. Provide exactly one of email or domain. role is editor,
+        commenter, or viewer. notify (email grants only) defaults to true.
+    Grant:
+      type: object
+      properties:
+        id:
+          type: integer
+        grantee_type:
+          type: string
+          enum:
+            - email
+            - domain
+        grantee:
+          type: string
+        role:
+          type: string
+          enum:
+            - editor
+            - commenter
+            - viewer
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - grantee_type
+        - grantee
+        - role
+        - created_at
+      description: A single grant (email or domain) on a document.
+    GrantListResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        grants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Grant'
+        count:
+          type: integer
+        max:
+          type: integer
+          example: 50
+      required:
+        - slug
+        - grants
+        - count
+        - max
+      description: Grants on the document (owner only).
+    GrantCreatedResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        grant:
+          $ref: '#/components/schemas/Grant'
+        notified:
+          type: boolean
+          description: >-
+            Present only for email grants: true if the share-notification email was sent, false if
+            suppressed (notify:false) or skipped (rate-limited / send failed).
+      required:
+        - slug
+        - grant
+      description: Grant created.
+    GrantUnchangedResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        grant:
+          $ref: '#/components/schemas/Grant'
+        unchanged:
+          type: boolean
+      required:
+        - slug
+        - grant
+        - unchanged
+      description: Idempotent re-grant (same target + role).
+    GrantDeletedResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        grant_id:
+          type: integer
+        deleted:
+          type: boolean
+      required:
+        - slug
+        - grant_id
+        - deleted
+      description: Grant revoked.
+    VersionMeta:
+      type: object
+      properties:
+        version:
+          type: integer
+        edit_kind:
+          type: string
+          enum:
+            - create
+            - patch
+            - rewrite
+        author_user_id:
+          type:
+            - integer
+            - 'null'
+          description: User who authored this version (null for legacy/system writes).
+        patch:
+          type: array
+          items:
+            type: object
+            properties:
+              oldText:
+                type: string
+              newText:
+                type: string
+            required:
+              - oldText
+              - newText
+          description: >-
+            The edits payload as requested, present only when edit_kind=patch (the list of
+            {oldText,newText} applied). Omitted otherwise.
+        bytes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - version
+        - edit_kind
+        - author_user_id
+        - bytes
+        - created_at
+      description: Metadata for one retained version (no html).
+    VersionListResponse:
+      type: object
+      properties:
+        slug:
+          type: string
+        current_version:
+          type: integer
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/VersionMeta'
+      required:
+        - slug
+        - current_version
+        - versions
+      description: Version metadata (no html), newest first.
+    VersionSnapshot:
+      type: object
+      properties:
+        slug:
+          type: string
+        version:
+          type: integer
+        edit_kind:
+          type: string
+          enum:
+            - create
+            - patch
+            - rewrite
+        author_user_id:
+          type:
+            - integer
+            - 'null'
+        patch:
+          type: array
+          items:
+            type: object
+            properties:
+              oldText:
+                type: string
+              newText:
+                type: string
+            required:
+              - oldText
+              - newText
+        bytes:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        html:
+          type: string
+      required:
+        - slug
+        - version
+        - edit_kind
+        - author_user_id
+        - bytes
+        - created_at
+        - html
+      description: A version's metadata plus its full html snapshot.
+    EditsBody:
+      type: object
+      properties:
+        edits:
+          type: array
+          items:
+            type: object
+            properties:
+              oldText:
+                type: string
+              newText:
+                type: string
+            required:
+              - oldText
+              - newText
+          minItems: 1
+          maxItems: 200
+          description: The patches to apply, in order. 1–200 edits.
+        base_version:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          description: The version the edits were derived against; a mismatch returns 409.
+      required:
+        - edits
+      description: >-
+        Apply deterministic patches. edits is a non-empty list of {oldText,newText}. Always send
+        base_version; a mismatch returns 409.
     Slug:
       type: string
       example: fierce-tiger-12345
+    VersionNum:
+      type: integer
+      minimum: 1
+      example: 3
+    GrantId:
+      type: integer
+      minimum: 1
+      example: 1
   parameters:
     Slug:
       schema:
         $ref: '#/components/schemas/Slug'
       required: true
       name: slug
+      in: path
+    VersionNum:
+      schema:
+        $ref: '#/components/schemas/VersionNum'
+      required: true
+      name: 'n'
+      in: path
+    GrantId:
+      schema:
+        $ref: '#/components/schemas/GrantId'
+      required: true
+      name: id
       in: path
 paths:
   /api/v1/docs:
@@ -510,6 +784,334 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteDocResponse'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/edits:
+    post:
+      tags:
+        - docs
+      summary: Apply deterministic patches
+      description: >-
+        exact-match-then-fuzzy edit application. Owner or editor grant. Always send base_version; a
+        mismatch returns 409. Ambiguous, no-match, or overlapping edits return 422 naming the
+        failing edit index.
+      operationId: editDoc
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EditsBody'
+      responses:
+        '200':
+          description: Patched
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocWithHtml'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: base_version conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '413':
+          description: HTML exceeds the 2 MB per-document size limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: An edit could not be applied deterministically
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/rotate-token:
+    post:
+      tags:
+        - docs
+      summary: Rotate the view token (un-share; owner only)
+      operationId: rotateViewToken
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: New view token issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerDoc'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/versions:
+    get:
+      tags:
+        - docs
+      summary: List retained version history (newest first)
+      operationId: listVersions
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: Version metadata (no html)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionListResponse'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/versions/{n}:
+    get:
+      tags:
+        - docs
+      summary: Fetch a specific version's full html
+      operationId: getVersion
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/VersionNum'
+      responses:
+        '200':
+          description: Version snapshot with html
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VersionSnapshot'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/grants:
+    get:
+      tags:
+        - sharing
+      summary: List grants (owner only)
+      operationId: listGrants
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      responses:
+        '200':
+          description: Grants on the document
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantListResponse'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      tags:
+        - sharing
+      summary: Share with an email or a domain (owner only)
+      description: >-
+        Provide exactly one of email or domain. role is editor, commenter, or viewer. Consumer email
+        providers (gmail.com, ...) are rejected with 422. Re-granting the same target+role is
+        idempotent (200 with unchanged:true). Email grants send the grantee a share-notification
+        email containing ONE single-use, 7-day login link with next=/d/:slug; set notify:false to
+        suppress it. DOMAIN grants NEVER notify (notify is ignored for them).
+      operationId: createGrant
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantBody'
+      responses:
+        '200':
+          description: Idempotent re-grant (same target + role)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantUnchangedResponse'
+        '201':
+          description: Grant created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantCreatedResponse'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Missing/invalid credential
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: A resource quota was exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: No such document (also returned for inaccessible docs; no existence oracle)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Consumer email domain rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '429':
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /api/v1/docs/{slug}/grants/{id}:
+    delete:
+      tags:
+        - sharing
+      summary: Revoke a grant (owner only)
+      operationId: deleteGrant
+      security:
+        - bearerApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/Slug'
+        - $ref: '#/components/parameters/GrantId'
+      responses:
+        '200':
+          description: Grant revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantDeletedResponse'
+        '400':
+          description: Invalid request body or parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Missing/invalid credential
           content:
