@@ -1,9 +1,10 @@
 // lib/openapi/response-validator.ts — the runtime half of the Z0 contract test.
 //
-// Loads the hand-written OpenAPI spec (lib/openapi/spec-yaml.ts), and exposes a
-// validator that checks a live JSON response body against the response schema the
-// spec documents for that (method, path template, status). Used by scripts/e2e.ts
-// so that a response which violates its documented schema fails the e2e run.
+// Loads the served OpenAPI spec (the code-first lib/openapi/generated-spec.ts —
+// the same bytes GET /api/spec.yaml serves), and exposes a validator that checks
+// a live JSON response body against the response schema the spec documents for
+// that (method, path template, status). Used by scripts/e2e.ts so that a response
+// which violates its documented schema fails the e2e run.
 //
 // OpenAPI 3.1 schemas ARE JSON Schema 2020-12, so we validate with Ajv's 2020
 // dialect (handles `type: [..., "null"]` and `$ref` into #/components/schemas).
@@ -13,7 +14,7 @@
 import Ajv2020, { type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 import yaml from "js-yaml";
-import { SPEC_YAML } from "@/lib/openapi/spec-yaml";
+import { SPEC_YAML } from "@/lib/openapi/generated-spec";
 
 type AnyObj = Record<string, unknown>;
 

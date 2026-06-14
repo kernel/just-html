@@ -1,8 +1,10 @@
-// Code-first OpenAPI infrastructure (Z1+). The single OpenAPIRegistry every
-// resource registers its Zod schemas + paths into; scripts/gen-spec.ts runs the
-// OpenApiGeneratorV31 over it to emit a parallel generated spec that we diff
-// against the still-served hand-written lib/openapi/spec-yaml.ts. The route keeps
-// serving the hand-written literal until the final cutover (Z5).
+// Code-first OpenAPI infrastructure. The single OpenAPIRegistry every resource
+// registers its Zod schemas + paths into; scripts/gen-spec.ts runs the
+// OpenApiGeneratorV31 over it to emit the SERVED spec artifacts
+// (lib/openapi/generated-spec.ts, served by GET /api/spec.yaml, and the parallel
+// generated.yaml validated by @redocly/cli). The hand-written literal that used
+// to be the source of truth was deleted at the Z5 cutover; this registry is now
+// the single source for the whole documented surface.
 //
 // extendZodWithOpenApi(z) is called ONCE here so every `import { z }` downstream
 // already has `.openapi()` available. Import z from THIS module (or just import

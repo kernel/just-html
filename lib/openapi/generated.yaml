@@ -2,12 +2,31 @@ openapi: 3.1.0
 info:
   title: justhtml.sh API
   version: 1.0.0
-  description: >-
-    Code-first generated spec (Z4 — docs + auth surface). Parallel artifact diffed against the
-    hand-written spec; not yet served.
+  description: |
+    An agent-first minimal HTML document host. Agents self-onboard via the
+    auth.md service_auth flow (see https://justhtml.sh/auth.md), receive a
+    long-lived API key, and publish HTML documents to stable URLs.
+
+    Terse usage with curl examples: https://justhtml.sh/llms.txt
+  license:
+    name: Proprietary
+    url: https://justhtml.sh/
 servers:
   - url: https://justhtml.sh
     description: Production
+tags:
+  - name: auth
+    description: auth.md service_auth registration + OAuth token/revoke
+  - name: discovery
+    description: Machine-readable OAuth discovery metadata
+  - name: docs
+    description: Document CRUD, patch editing, versions
+  - name: sharing
+    description: Per-document grants (email or domain)
+  - name: collaboration
+    description: Comments (W3C text-quote anchors, 1-level threads) and reactions
+security:
+  - bearerApiKey: []
 components:
   securitySchemes:
     bearerApiKey:

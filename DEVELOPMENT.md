@@ -61,6 +61,27 @@ audit tables.
 
 Edit the content in `lib/skill-content.ts`, never the generated files.
 
+## The OpenAPI spec
+
+`/api/spec.yaml` is **code-first**: generated from the Zod schemas + paths
+registered in `lib/{docs,auth}/{schemas,paths}.ts` (the single source of truth
+for request/response validation AND the documented surface), so the spec can
+never drift from the code. Same pattern as the skill above:
+
+- `npm run gen:spec` (runs `scripts/gen-spec.ts` via `tsx`) runs the
+  `OpenApiGeneratorV31` over the registry and writes two committed artifacts:
+  `lib/openapi/generated-spec.ts` (the `SPEC_YAML` the route serves) and
+  `lib/openapi/generated.yaml` (the same bytes as a file, for `@redocly/cli`).
+- `app/api/spec.yaml/route.ts` serves `SPEC_YAML` verbatim.
+- `npm run spec:check` re-runs the generator and asserts the committed artifacts
+  match it byte-for-byte (drift guard), then cross-checks that the served spec's
+  paths, the on-disk route handlers, and the `/llms.txt` body all agree.
+- The `spec-sync` GitHub Action regenerates and commits the artifacts whenever a
+  schema/path/generator file changes, so the served spec is always in sync.
+
+Edit the Zod schemas/paths, never the generated files. Validate locally with
+`npx @redocly/cli lint lib/openapi/generated.yaml`.
+
 ## Deploy
 
 Production deploys come from the **Vercel ↔ GitHub** integration: every push to

@@ -1,11 +1,8 @@
-// Register the /api/v1/docs PATHS into the shared OpenAPIRegistry (Z1). Importing
-// this module (side-effecting) wires the docs operations + their request/response
-// schemas so scripts/gen-spec.ts can emit a generated spec to diff against the
-// hand-written lib/openapi/spec-yaml.ts. Descriptions/summaries are carried over
-// from that hand-written spec's docs section so the generated output is as rich.
-//
-// Only the docs resource is registered in Z1; the other resources (edits, grants,
-// versions, comments, reactions, auth) stay hand-written until later phases.
+// Register the /api/v1/docs PATHS into the shared OpenAPIRegistry. Importing this
+// module (side-effecting) wires the docs operations + their request/response
+// schemas so scripts/gen-spec.ts can emit the served OpenAPI spec. The rich
+// descriptions/summaries here are what make the generated spec the single,
+// authoritative source for GET /api/spec.yaml (the hand-written literal is gone).
 
 import { registry, z } from "@/lib/openapi/registry";
 import {
@@ -197,8 +194,7 @@ registry.registerPath({
 });
 
 // =========================================================================
-// Z2 — docs sub-resources: edits, rotate-token, versions, grants. Summaries +
-// descriptions carried over from the hand-written spec-yaml.ts sections.
+// Docs sub-resources: edits, rotate-token, versions, grants.
 // =========================================================================
 
 const versionNumParam = registry.registerParameter(
@@ -402,11 +398,9 @@ registry.registerPath({
 });
 
 // =========================================================================
-// Z3 — comments + reactions. Summaries + descriptions carried over from the
-// hand-written spec-yaml.ts collaboration section. Both surfaces accept an API
-// key OR a signed-in session, so the security list adds the anonymous/{} option
-// the hand-written spec uses (a session is presented via cookie, not the Bearer
-// scheme), matching the served spec's `security: [{ bearerApiKey: [] }, {}]`.
+// Comments + reactions. Both surfaces accept an API key OR a signed-in session,
+// so the security list adds the anonymous/{} option (a session is presented via
+// cookie, not the Bearer scheme), yielding `security: [{ bearerApiKey: [] }, {}]`.
 // =========================================================================
 
 const commentOrSessionSecurity = [{ [bearerApiKey.name]: [] }, {}];

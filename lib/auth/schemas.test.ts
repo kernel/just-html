@@ -12,10 +12,11 @@ import "@/lib/docs/paths";
 import "@/lib/auth/schemas";
 import "@/lib/auth/paths";
 
-// Z4 acceptance criterion: after registering the agent ceremony, OAuth, and the
-// .well-known discovery docs, the Zod registry covers EVERY path+method the served
-// hand-written spec documents. This pins generated-set == hand-written-set so the
-// auth surface can't silently drift before the Z5 cutover.
+// The Zod registry must cover the WHOLE served surface, including the agent
+// ceremony, OAuth, and the .well-known discovery docs. Since the Z5 cutover the
+// served spec IS the generated one (lib/openapi/generated-spec.ts), so these
+// pins guard that the registry keeps modelling the full auth surface — and that
+// /oauth2/* stays form-encoded — independent of the committed artifact.
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const HTTP_METHODS = ["get", "post", "put", "patch", "delete"];
@@ -30,11 +31,12 @@ function endpointSet(doc: { paths?: Record<string, Record<string, unknown>> }): 
   return out;
 }
 
-function handWrittenDoc() {
-  const src = readFileSync(join(ROOT, "lib/openapi/spec-yaml.ts"), "utf8");
-  const m = src.match(/export const SPEC_YAML = `([\s\S]*?)`;/);
-  if (!m) throw new Error("could not find SPEC_YAML");
-  return yaml.load(m[1]) as { paths?: Record<string, Record<string, unknown>> };
+// The committed served artifact (the bytes GET /api/spec.yaml returns).
+function servedDoc() {
+  const src = readFileSync(join(ROOT, "lib/openapi/generated-spec.ts"), "utf8");
+  const m = src.match(/export const SPEC_YAML = (".*");\n?$/s);
+  if (!m) throw new Error("could not find SPEC_YAML in generated-spec.ts");
+  return yaml.load(JSON.parse(m[1])) as { paths?: Record<string, Record<string, unknown>> };
 }
 
 function generatedDoc() {
@@ -45,13 +47,13 @@ function generatedDoc() {
   }) as { paths?: Record<string, Record<string, unknown>> };
 }
 
-describe("Z4 — Zod registry covers 100% of the served spec's paths", () => {
-  it("generated path+method set equals the hand-written spec's set", () => {
-    const hand = endpointSet(handWrittenDoc());
+describe("Zod registry covers 100% of the served spec's paths", () => {
+  it("freshly generated path+method set equals the committed served artifact's set", () => {
+    const served = endpointSet(servedDoc());
     const gen = endpointSet(generatedDoc());
-    const onlyHand = [...hand].filter((x) => !gen.has(x)).sort();
-    const onlyGen = [...gen].filter((x) => !hand.has(x)).sort();
-    expect({ onlyHand, onlyGen }).toEqual({ onlyHand: [], onlyGen: [] });
+    const onlyServed = [...served].filter((x) => !gen.has(x)).sort();
+    const onlyGen = [...gen].filter((x) => !served.has(x)).sort();
+    expect({ onlyServed, onlyGen }).toEqual({ onlyServed: [], onlyGen: [] });
   });
 
   it("includes the agent ceremony, OAuth, and .well-known paths", () => {

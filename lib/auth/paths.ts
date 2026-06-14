@@ -1,14 +1,13 @@
-// Register the auth-surface PATHS into the shared OpenAPIRegistry (Z4): the agent
+// Register the auth-surface PATHS into the shared OpenAPIRegistry: the agent
 // claim ceremony, OAuth token/revoke, and the two .well-known discovery docs.
 // Importing this module (side-effecting) wires the operations + their schemas so
-// scripts/gen-spec.ts emits the agent/oauth/.well-known paths and the registry
-// covers 100% of the served hand-written spec's paths.
+// scripts/gen-spec.ts emits the agent/oauth/.well-known paths into the served spec
+// and the registry covers 100% of it.
 //
-// All summaries/descriptions are carried over from the hand-written
-// lib/openapi/spec-yaml.ts auth + discovery sections so the generated spec is as
-// rich. Every operation is `security: []` (the ceremony + discovery are
-// unauthenticated — the API key is the OUTPUT of the ceremony), matching the
-// hand-written spec's per-operation `security: []`.
+// Summaries/descriptions are rich so the generated spec fully documents the auth
+// surface. Every operation is `security: []` (the ceremony + discovery are
+// unauthenticated — the API key is the OUTPUT of the ceremony), overriding the
+// document-wide default `security: [{ bearerApiKey: [] }]`.
 //
 // NOTE (parity with the served spec): the auth handlers are NOT migrated to Zod
 // (their parsing is idiosyncratic + security-sensitive — see lib/auth/schemas.ts).

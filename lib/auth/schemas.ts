@@ -10,15 +10,14 @@
 // constant-time 6-digit code compare + 5-attempt budget in claim/complete, the
 // RFC 8628 authorization_pending/slow_down polling state machine in /oauth2/token,
 // the RFC 7009 idempotent revoke, and the application/x-www-form-urlencoded bodies
-// on /oauth2/*). The task's golden rule for these endpoints: register the schema
-// for spec coverage while leaving the handler parsing AS-IS so the wire bytes are
-// untouched. So unlike the docs resource, NO auth handler calls these via
-// safeParse — they exist solely so scripts/gen-spec.ts can emit the agent/oauth
-// paths and scripts/spec-check.ts can prove the registry covers 100% of the served
-// spec's paths.
+// on /oauth2/*). The golden rule for these endpoints: register the schema for spec
+// coverage while leaving the handler parsing AS-IS so the wire bytes are untouched.
+// So unlike the docs resource, NO auth handler calls these via safeParse — they
+// exist solely so scripts/gen-spec.ts can emit the agent/oauth paths into the
+// served spec and scripts/spec-check.ts can prove the registry covers 100% of it.
 //
-// Shapes + descriptions/examples are carried over VERBATIM from the hand-written
-// lib/openapi/spec-yaml.ts auth section so the generated spec is as rich.
+// Shapes + descriptions/examples are rich so the generated spec fully documents
+// the auth surface.
 
 import { z, registry } from "@/lib/openapi/registry";
 import { SCOPES } from "@/lib/auth/config";
