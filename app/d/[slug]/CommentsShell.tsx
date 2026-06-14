@@ -958,9 +958,13 @@ const RAIL_CSS = `
 .jh-scrim[data-open="1"] { opacity: 1 !important; pointer-events: auto !important; }
 
 @media (max-width: 768px) {
+  /* The rail carries an inline style (position:relative, width:320) for the
+     desktop side-by-side flex layout; inline styles beat stylesheet specificity,
+     so the off-canvas drawer overrides need !important here. */
   .jh-stage .jh-rail {
-    position: absolute; top: 0; right: 0; bottom: 0;
-    width: min(86vw, 340px);
+    position: absolute !important;
+    top: 0; right: 0; bottom: 0;
+    width: min(86vw, 340px) !important;
     transform: translateX(100%);
     transition: transform .24s ease;
     border-left: 1px solid #ccc;
