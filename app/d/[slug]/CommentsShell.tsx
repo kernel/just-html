@@ -75,7 +75,14 @@ type Props = {
   version: number;
 };
 
-/** Anchor signature — MUST match the server (lib/docs/reactions.ts) + overlay. */
+/**
+ * Anchor signature for OPTIMISTIC local grouping only. We prefer the server-sent
+ * `sig` (every AnchoredReactionGroup from GET /comments carries one); this is the
+ * sole case where no server sig exists yet — a brand-new span reaction the user
+ * just clicked, before the server round-trip. It MUST stay byte-identical to the
+ * canonical anchorSignature() in lib/docs/anchor.ts (the source of truth, also
+ * the DB index + overlay key); cannot import it (server code).
+ */
 function anchorSig(a: NonNullable<Anchor>): string {
   return `${a.prefix ?? ""}|${a.exact}|${a.suffix ?? ""}`;
 }

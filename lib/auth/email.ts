@@ -3,8 +3,8 @@ import {
   RESEND_FROM,
   LOGIN_SUBJECT,
   CLAIM_SUBJECT,
-  LOGIN_TOKEN_TTL_S,
-  USER_CODE_TTL_S,
+  LOGIN_TOKEN_TTL_MIN,
+  USER_CODE_TTL_MIN,
   SHARE_TOKEN_TTL_S,
 } from "@/lib/auth/config";
 
@@ -74,7 +74,7 @@ ${rows}
 </html>`;
 }
 
-const EXPIRY_MIN = Math.round(LOGIN_TOKEN_TTL_S / 60);
+const EXPIRY_MIN = LOGIN_TOKEN_TTL_MIN;
 
 function htmlBody(email: string, link: string): string {
   const rows = `<tr><td style="${LEAD}">Sign in to justhtml.sh as <strong>${esc(email)}</strong>.</td></tr>
@@ -124,7 +124,7 @@ export async function sendLoginEmail(
 // The human reads the code back to the agent, which submits it to
 // /agent/identity/claim/complete. Binding proof = inbox possession.
 
-const CLAIM_EXPIRY_MIN = Math.round(USER_CODE_TTL_S / 60);
+const CLAIM_EXPIRY_MIN = USER_CODE_TTL_MIN;
 
 function claimHtmlBody(opts: { email: string; code: string }): string {
   const rows = `<tr><td style="${LEAD}">Your justhtml.sh code for ${esc(opts.email)}:</td></tr>

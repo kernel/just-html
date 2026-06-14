@@ -256,6 +256,17 @@ export async function deleteGrant(docId: number, grantId: number): Promise<boole
   return rowCount > 0;
 }
 
+/**
+ * True iff `userId` is the doc's owner. The ONE owner check — coerces BOTH sides
+ * with Number() because pg returns bigint columns (doc.owner_id) as strings while
+ * an API principal's userId may be a number or a string depending on the path.
+ * Every owner-gate (the docs/grants/rotate-token routes, resolveAccess) runs
+ * through this so a string/number mismatch can't silently mis-authorize.
+ */
+export function isOwner(doc: DocRow, userId: number | string): boolean {
+  return Number(doc.owner_id) === Number(userId);
+}
+
 export type DocAccess =
   | { kind: "owner"; role: null }
   | { kind: "email_grant"; role: GrantRole }
@@ -274,9 +285,9 @@ export type DocAccess =
  * one. (Plan: "explicit email grant beats domain grant".)
  */
 export async function resolveAccess(doc: DocRow, principalEmail: string, principalUserId: number): Promise<DocAccess> {
-  // pg returns bigint columns (doc.owner_id) as strings; coerce both sides so
-  // owner detection holds whether the caller passes a numeric or string id.
-  if (Number(doc.owner_id) === Number(principalUserId)) return { kind: "owner", role: null };
+  // Owner detection coerces both sides (pg bigint → string); isOwner is the one
+  // place that does it, so a numeric/string id mismatch can't slip through.
+  if (isOwner(doc, principalUserId)) return { kind: "owner", role: null };
 
   const email = principalEmail.toLowerCase();
   const domain = emailDomain(email);

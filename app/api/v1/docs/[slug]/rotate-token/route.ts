@@ -1,6 +1,7 @@
 import { authenticate, unauthorized } from "@/lib/auth/bearer";
 import { forbiddenScope, hasScope, json, notFoundDoc, rateLimit } from "@/lib/docs/api";
 import { findBySlug, ownerView, rotateViewToken } from "@/lib/docs/store";
+import { isOwner } from "@/lib/docs/grants";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);
-  if (!doc || doc.owner_id !== principal.userId) return notFoundDoc();
+  if (!doc || !isOwner(doc, principal.userId)) return notFoundDoc();
 
   const updated = await rotateViewToken(doc.id);
   return json(ownerView(updated, false));

@@ -1,4 +1,5 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac } from "node:crypto";
+import { safeEqualStr } from "@/lib/auth/tokens";
 
 // Short-lived, grant-scoped viewer capability for the sandboxed iframe.
 //
@@ -46,25 +47,24 @@ export const CAP_TTL_S = 300; // 5 minutes — long enough for the iframe to loa
  * only server-side; it is never sent to the client (only the HMAC output is).
  */
 function capKey(): string {
-  return (
-    process.env.VIEWER_CAP_SECRET ||
-    process.env.PLANETSCALE_PASSWORD ||
-    // Last-resort constant so local/dev never throws; production always has one
-    // of the above. A constant here is fine because the only thing it protects
-    // is a 5-minute, slug-scoped iframe-load capability, not a credential.
-    "justhtml-viewer-cap-dev-fallback"
-  );
+  const secret = process.env.VIEWER_CAP_SECRET || process.env.PLANETSCALE_PASSWORD;
+  if (secret) return secret;
+  // Prod always has PLANETSCALE_PASSWORD, so this never fires there — but make
+  // the dev fallback impossible to ship accidentally: refuse to mint/verify caps
+  // with a hardcoded key in production rather than silently degrading.
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "viewcap: no VIEWER_CAP_SECRET or PLANETSCALE_PASSWORD set in production."
+    );
+  }
+  // Last-resort constant so local/dev never throws. A constant here is fine
+  // because the only thing it protects is a 5-minute, slug-scoped iframe-load
+  // capability, not a credential.
+  return "justhtml-viewer-cap-dev-fallback";
 }
 
 function sign(payload: string): string {
   return createHmac("sha256", capKey()).update(payload).digest("base64url");
-}
-
-function safeEq(a: string, b: string): boolean {
-  const ab = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
 }
 
 /**
@@ -98,7 +98,7 @@ export function verifyViewCap(
   if (prefix !== CAP_PREFIX) return false;
   // Recompute the expected signature over the presented (prefix, slug, exp).
   const body = `${prefix}.${slugB64}.${expStr}`;
-  if (!safeEq(mac, sign(body))) return false;
+  if (!safeEqualStr(mac, sign(body))) return false;
   // Signature is valid → the fields are trustworthy. Check slug scope + expiry.
   let decodedSlug: string;
   try {

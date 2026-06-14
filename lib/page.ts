@@ -54,8 +54,6 @@ function footerLine(date: string): string {
 
 export function manPage(opts: {
   title: string;
-  manTitle?: string; // retained for API-compat; the headline is always JUSTHTML.SH(1)
-  center?: string; // retained for API-compat; no longer rendered (no center label)
   date?: string;
   bodyHtml: string;
 }): string {

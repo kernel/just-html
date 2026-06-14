@@ -1,7 +1,7 @@
 import { authenticate, unauthorized } from "@/lib/auth/bearer";
 import { apiError, forbiddenScope, hasScope, json, notFoundDoc, rateLimit } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
-import { deleteGrant } from "@/lib/docs/grants";
+import { deleteGrant, isOwner } from "@/lib/docs/grants";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
 
   const doc = await findBySlug(slug);
   // Owner-only, no existence oracle.
-  if (!doc || doc.owner_id !== principal.userId) return notFoundDoc();
+  if (!doc || !isOwner(doc, principal.userId)) return notFoundDoc();
 
   const removed = await deleteGrant(doc.id, grantId);
   if (!removed) {

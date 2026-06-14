@@ -4,6 +4,7 @@ import { apiError, json } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { resolveCommentPrincipal } from "@/lib/docs/comments";
 import { deleteOwnReaction } from "@/lib/docs/reactions";
+import { WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
@@ -20,8 +21,7 @@ function unauthorized(): Response {
       status: 401,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "WWW-Authenticate":
-          'Bearer resource_metadata="https://justhtml.sh/.well-known/oauth-protected-resource"',
+        "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
       },
     }
   );

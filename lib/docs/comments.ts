@@ -6,7 +6,7 @@ import type { ApiPrincipal } from "@/lib/auth/bearer";
 import { resolveAccess, type DocAccess } from "@/lib/docs/grants";
 import { canViewSession } from "@/lib/docs/access";
 import type { TextAnchor } from "@/lib/docs/anchor";
-import { resolveQuote, htmlToText } from "@/lib/docs/anchor";
+import { resolveQuote, htmlToText, anchorSignature, resolveInitialAnchor } from "@/lib/docs/anchor";
 
 // Comments persistence + permission resolution (birthday.md "Comment anchoring",
 // "Permission matrix", "All-threads view", "Comments & reactions API").
@@ -238,16 +238,17 @@ function aggregateReactions(reactions: ReactionRow[]): ReactionGroup[] {
 
 /**
  * Group ANCHORED (non-orphaned) reactions by their anchor signature
- * (prefix|exact|suffix — matches lib/docs/reactions.ts anchorSignature + the
- * overlay's anchorSig), then aggregate per emoji within each span. Ordered by
- * the resolved text position so the client paints/stacks in document order.
+ * (prefix|exact|suffix via lib/docs/anchor.ts anchorSignature — the one source
+ * shared with the DB index + the overlay), then aggregate per emoji within each
+ * span. Ordered by the resolved text position so the client paints/stacks in
+ * document order.
  */
 function groupAnchoredReactions(reactions: ReactionRow[], docText: string): AnchoredReactionGroup[] {
   const bySig = new Map<string, { anchor: TextAnchor; av: number | null; rows: ReactionRow[] }>();
   for (const r of reactions) {
     if (!r.anchor || r.orphaned) continue;
     const a = r.anchor;
-    const sig = `${a.prefix ?? ""}|${a.exact}|${a.suffix ?? ""}`;
+    const sig = anchorSignature(a);
     const g = bySig.get(sig);
     if (g) g.rows.push(r);
     else bySig.set(sig, { anchor: a, av: r.anchored_version, rows: [r] });
@@ -475,22 +476,15 @@ export async function createComment(opts: {
       }
     }
 
-    // Resolve initial anchor offsets + orphan state (replies are never anchored).
-    let anchorJson: string | null = null;
-    let orphaned = false;
-    const anchoredVersion = opts.anchor ? opts.doc.version : null;
-    if (opts.anchor && opts.parentId === null) {
-      const docText = htmlToText(opts.doc.html);
-      const r = resolveQuote(docText, opts.anchor, opts.anchor.start);
-      const resolved: TextAnchor = { ...opts.anchor, type: "text" };
-      if (r.ok) {
-        resolved.start = r.start;
-        resolved.end = r.end;
-      } else {
-        orphaned = true;
-      }
-      anchorJson = JSON.stringify(resolved);
-    }
+    // Resolve initial anchor offsets + orphan state (replies are never anchored,
+    // so a reply's anchor is dropped). Shared with addOrToggleReaction via
+    // resolveInitialAnchor (lib/docs/anchor.ts).
+    const rootAnchor = opts.parentId === null ? opts.anchor : null;
+    const { anchorJson, orphaned, anchoredVersion } = resolveInitialAnchor(
+      opts.doc.html,
+      rootAnchor,
+      opts.doc.version
+    );
 
     const { rows: insRows } = await client.query(
       `INSERT INTO comments

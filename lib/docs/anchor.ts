@@ -192,7 +192,11 @@ function commonSuffixLen(a: string, b: string): number {
   return i;
 }
 
-export type Edit = { oldText: string; newText: string };
+// The patch Edit shape ({oldText, newText}) has ONE definition — the vendored
+// edit engine in edit-diff.ts. Re-exported here so callers that work in
+// anchor/offset space (reanchor.ts) can keep importing it from this module.
+export type { Edit } from "@/lib/docs/edit-diff";
+import type { Edit } from "@/lib/docs/edit-diff";
 
 /**
  * Tier-1 offset mapping for patch edits (birthday.md "Offset mapping through
@@ -252,4 +256,55 @@ export function buildOffsetMap(oldText: string, newText: string, edits: Edit[]):
       return oldOffset + shift;
     },
   };
+}
+
+/**
+ * THE ANCHOR SIGNATURE — the one canonical `prefix|exact|suffix` triple. This is
+ * the DB unique-index dedup key (reactions.anchor_sig, the 0012/0013 index) AND
+ * the GROUPING key the GET /comments response + the viewer overlay use to stack
+ * span reactions. Server uniqueness, client grouping, and re-anchoring all agree
+ * on "the same span" because they all run through THIS function. Non-anchored
+ * targets (doc/comment level) get '' — COALESCE(comment_id,0) disambiguates them.
+ * The signature is over the DECODED text-quote fields (what a human/agent quoted),
+ * not the raw JSON, so two anchors differing only in offsets collide as the same
+ * span — which is what toggle wants.
+ *
+ * The browser copies that cannot import server code (lib/docs/overlay.ts's
+ * stringified JS, app/d/[slug]/CommentsShell.tsx's optimistic toggle) point here
+ * as the source of truth and prefer the server-sent `sig` where one exists.
+ */
+export function anchorSignature(anchor: TextAnchor | null): string {
+  if (!anchor) return "";
+  return `${anchor.prefix ?? ""}|${anchor.exact}|${anchor.suffix ?? ""}`;
+}
+
+/**
+ * Resolve an initial anchor against the current doc text: re-find the quote,
+ * stamp start/end offsets, set orphaned if it can't be found, and serialize the
+ * resolved anchor to JSON for storage. The ONE definition of the "resolve quote →
+ * stamp offsets → set orphaned → JSON.stringify" block shared by createComment
+ * (comments.ts) and addOrToggleReaction (reactions.ts), so a comment and a span
+ * reaction born from the same quote land identically.
+ *
+ * Returns the column trio both callers persist: the JSON to store in `anchor`,
+ * the `orphaned` flag, and the `anchored_version` (the doc version this was
+ * resolved against). `anchor === null` (doc-level) yields all-null/false.
+ */
+export function resolveInitialAnchor(
+  docHtml: string,
+  anchor: TextAnchor | null,
+  version: number
+): { anchorJson: string | null; orphaned: boolean; anchoredVersion: number | null } {
+  if (!anchor) return { anchorJson: null, orphaned: false, anchoredVersion: null };
+  const docText = htmlToText(docHtml);
+  const r = resolveQuote(docText, anchor, anchor.start);
+  const resolved: TextAnchor = { ...anchor, type: "text" };
+  let orphaned = false;
+  if (r.ok) {
+    resolved.start = r.start;
+    resolved.end = r.end;
+  } else {
+    orphaned = true;
+  }
+  return { anchorJson: JSON.stringify(resolved), orphaned, anchoredVersion: version };
 }

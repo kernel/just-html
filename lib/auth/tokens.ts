@@ -9,16 +9,25 @@ export function sha256Hex(s: string): string {
 }
 
 /**
- * Constant-time comparison of two SHA-256 hex digests. Used for the
- * low-entropy user_code verification (§5.2). Returns false on length
- * mismatch without leaking via early return.
+ * Constant-time UTF-8 string equality — the ONE timing-safe string compare.
+ * Returns false on length mismatch without leaking via early return. Used for the
+ * view-token check (lib/docs/access.ts) and the viewer-capability HMAC compare
+ * (lib/docs/viewcap.ts). safeEqualHex is the same primitive, kept under its
+ * hex-named alias for the user_code verification call site.
  */
-export function safeEqualHex(a: string, b: string): boolean {
+export function safeEqualStr(a: string, b: string): boolean {
   const ab = Buffer.from(a, "utf8");
   const bb = Buffer.from(b, "utf8");
   if (ab.length !== bb.length) return false;
   return timingSafeEqual(ab, bb);
 }
+
+/**
+ * Constant-time comparison of two SHA-256 hex digests. Used for the
+ * low-entropy user_code verification (§5.2). Alias of safeEqualStr (same
+ * UTF-8 byte comparison) named for that hex-digest call site.
+ */
+export const safeEqualHex = safeEqualStr;
 
 function token(prefix: string, bytes: number): string {
   return prefix + randomBytes(bytes).toString("base64url");

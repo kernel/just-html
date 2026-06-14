@@ -7,11 +7,11 @@ import { mintLoginToken, sha256Hex } from "@/lib/auth/tokens";
 import { sendLoginEmail } from "@/lib/auth/email";
 import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
-import { LOGIN_TOKEN_TTL_S, ORIGIN } from "@/lib/auth/config";
+import { LOGIN_TOKEN_TTL_S, LOGIN_TOKEN_TTL_MIN, ORIGIN } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
-const EXPIRY_MIN = Math.round(LOGIN_TOKEN_TTL_S / 60);
+const EXPIRY_MIN = LOGIN_TOKEN_TTL_MIN;
 
 // The sign-in intro copy. Generic and honest: /login sends a single-use sign-in
 // link. There is no longer a claim `next=` context — the claim ceremony is the

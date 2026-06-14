@@ -1,8 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
 import { query } from "@/lib/db";
 import type { DocRow } from "@/lib/docs/store";
 import type { Session } from "@/lib/auth/session";
 import { emailDomain } from "@/lib/docs/grants";
+import { safeEqualStr } from "@/lib/auth/tokens";
 
 // View access resolution for the viewer routes (/d/:slug, /d/:slug/raw).
 //
@@ -16,23 +16,16 @@ import { emailDomain } from "@/lib/docs/grants";
 // Editor-granted humans VIEW via the web; web editing is not v1 (their agent
 // edits via the API). So a grant of ANY role authorizes viewing here.
 
-/** Constant-time string equality (avoids leaking the view token via timing). */
-export function safeStrEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a, "utf8");
-  const bb = Buffer.from(b, "utf8");
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
 /**
  * Token/public-only view check (no session). Public → always. Private → the
- * presented viewtoken must match (constant-time). Used where no session context
- * is in play; the session-aware path is canViewSession below.
+ * presented viewtoken must match (constant-time, via safeEqualStr — the one
+ * timing-safe string compare in lib/auth/tokens.ts). Used where no session
+ * context is in play; the session-aware path is canViewSession below.
  */
 export function canView(doc: DocRow, viewtoken: string | null): boolean {
   if (doc.is_public) return true;
   if (!viewtoken) return false;
-  return safeStrEqual(viewtoken, doc.view_token);
+  return safeEqualStr(viewtoken, doc.view_token);
 }
 
 /**

@@ -6,7 +6,6 @@ import {
   hasScope,
   json,
   notFoundDoc,
-  ownerOnly,
   quotaExceeded,
   rateLimit,
 } from "@/lib/docs/api";
@@ -17,6 +16,7 @@ import {
   GRANT_ROLES,
   grantView,
   isConsumerDomain,
+  isOwner,
   isValidDomain,
   isValidEmail,
   listGrants,
@@ -49,7 +49,7 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   const doc = await findBySlug(slug);
   // No existence oracle: a non-owner gets 404 whether or not the slug exists.
   // (Grants are owner-only; a grantee who can edit still can't enumerate grants.)
-  if (!doc || doc.owner_id !== principal.userId) return notFoundDoc();
+  if (!doc || !isOwner(doc, principal.userId)) return notFoundDoc();
 
   const grants = await listGrants(doc.id);
   return json({
@@ -74,7 +74,7 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   const doc = await findBySlug(slug);
   // Owner-only: a non-owner (even an editor) gets a 404 — no existence oracle,
   // and managing grants is strictly an owner capability (birthday.md).
-  if (!doc || doc.owner_id !== principal.userId) return notFoundDoc();
+  if (!doc || !isOwner(doc, principal.userId)) return notFoundDoc();
 
   let body: unknown;
   try {

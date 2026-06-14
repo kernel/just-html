@@ -1,6 +1,6 @@
 import { query } from "@/lib/db";
 import { sha256Hex } from "@/lib/auth/tokens";
-import { API_KEY_LAST_USED_THROTTLE_S } from "@/lib/auth/config";
+import { API_KEY_LAST_USED_THROTTLE_S, WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 
 // Bearer API-key authentication for /api/v1/* (§3.5). Single indexed lookup on
 // the SHA-256 of the presented key; bumps last_used_at (throttled).
@@ -12,16 +12,13 @@ export type ApiPrincipal = {
   scopes: string[];
 };
 
-const CHALLENGE =
-  'Bearer resource_metadata="https://justhtml.sh/.well-known/oauth-protected-resource"';
-
 /** 401 with the WWW-Authenticate discovery hint (§3.5). */
 export function unauthorized(message = "Invalid, expired, or revoked credential."): Response {
   return new Response(JSON.stringify({ error: "unauthorized", message }), {
     status: 401,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "WWW-Authenticate": CHALLENGE,
+      "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
     },
   });
 }

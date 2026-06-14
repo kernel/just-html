@@ -4,6 +4,7 @@ import { apiError, json } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { checkLimits } from "@/lib/auth/ratelimit";
+import { WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 import {
   allThreads,
@@ -40,8 +41,7 @@ function unauthorizedWrite(): Response {
       status: 401,
       headers: {
         "Content-Type": "application/json; charset=utf-8",
-        "WWW-Authenticate":
-          'Bearer resource_metadata="https://justhtml.sh/.well-known/oauth-protected-resource"',
+        "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
       },
     }
   );

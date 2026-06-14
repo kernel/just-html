@@ -57,11 +57,6 @@ export function payloadTooLarge(limitBytes: number, gotBytes: number): Response 
   });
 }
 
-/** 403 — grant-management operation by a non-owner (owner-only surface). */
-export function ownerOnly(): Response {
-  return apiError(403, "owner_only", "Only the document owner can manage grants.");
-}
-
 /**
  * 422 — a domain grant targets a consumer email provider (granting @gmail.com
  * is granting the world). Suggests is_public or the view token instead

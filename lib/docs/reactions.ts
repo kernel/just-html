@@ -1,7 +1,7 @@
 import { query } from "@/lib/db";
 import type { DocRow } from "@/lib/docs/store";
 import type { TextAnchor } from "@/lib/docs/anchor";
-import { htmlToText, resolveQuote } from "@/lib/docs/anchor";
+import { anchorSignature, resolveInitialAnchor } from "@/lib/docs/anchor";
 
 // Reactions (birthday.md "Permission matrix": attributed-only, unique per
 // target+author+emoji, toggle by re-click). The target is 3-WAY and mutually
@@ -36,19 +36,10 @@ export function isAllowedEmoji(e: string): boolean {
   return ALLOWED_EMOJI.has(e);
 }
 
-/**
- * Normalized anchor signature for the dedup key — the SAME prefix|exact|suffix
- * triple the overlay/shared.js uses to GROUP reactions by span (anchorSig), so
- * the server's uniqueness, the client's grouping, and re-anchoring all agree on
- * "the same span". Non-anchored reactions get '' (doc/comment level), where
- * COALESCE(comment_id,0) already disambiguates. The signature is over the DECODED
- * text-quote fields (what a human/agent quoted), not the raw JSON, so two anchors
- * differing only in offsets collide as the same span — which is what toggle wants.
- */
-export function anchorSignature(anchor: TextAnchor | null): string {
-  if (!anchor) return "";
-  return `${anchor.prefix ?? ""}|${anchor.exact}|${anchor.suffix ?? ""}`;
-}
+// The canonical anchor signature lives in lib/docs/anchor.ts (single source of
+// the prefix|exact|suffix dedup/grouping key). Re-exported so existing importers
+// (the reactions route imports it from here) keep working.
+export { anchorSignature } from "@/lib/docs/anchor";
 
 export type ReactionRow = {
   id: number;
@@ -108,23 +99,13 @@ export async function addOrToggleReaction(opts: {
     return { removed: true, toggled: true };
   }
 
-  // Resolve anchored offsets + orphan state (anchored reactions only).
-  let anchorJson: string | null = null;
-  let anchoredVersion: number | null = null;
-  let orphaned = false;
-  if (opts.anchor) {
-    anchoredVersion = opts.doc.version;
-    const docText = htmlToText(opts.doc.html);
-    const r = resolveQuote(docText, opts.anchor, opts.anchor.start);
-    const resolved: TextAnchor = { ...opts.anchor, type: "text" };
-    if (r.ok) {
-      resolved.start = r.start;
-      resolved.end = r.end;
-    } else {
-      orphaned = true;
-    }
-    anchorJson = JSON.stringify(resolved);
-  }
+  // Resolve anchored offsets + orphan state (anchored reactions only). Shared
+  // with createComment via resolveInitialAnchor (lib/docs/anchor.ts).
+  const { anchorJson, orphaned, anchoredVersion } = resolveInitialAnchor(
+    opts.doc.html,
+    opts.anchor,
+    opts.doc.version
+  );
 
   const { rows } = await query<ReactionRow>(
     `INSERT INTO reactions

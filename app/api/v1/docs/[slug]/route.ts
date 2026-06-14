@@ -19,7 +19,7 @@ import {
   softDelete,
   updateMeta,
 } from "@/lib/docs/store";
-import { accessRoleLabel, canEdit, canRead, resolveAccess } from "@/lib/docs/grants";
+import { accessRoleLabel, canEdit, canRead, isOwner, resolveAccess } from "@/lib/docs/grants";
 
 export const dynamic = "force-dynamic";
 
@@ -176,7 +176,7 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);
-  if (!doc || doc.owner_id !== principal.userId) return notFoundDoc();
+  if (!doc || !isOwner(doc, principal.userId)) return notFoundDoc();
 
   await softDelete(doc.id);
   return json({ slug: doc.slug, deleted: true });

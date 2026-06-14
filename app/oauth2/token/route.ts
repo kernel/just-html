@@ -5,7 +5,7 @@ import { findByClaimToken } from "@/lib/auth/claim";
 import { query, getPool } from "@/lib/db";
 import { mintApiKey, sha256Hex } from "@/lib/auth/tokens";
 import { audit } from "@/lib/auth/audit";
-import { POLL_INTERVAL_S, SCOPE_STRING } from "@/lib/auth/config";
+import { POLL_INTERVAL_S, SCOPE_STRING, SCOPE_PG_ARRAY } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
@@ -123,9 +123,9 @@ async function issueKey(req: Request, regId: number): Promise<Response> {
     }
     const { rows: keyRows } = await client.query(
       `INSERT INTO api_keys (user_id, registration_id, token_hash, prefix, scopes, created_via)
-       VALUES ($1, $2, $3, $4, '{docs.read,docs.write}', 'auth.md')
+       VALUES ($1, $2, $3, $4, $5::text[], 'auth.md')
        RETURNING id`,
-      [lock.user_id, regId, sha256Hex(apiKey), apiKey.slice(0, 12)]
+      [lock.user_id, regId, sha256Hex(apiKey), apiKey.slice(0, 12), SCOPE_PG_ARRAY]
     );
     await client.query(
       `UPDATE agent_registrations SET credential_issued_at = now() WHERE id = $1`,

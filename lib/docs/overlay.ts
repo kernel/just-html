@@ -50,6 +50,9 @@ export const OVERLAY_SCRIPT = String.raw`
 
   // Unified anchor model. Each entry: { key, kind:"comment"|"reaction", id (comment)
   // or sig (reaction), exact, prefix, suffix, reactions? }. key is "c:<id>" or "r:<sig>".
+  // The reaction sig is the SERVER-SENT prefix|exact|suffix signature (canonical
+  // definition: lib/docs/anchor.ts anchorSignature) — we CONSUME it, never recompute
+  // it here; this stringified browser JS cannot import server code.
   var anchors = [];          // comment anchors from jh:anchors
   var rxGroups = [];         // reaction groups from jh:reactions
   var me = null;             // viewer email (for "(you)" in popovers)
