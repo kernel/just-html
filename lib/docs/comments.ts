@@ -65,9 +65,9 @@ export async function resolveCommentPrincipal(
   session: Session | null
 ): Promise<CommentPrincipal | null> {
   if (apiPrincipal) {
-    // pg returns bigint as a string; normalize so === comparisons against
-    // Number(...)-coerced ids (author/owner checks) are reliable.
-    return { userId: Number(apiPrincipal.userId), email: apiPrincipal.email, source: "api_key" };
+    // userId is already a JS number (bigint parsed at the pg layer), so === against
+    // other id columns (author/owner checks) is exact.
+    return { userId: apiPrincipal.userId, email: apiPrincipal.email, source: "api_key" };
   }
   if (session) {
     let userId = session.user_id;
@@ -85,7 +85,7 @@ export async function resolveCommentPrincipal(
         session.id,
       ]).catch(() => {});
     }
-    return { userId: Number(userId), email: session.email, source: "session" };
+    return { userId, email: session.email, source: "session" };
   }
   return null;
 }
@@ -186,11 +186,11 @@ export async function findComment(docId: number, commentId: number): Promise<Com
 }
 
 async function countLiveComments(docId: number): Promise<number> {
-  const { rows } = await query<{ n: string }>(
+  const { rows } = await query<{ n: number }>(
     `SELECT count(*) AS n FROM comments WHERE doc_id = $1 AND deleted_at IS NULL`,
     [docId]
   );
-  return Number(rows[0]?.n ?? 0);
+  return rows[0]?.n ?? 0;
 }
 
 /**
@@ -212,9 +212,9 @@ function splitReactions(reactionRows: ReactionRow[]): {
   const anchored: ReactionRow[] = [];
   for (const r of reactionRows) {
     if (r.comment_id !== null) {
-      const arr = byComment.get(Number(r.comment_id)) ?? [];
+      const arr = byComment.get(r.comment_id) ?? [];
       arr.push(r);
-      byComment.set(Number(r.comment_id), arr);
+      byComment.set(r.comment_id, arr);
     } else if (r.anchor && !r.orphaned) {
       anchored.push(r);
     } else {
@@ -231,9 +231,9 @@ function buildReplyIndex(commentRows: CommentRow[]): Map<number, CommentRow[]> {
   const repliesByParent = new Map<number, CommentRow[]>();
   for (const c of commentRows) {
     if (c.parent_id !== null) {
-      const arr = repliesByParent.get(Number(c.parent_id)) ?? [];
+      const arr = repliesByParent.get(c.parent_id) ?? [];
       arr.push(c);
-      repliesByParent.set(Number(c.parent_id), arr);
+      repliesByParent.set(c.parent_id, arr);
     }
   }
   return repliesByParent;
@@ -261,7 +261,7 @@ function orderRoots(
     if (a.group !== b.group) return groupRank[a.group] - groupRank[b.group];
     if (a.group === "anchored") return a.pos - b.pos;
     // doc-level + orphaned keep creation order (already ASC from the query).
-    return Number(a.root.id) - Number(b.root.id);
+    return a.root.id - b.root.id;
   });
 
   return ordered.map(({ root, group }) => ({ root, group }));
@@ -304,7 +304,7 @@ export async function allThreads(doc: DocRow): Promise<{
   const ordered = orderRoots(roots, docText);
 
   const threads = ordered.map(({ root, group }) =>
-    threadView(root, repliesByParent.get(Number(root.id)) ?? [], byComment, group)
+    threadView(root, repliesByParent.get(root.id) ?? [], byComment, group)
   );
 
   const anchoredGroups = groupAnchoredReactions(anchored, docText);
@@ -359,7 +359,7 @@ export async function createComment(opts: {
       `SELECT count(*) AS n FROM comments WHERE doc_id = $1 AND deleted_at IS NULL`,
       [opts.doc.id]
     );
-    if (Number((cntRows[0] as { n: string }).n) >= MAX_COMMENTS_PER_DOC) {
+    if ((cntRows[0] as { n: number }).n >= MAX_COMMENTS_PER_DOC) {
       await client.query("ROLLBACK");
       return { error: "limit", limit: MAX_COMMENTS_PER_DOC };
     }
@@ -406,7 +406,7 @@ export async function createComment(opts: {
     await client.query("COMMIT");
     const created = insRows[0] as CommentRow;
     // Attach the author email for the response (the insert RETURNING * has none).
-    const full = await findComment(opts.doc.id, Number(created.id));
+    const full = await findComment(opts.doc.id, created.id);
     return { comment: full ?? created };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});

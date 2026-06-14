@@ -65,7 +65,7 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   if (!comment) return apiError(404, "not_found", "No such comment.");
 
   const cap = await resolveCapability(doc, principal, canView(doc, viewtoken));
-  const isAuthor = comment.author_user_id !== null && Number(comment.author_user_id) === Number(principal.userId);
+  const isAuthor = comment.author_user_id !== null && comment.author_user_id === principal.userId;
 
   const parsed = await parseJsonObject(req);
   if ("response" in parsed) return parsed.response;
@@ -127,7 +127,7 @@ export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
   const comment = await findComment(doc.id, commentId);
   if (!comment) return apiError(404, "not_found", "No such comment.");
 
-  const isAuthor = comment.author_user_id !== null && Number(comment.author_user_id) === Number(principal.userId);
+  const isAuthor = comment.author_user_id !== null && comment.author_user_id === principal.userId;
   const owner = isOwner(doc, principal.userId);
   if (!isAuthor && !owner) {
     return apiError(403, "forbidden", "Only the comment's author or the document owner can delete it.");

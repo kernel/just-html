@@ -50,8 +50,8 @@ export type AnchoredReactionGroup = {
 /** API/JSON view for a single comment (no internal db ids beyond the public id). */
 export function commentView(c: CommentRow, reactions: ReactionRow[]) {
   return {
-    id: Number(c.id),
-    parent_id: c.parent_id === null ? null : Number(c.parent_id),
+    id: c.id,
+    parent_id: c.parent_id,
     author: c.author_email,
     author_avatar: c.author_email ? avatarUrl(c.author_email, 64) : null,
     body: c.body,
@@ -73,12 +73,12 @@ export function threadView(
   group: "anchored" | "doc" | "orphaned"
 ) {
   return {
-    ...commentView(root, reactionsByComment.get(Number(root.id)) ?? []),
+    ...commentView(root, reactionsByComment.get(root.id) ?? []),
     group,
     replies: replies
       .slice()
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-      .map((r) => commentView(r, reactionsByComment.get(Number(r.id)) ?? [])),
+      .map((r) => commentView(r, reactionsByComment.get(r.id) ?? [])),
   };
 }
 

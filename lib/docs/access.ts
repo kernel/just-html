@@ -37,21 +37,21 @@ export function canView(doc: DocRow, viewtoken: string | null): boolean {
 async function sessionHasGrant(docId: number, email: string): Promise<boolean> {
   const lower = email.toLowerCase();
   const match = grantFor(docId, lower, emailDomain(lower));
-  const { rows } = await query<{ n: string }>(
+  const { rows } = await query<{ n: number }>(
     `SELECT count(*) AS n FROM doc_grants WHERE ${match.where}`,
     match.params
   );
-  return Number(rows[0]?.n ?? 0) > 0;
+  return (rows[0]?.n ?? 0) > 0;
 }
 
 /** True if `email` is the registered owner of `doc` (one indexed lookup). */
 async function emailOwnsDoc(doc: DocRow, email: string): Promise<boolean> {
-  const { rows } = await query<{ n: string }>(
+  const { rows } = await query<{ n: number }>(
     `SELECT count(*) AS n FROM users
      WHERE id = $1 AND email = $2`,
     [doc.owner_id, email.toLowerCase()]
   );
-  return Number(rows[0]?.n ?? 0) > 0;
+  return (rows[0]?.n ?? 0) > 0;
 }
 
 /**

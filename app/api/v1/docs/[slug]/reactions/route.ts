@@ -111,8 +111,8 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   return json(
     {
       reaction: {
-        id: Number(result.reaction.id),
-        comment_id: result.reaction.comment_id === null ? null : Number(result.reaction.comment_id),
+        id: result.reaction.id,
+        comment_id: result.reaction.comment_id,
         anchor: result.reaction.anchor,
         anchored_version: result.reaction.anchored_version,
         orphaned: result.reaction.orphaned,

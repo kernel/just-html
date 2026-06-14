@@ -1,5 +1,13 @@
-import { Pool } from "pg";
+import pg, { Pool } from "pg";
 import { pgConfigFromEnv } from "@/lib/pg-config";
+
+// Parse Postgres int8 (bigint, OID 20) as a JS number instead of the string
+// node-pg returns by default, so the runtime value matches our `number` TS types
+// for every id/count column (documents.owner_id, api_keys.user_id, count(*)/sum
+// aggregates, …). Safe because every id is a sequential bigint well under 2^53
+// and no count in this app approaches it; revisit if that ever changes.
+// Registered once, globally, at module load — before any pool is created.
+pg.types.setTypeParser(20, (v) => (v === null ? null : Number(v)));
 
 // Single shared pool per serverless instance. PlanetScale Postgres speaks the
 // standard wire protocol; the connection string (PLANETSCALE_URL) carries

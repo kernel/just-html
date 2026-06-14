@@ -129,7 +129,7 @@ export type QuotaError =
 export async function userUsage(
   userId: number
 ): Promise<{ docCount: number; storageBytes: number }> {
-  const { rows } = await query<{ doc_count: string; storage_bytes: string }>(
+  const { rows } = await query<{ doc_count: number; storage_bytes: number }>(
     `SELECT
        (SELECT count(*) FROM documents
           WHERE owner_id = $1 AND deleted_at IS NULL) AS doc_count,
@@ -142,9 +142,10 @@ export async function userUsage(
        ) AS storage_bytes`,
     [userId]
   );
+  // count(*)/sum(...) are bigint (OID 20), parsed to JS numbers at the pg layer.
   return {
-    docCount: Number(rows[0]?.doc_count ?? 0),
-    storageBytes: Number(rows[0]?.storage_bytes ?? 0),
+    docCount: rows[0]?.doc_count ?? 0,
+    storageBytes: rows[0]?.storage_bytes ?? 0,
   };
 }
 
@@ -244,9 +245,10 @@ async function projectStorage(
           WHERE v.doc_id = $2), 0) AS this_versions_bytes`,
     [current.owner_id, current.id]
   );
-  const u = usageRows[0] as { other_bytes: string | number; this_versions_bytes: string | number };
-  const otherBytes = Number(u?.other_bytes ?? 0);
-  const thisVersionsBytes = Number(u?.this_versions_bytes ?? 0);
+  // sum(...) is bigint (OID 20), parsed to a JS number at the pg layer.
+  const u = usageRows[0] as { other_bytes: number; this_versions_bytes: number };
+  const otherBytes = u?.other_bytes ?? 0;
+  const thisVersionsBytes = u?.this_versions_bytes ?? 0;
   return {
     projected: otherBytes + newHtmlBytes + thisVersionsBytes + newHtmlBytes,
     current: otherBytes + byteLen(current.html) + thisVersionsBytes,
@@ -445,9 +447,10 @@ export function versionView(v: VersionRow, includeHtml: boolean) {
     version: v.version,
     edit_kind: v.edit_kind,
     patch: v.edit_kind === "patch" ? v.patch : undefined,
-    // pg returns bigint as a string; coerce so ids are JSON numbers API-wide
-    // (matches Grant.id and the VersionMeta schema in spec.yaml).
-    author_user_id: v.author_user_id === null ? null : Number(v.author_user_id),
+    // bigint id (OID 20) is parsed to a JS number at the pg layer (lib/db.ts), so
+    // it serializes as a JSON number API-wide (matches Grant.id and the VersionMeta
+    // schema in spec.yaml). bytes is octet_length (int4), already a number.
+    author_user_id: v.author_user_id,
     created_at: v.created_at,
     bytes: Number(v.bytes),
     ...(includeHtml ? { html: v.html } : {}),

@@ -144,10 +144,10 @@ export function emailDomain(email: string): string {
 
 export function grantView(g: GrantRow) {
   return {
-    // pg returns bigint columns as strings; coerce to a JSON number so the
-    // serialized id matches the OpenAPI spec (Grant.id: integer) and DELETE's
-    // integer grant_id. (spec.yaml + DELETE /grants/:id are the source of truth.)
-    id: Number(g.id),
+    // bigint id (OID 20) is parsed to a JS number at the pg layer (lib/db.ts), so
+    // the serialized id is already a JSON number matching the OpenAPI spec
+    // (Grant.id: integer) and DELETE's integer grant_id.
+    id: g.id,
     grantee_type: g.grantee_type,
     grantee: g.grantee,
     role: g.role,
@@ -166,11 +166,11 @@ export async function listGrants(docId: number): Promise<GrantRow[]> {
 }
 
 export async function countGrants(docId: number): Promise<number> {
-  const { rows } = await query<{ n: string }>(
+  const { rows } = await query<{ n: number }>(
     `SELECT count(*) AS n FROM doc_grants WHERE doc_id = $1`,
     [docId]
   );
-  return Number(rows[0]?.n ?? 0);
+  return rows[0]?.n ?? 0;
 }
 
 export type CreateGrantResult =
@@ -226,7 +226,7 @@ export async function createGrant(opts: {
       `SELECT count(*) AS n FROM doc_grants WHERE doc_id = $1`,
       [opts.docId]
     );
-    if (Number((countRows[0] as { n: string }).n) >= MAX_GRANTS_PER_DOC) {
+    if ((countRows[0] as { n: number }).n >= MAX_GRANTS_PER_DOC) {
       await client.query("ROLLBACK");
       return { error: "limit" };
     }
@@ -257,14 +257,14 @@ export async function deleteGrant(docId: number, grantId: number): Promise<boole
 }
 
 /**
- * True iff `userId` is the doc's owner. The ONE owner check — coerces BOTH sides
- * with Number() because pg returns bigint columns (doc.owner_id) as strings while
- * an API principal's userId may be a number or a string depending on the path.
- * Every owner-gate (the docs/grants/rotate-token routes, resolveAccess) runs
- * through this so a string/number mismatch can't silently mis-authorize.
+ * True iff `userId` is the doc's owner. The ONE owner check. Both sides are plain
+ * numbers — doc.owner_id is a bigint parsed to a JS number at the pg layer
+ * (lib/db.ts) and an API principal's userId is a number — so a direct === is
+ * exact (every id is a sequential bigint well under 2^53). Every owner-gate (the
+ * docs/grants/rotate-token routes, resolveAccess) runs through this.
  */
-export function isOwner(doc: DocRow, userId: number | string): boolean {
-  return Number(doc.owner_id) === Number(userId);
+export function isOwner(doc: DocRow, userId: number): boolean {
+  return doc.owner_id === userId;
 }
 
 export type DocAccess =
@@ -309,8 +309,7 @@ export function grantFor(
  * one. (Plan: "explicit email grant beats domain grant".)
  */
 export async function resolveAccess(doc: DocRow, principalEmail: string, principalUserId: number): Promise<DocAccess> {
-  // Owner detection coerces both sides (pg bigint → string); isOwner is the one
-  // place that does it, so a numeric/string id mismatch can't slip through.
+  // Owner detection via the single isOwner helper (both sides are JS numbers).
   if (isOwner(doc, principalUserId)) return { kind: "owner", role: null };
 
   const email = principalEmail.toLowerCase();
