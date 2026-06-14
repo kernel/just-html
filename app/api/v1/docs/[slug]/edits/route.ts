@@ -1,13 +1,11 @@
-import { authenticate, unauthorized } from "@/lib/auth/bearer";
 import {
   apiError,
-  forbiddenScope,
-  hasScope,
   json,
   notFoundDoc,
+  parseJsonObject,
   payloadTooLarge,
   quotaExceeded,
-  rateLimit,
+  requireApiKey,
   staleVersion,
   unprocessableEdit,
 } from "@/lib/docs/api";
@@ -24,27 +22,18 @@ type Ctx = { params: Promise<{ slug: string }> };
 // patches. Generous; the real protection is the per-doc size cap + rate limits.
 const MAX_EDITS_PER_REQUEST = 200;
 
-function authFail(req: Request): Response {
-  return unauthorized(
-    req.headers.get("authorization")
-      ? "Invalid, expired, or revoked credential."
-      : "Missing Bearer credential."
-  );
-}
-
 // POST /api/v1/docs/:slug/edits — apply deterministic patches (birthday.md
 // "Editing"). Body: { edits: [{ oldText, newText }, ...], base_version? }.
 // Scope: docs.write. Owner OR editor grant (birthday.md "Permissions model").
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) return authFail(req);
-  if (!hasScope(principal, "docs.write")) return forbiddenScope("docs.write");
-
-  const limited = await rateLimit(req, principal, "write");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.write", "write");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   // Size cap by Content-Length before parse (the produced html is re-checked
-  // under the write lock inside applyPatch).
+  // under the write lock inside applyPatch). This precheck runs before the doc
+  // lookup, matching the original ordering; the JSON parse itself runs after the
+  // access check below.
   const contentLength = Number(req.headers.get("content-length") ?? "");
   if (Number.isFinite(contentLength) && contentLength > MAX_HTML_BYTES) {
     return payloadTooLarge(MAX_HTML_BYTES, contentLength);
@@ -58,16 +47,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   // viewer/commenter grant) gets 404 whether or not the slug exists.
   if (!canEdit(access)) return notFoundDoc();
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof body !== "object" || body === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = body as Record<string, unknown>;
+  const parsed = await parseJsonObject(req);
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   // Validate edits.
   if (!Array.isArray(b.edits)) {

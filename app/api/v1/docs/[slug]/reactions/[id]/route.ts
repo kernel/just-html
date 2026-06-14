@@ -1,10 +1,9 @@
 import { authenticate } from "@/lib/auth/bearer";
 import { getSession } from "@/lib/auth/session";
-import { apiError, json } from "@/lib/docs/api";
+import { apiError, json, parsePositiveIntParam, unauthorizedIdentity } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { resolveCommentPrincipal } from "@/lib/docs/comments";
 import { deleteOwnReaction } from "@/lib/docs/reactions";
-import { WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
@@ -15,24 +14,14 @@ type Ctx = { params: Promise<{ slug: string; id: string }> };
 // id-addressed removal). Author-scoped; you can only delete reactions you made.
 
 function unauthorized(): Response {
-  return new Response(
-    JSON.stringify({ error: "unauthorized", message: "This action requires an API key or a signed-in session." }),
-    {
-      status: 401,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
-      },
-    }
-  );
+  return unauthorizedIdentity("This action requires an API key or a signed-in session.");
 }
 
 export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
   const { slug, id } = await ctx.params;
-  const reactionId = Number(id);
-  if (!Number.isInteger(reactionId) || reactionId < 1) {
-    return apiError(400, "invalid_request", "Invalid reaction id.");
-  }
+  const idResult = parsePositiveIntParam("Reaction id", id);
+  if ("response" in idResult) return idResult.response;
+  const reactionId = idResult.value;
 
   const apiPrincipal = await authenticate(req);
   const session = apiPrincipal ? null : await getSession(req);

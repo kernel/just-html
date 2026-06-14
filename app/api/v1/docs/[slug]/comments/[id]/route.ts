@@ -1,11 +1,10 @@
 import { authenticate } from "@/lib/auth/bearer";
 import { getSession } from "@/lib/auth/session";
-import { apiError, json } from "@/lib/docs/api";
+import { apiError, json, parseJsonObject, parsePositiveIntParam, unauthorizedIdentity } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { isOwner } from "@/lib/docs/grants";
 import { checkLimits } from "@/lib/auth/ratelimit";
-import { WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 import {
   findComment,
   commentView,
@@ -30,16 +29,7 @@ type Ctx = { params: Promise<{ slug: string; id: string }> };
 // Auth: API key OR session, same as POST /comments.
 
 function unauthorized(): Response {
-  return new Response(
-    JSON.stringify({ error: "unauthorized", message: "This action requires an API key or a signed-in session." }),
-    {
-      status: 401,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
-      },
-    }
-  );
+  return unauthorizedIdentity("This action requires an API key or a signed-in session.");
 }
 
 async function rateLimited(source: "api_key" | "session", id: number): Promise<Response | null> {
@@ -55,10 +45,9 @@ async function rateLimited(source: "api_key" | "session", id: number): Promise<R
 
 export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   const { slug, id } = await ctx.params;
-  const commentId = Number(id);
-  if (!Number.isInteger(commentId) || commentId < 1) {
-    return apiError(400, "invalid_request", "Invalid comment id.");
-  }
+  const idResult = parsePositiveIntParam("Comment id", id);
+  if ("response" in idResult) return idResult.response;
+  const commentId = idResult.value;
   const url = new URL(req.url);
   const viewtoken = url.searchParams.get("viewtoken");
 
@@ -78,16 +67,9 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   const cap = await resolveCapability(doc, principal, canView(doc, viewtoken));
   const isAuthor = comment.author_user_id !== null && Number(comment.author_user_id) === Number(principal.userId);
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof raw !== "object" || raw === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = raw as Record<string, unknown>;
+  const parsed = await parseJsonObject(req);
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   const hasBody = b.body !== undefined;
   const hasResolved = b.resolved !== undefined;
@@ -128,10 +110,9 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
 
 export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
   const { slug, id } = await ctx.params;
-  const commentId = Number(id);
-  if (!Number.isInteger(commentId) || commentId < 1) {
-    return apiError(400, "invalid_request", "Invalid comment id.");
-  }
+  const idResult = parsePositiveIntParam("Comment id", id);
+  if ("response" in idResult) return idResult.response;
+  const commentId = idResult.value;
 
   const apiPrincipal = await authenticate(req);
   const session = apiPrincipal ? null : await getSession(req);

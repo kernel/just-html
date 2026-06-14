@@ -1,13 +1,12 @@
-import { authenticate, unauthorized } from "@/lib/auth/bearer";
 import {
   apiError,
   consumerDomainRejected,
-  forbiddenScope,
-  hasScope,
   json,
   notFoundDoc,
+  parseJsonObject,
+  parseOptionalBool,
   quotaExceeded,
-  rateLimit,
+  requireApiKey,
 } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { sendShareNotification } from "@/lib/docs/share-notify";
@@ -28,22 +27,11 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-function authFail(req: Request): Response {
-  return unauthorized(
-    req.headers.get("authorization")
-      ? "Invalid, expired, or revoked credential."
-      : "Missing Bearer credential."
-  );
-}
-
 // GET /api/v1/docs/:slug/grants — list grants. Owner only. Scope: docs.read.
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) return authFail(req);
-  if (!hasScope(principal, "docs.read")) return forbiddenScope("docs.read");
-
-  const limited = await rateLimit(req, principal, "read");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.read", "read");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);
@@ -63,12 +51,9 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
 // POST /api/v1/docs/:slug/grants — share a doc. Owner only. Scope: docs.write.
 // Body: { email, role } OR { domain, role }; role ∈ editor|commenter|viewer.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) return authFail(req);
-  if (!hasScope(principal, "docs.write")) return forbiddenScope("docs.write");
-
-  const limited = await rateLimit(req, principal, "write");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.write", "write");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);
@@ -76,16 +61,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   // and managing grants is strictly an owner capability (birthday.md).
   if (!doc || !isOwner(doc, principal.userId)) return notFoundDoc();
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof body !== "object" || body === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = body as Record<string, unknown>;
+  const parsed = await parseJsonObject(req);
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   const hasEmail = b.email !== undefined && b.email !== null;
   const hasDomain = b.domain !== undefined && b.domain !== null;
@@ -110,13 +88,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   // notify: suppress the share-notification email (default true). Only ever
   // relevant for EMAIL grants — domain grants never notify (we don't email a
   // whole company), so the flag is silently ignored for domains.
-  let notify = true;
-  if (b.notify !== undefined) {
-    if (typeof b.notify !== "boolean") {
-      return apiError(400, "invalid_request", "Field 'notify' must be a boolean.");
-    }
-    notify = b.notify;
-  }
+  const notifyResult = parseOptionalBool(b.notify, "notify", true);
+  if ("response" in notifyResult) return notifyResult.response;
+  const notify = notifyResult.value;
 
   let granteeType: "email" | "domain";
   let grantee: string;

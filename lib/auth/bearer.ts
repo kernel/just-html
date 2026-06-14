@@ -23,6 +23,21 @@ export function unauthorized(message = "Invalid, expired, or revoked credential.
   });
 }
 
+/**
+ * The Bearer 401 for /api/v1/* when authenticate() returns null. Distinguishes a
+ * MISSING credential from an invalid/expired/revoked one purely from the message
+ * (status + WWW-Authenticate are identical either way). Previously copy-pasted /
+ * inlined across every v1 route; now single-sourced and folded into
+ * requireApiKey().
+ */
+export function authFail(req: Request): Response {
+  return unauthorized(
+    req.headers.get("authorization")
+      ? "Invalid, expired, or revoked credential."
+      : "Missing Bearer credential."
+  );
+}
+
 /** Extract a Bearer token from the Authorization header (/^Bearer\s+(.+)$/i). */
 export function extractBearer(req: Request): string | null {
   const h = req.headers.get("authorization");

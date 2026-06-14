@@ -1,15 +1,15 @@
-import { authenticate, unauthorized } from "@/lib/auth/bearer";
 import {
   apiError,
-  forbiddenScope,
-  hasScope,
   json,
   notFoundDoc,
+  parseJsonObject,
+  parseOptionalBool,
+  parseTitle,
   payloadTooLarge,
   quotaExceeded,
-  rateLimit,
+  requireApiKey,
 } from "@/lib/docs/api";
-import { MAX_HTML_BYTES, MAX_TITLE_LEN } from "@/lib/docs/config";
+import { MAX_HTML_BYTES } from "@/lib/docs/config";
 import {
   byteLen,
   findBySlug,
@@ -25,24 +25,13 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-function authFail(req: Request): Response {
-  return unauthorized(
-    req.headers.get("authorization")
-      ? "Invalid, expired, or revoked credential."
-      : "Missing Bearer credential."
-  );
-}
-
 // GET /api/v1/docs/:slug — fetch metadata + html. Readable by the owner OR any
 // grantee (editor/commenter/viewer), per the permissions ladder. Scope: docs.read.
 // Non-owners get granteeView (no view_token — that's an owner-only capability).
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) return authFail(req);
-  if (!hasScope(principal, "docs.read")) return forbiddenScope("docs.read");
-
-  const limited = await rateLimit(req, principal, "read");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.read", "read");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);
@@ -61,13 +50,13 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
 //   - title / public (visibility): OWNER ONLY — editors cannot change visibility
 //     (birthday.md "Permissions model": editors "cannot ... change visibility").
 export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) return authFail(req);
-  if (!hasScope(principal, "docs.write")) return forbiddenScope("docs.write");
+  const auth = await requireApiKey(req, "docs.write", "write");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
-  const limited = await rateLimit(req, principal, "write");
-  if (limited) return limited;
-
+  // Content-Length 413 precheck runs BEFORE the doc lookup (preserving the
+  // original ordering: an oversized body is rejected before any 404). The JSON
+  // parse itself happens after the access check below.
   const contentLength = Number(req.headers.get("content-length") ?? "");
   if (Number.isFinite(contentLength) && contentLength > MAX_HTML_BYTES) {
     return payloadTooLarge(MAX_HTML_BYTES, contentLength);
@@ -82,16 +71,9 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   if (!canEdit(access)) return notFoundDoc();
   const isOwner = access.kind === "owner";
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof body !== "object" || body === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = body as Record<string, unknown>;
+  const parsed = await parseJsonObject(req);
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   const hasHtml = b.html !== undefined;
   const hasTitle = b.title !== undefined;
@@ -120,27 +102,21 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     if (htmlBytes > MAX_HTML_BYTES) return payloadTooLarge(MAX_HTML_BYTES, htmlBytes);
   }
 
-  // Validate title (if present; null clears it).
+  // Validate title (if present; null clears it). Left undefined when absent so
+  // updateMeta only touches provided fields.
   let title: string | null | undefined;
   if (hasTitle) {
-    if (b.title === null) {
-      title = null;
-    } else if (typeof b.title !== "string") {
-      return apiError(400, "invalid_request", "Field 'title' must be a string or null.");
-    } else if ((b.title as string).length > MAX_TITLE_LEN) {
-      return apiError(400, "invalid_request", `Field 'title' must be at most ${MAX_TITLE_LEN} characters.`);
-    } else {
-      title = b.title as string;
-    }
+    const titleResult = parseTitle(b.title, { allowNull: true });
+    if ("response" in titleResult) return titleResult.response;
+    title = titleResult.title;
   }
 
-  // Validate public (if present).
+  // Validate public (if present). Left undefined when absent.
   let isPublic: boolean | undefined;
   if (hasPublic) {
-    if (typeof b.public !== "boolean") {
-      return apiError(400, "invalid_request", "Field 'public' must be a boolean.");
-    }
-    isPublic = b.public as boolean;
+    const publicResult = parseOptionalBool(b.public, "public", false);
+    if ("response" in publicResult) return publicResult.response;
+    isPublic = publicResult.value;
   }
 
   // Apply metadata changes first (no version bump), then the html rewrite (bump +
@@ -167,12 +143,9 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
 
 // DELETE /api/v1/docs/:slug — soft-delete. Scope: docs.write. Owner only.
 export async function DELETE(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) return authFail(req);
-  if (!hasScope(principal, "docs.write")) return forbiddenScope("docs.write");
-
-  const limited = await rateLimit(req, principal, "write");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.write", "write");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   const { slug } = await ctx.params;
   const doc = await findBySlug(slug);

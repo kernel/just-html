@@ -1,5 +1,4 @@
-import { authenticate, unauthorized } from "@/lib/auth/bearer";
-import { apiError, forbiddenScope, hasScope, json, notFoundDoc, rateLimit } from "@/lib/docs/api";
+import { apiError, json, notFoundDoc, parsePositiveIntParam, requireApiKey } from "@/lib/docs/api";
 import { findBySlug, findVersion, versionView } from "@/lib/docs/store";
 import { canRead, resolveAccess } from "@/lib/docs/grants";
 
@@ -11,24 +10,14 @@ type Ctx = { params: Promise<{ slug: string; n: string }> };
 // snapshot. Scope: docs.read. Readable by owner OR any grantee. A 404 covers
 // both a missing/inaccessible doc and a version pruned past the retention cap.
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) {
-    return unauthorized(
-      req.headers.get("authorization")
-        ? "Invalid, expired, or revoked credential."
-        : "Missing Bearer credential."
-    );
-  }
-  if (!hasScope(principal, "docs.read")) return forbiddenScope("docs.read");
-
-  const limited = await rateLimit(req, principal, "read");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.read", "read");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   const { slug, n } = await ctx.params;
-  const versionNum = Number(n);
-  if (!Number.isInteger(versionNum) || versionNum < 1) {
-    return apiError(400, "invalid_request", "Version must be a positive integer.");
-  }
+  const versionResult = parsePositiveIntParam("Version", n);
+  if ("response" in versionResult) return versionResult.response;
+  const versionNum = versionResult.value;
 
   const doc = await findBySlug(slug);
   if (!doc) return notFoundDoc();

@@ -1,10 +1,9 @@
 import { authenticate } from "@/lib/auth/bearer";
 import { getSession } from "@/lib/auth/session";
-import { apiError, json } from "@/lib/docs/api";
+import { apiError, json, parseJsonObject, unauthorizedIdentity } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { checkLimits } from "@/lib/auth/ratelimit";
-import { WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 import {
   resolveCommentPrincipal,
   resolveCapability,
@@ -27,16 +26,7 @@ type Ctx = { params: Promise<{ slug: string }> };
 // re-posting the same reaction toggles it off.
 
 function unauthorized(): Response {
-  return new Response(
-    JSON.stringify({ error: "unauthorized", message: "Reacting requires an API key or a signed-in session." }),
-    {
-      status: 401,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
-      },
-    }
-  );
+  return unauthorizedIdentity("Reacting requires an API key or a signed-in session.");
 }
 
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
@@ -70,16 +60,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     return apiError(404, "not_found", "No such document.");
   }
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof raw !== "object" || raw === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = raw as Record<string, unknown>;
+  const parsed = await parseJsonObject(req);
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   if (typeof b.emoji !== "string" || !isAllowedEmoji(b.emoji)) {
     return apiError(400, "invalid_request", "Field 'emoji' must be one of the supported emoji.", {

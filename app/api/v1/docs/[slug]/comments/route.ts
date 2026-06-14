@@ -1,10 +1,9 @@
 import { authenticate } from "@/lib/auth/bearer";
 import { getSession } from "@/lib/auth/session";
-import { apiError, json } from "@/lib/docs/api";
+import { apiError, json, parseJsonObject, unauthorizedIdentity } from "@/lib/docs/api";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { checkLimits } from "@/lib/auth/ratelimit";
-import { WWW_AUTHENTICATE_CHALLENGE } from "@/lib/auth/config";
 import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 import {
   allThreads,
@@ -29,21 +28,10 @@ type Ctx = { params: Promise<{ slug: string }> };
 // start?, end?}; null anchor = a doc-level comment. parent_id makes a 1-level
 // reply.
 
+// 401 with the API discovery hint (an agent hitting this cold can bootstrap).
 function unauthorizedWrite(): Response {
-  // 401 with the API discovery hint (an agent hitting this cold can bootstrap).
-  return new Response(
-    JSON.stringify({
-      error: "unauthorized",
-      message:
-        "Commenting requires identity: an API key (Authorization: Bearer jh_live_…) or a signed-in session. Anonymous viewers cannot comment.",
-    }),
-    {
-      status: 401,
-      headers: {
-        "Content-Type": "application/json; charset=utf-8",
-        "WWW-Authenticate": WWW_AUTHENTICATE_CHALLENGE,
-      },
-    }
+  return unauthorizedIdentity(
+    "Commenting requires identity: an API key (Authorization: Bearer jh_live_…) or a signed-in session. Anonymous viewers cannot comment."
   );
 }
 
@@ -88,16 +76,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     return apiError(403, "forbidden", "You can view this document but are not allowed to comment on it.");
   }
 
-  let raw: unknown;
-  try {
-    raw = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof raw !== "object" || raw === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = raw as Record<string, unknown>;
+  const parsed = await parseJsonObject(req);
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   if (typeof b.body !== "string" || b.body.trim().length === 0) {
     return apiError(400, "invalid_request", "Field 'body' is required and must be a non-empty string.");

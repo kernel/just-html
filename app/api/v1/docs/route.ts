@@ -1,14 +1,14 @@
-import { authenticate, unauthorized } from "@/lib/auth/bearer";
 import {
   apiError,
-  forbiddenScope,
-  hasScope,
   json,
+  parseJsonObject,
+  parseOptionalBool,
+  parseTitle,
   payloadTooLarge,
   quotaExceeded,
-  rateLimit,
+  requireApiKey,
 } from "@/lib/docs/api";
-import { MAX_HTML_BYTES, MAX_TITLE_LEN } from "@/lib/docs/config";
+import { MAX_HTML_BYTES } from "@/lib/docs/config";
 import {
   byteLen,
   createDoc,
@@ -27,36 +27,16 @@ const MAX_LIST_LIMIT = 500;
 // POST /api/v1/docs — create a document. Body: { html, title?, public? }.
 // Returns { slug, url, view_token, ... }. Scope: docs.write.
 export async function POST(req: Request): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) {
-    return unauthorized(
-      req.headers.get("authorization")
-        ? "Invalid, expired, or revoked credential."
-        : "Missing Bearer credential."
-    );
-  }
-  if (!hasScope(principal, "docs.write")) return forbiddenScope("docs.write");
+  const auth = await requireApiKey(req, "docs.write", "create");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
-  const limited = await rateLimit(req, principal, "create");
-  if (limited) return limited;
-
-  // Size cap checked before parse: reject oversized bodies by Content-Length when
-  // present, then again on the parsed html string (the authoritative check).
-  const contentLength = Number(req.headers.get("content-length") ?? "");
-  if (Number.isFinite(contentLength) && contentLength > MAX_HTML_BYTES) {
-    return payloadTooLarge(MAX_HTML_BYTES, contentLength);
-  }
-
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return apiError(400, "invalid_request", "Request body must be valid JSON.");
-  }
-  if (typeof body !== "object" || body === null) {
-    return apiError(400, "invalid_request", "Request body must be a JSON object.");
-  }
-  const b = body as Record<string, unknown>;
+  // Size cap checked before parse (Content-Length precheck folded into
+  // parseJsonObject), then again on the parsed html string (the authoritative
+  // check).
+  const parsed = await parseJsonObject(req, { maxBytes: MAX_HTML_BYTES });
+  if ("response" in parsed) return parsed.response;
+  const b = parsed.obj;
 
   if (typeof b.html !== "string") {
     return apiError(400, "invalid_request", "Field 'html' is required and must be a string.");
@@ -67,24 +47,13 @@ export async function POST(req: Request): Promise<Response> {
     return payloadTooLarge(MAX_HTML_BYTES, htmlBytes);
   }
 
-  let title: string | null = null;
-  if (b.title !== undefined && b.title !== null) {
-    if (typeof b.title !== "string") {
-      return apiError(400, "invalid_request", "Field 'title' must be a string.");
-    }
-    if (b.title.length > MAX_TITLE_LEN) {
-      return apiError(400, "invalid_request", `Field 'title' must be at most ${MAX_TITLE_LEN} characters.`);
-    }
-    title = b.title;
-  }
+  const titleResult = parseTitle(b.title, { allowNull: false });
+  if ("response" in titleResult) return titleResult.response;
+  const title = titleResult.title;
 
-  let isPublic = false;
-  if (b.public !== undefined) {
-    if (typeof b.public !== "boolean") {
-      return apiError(400, "invalid_request", "Field 'public' must be a boolean.");
-    }
-    isPublic = b.public;
-  }
+  const publicResult = parseOptionalBool(b.public, "public", false);
+  if ("response" in publicResult) return publicResult.response;
+  const isPublic = publicResult.value;
 
   const result = await createDoc({ ownerId: principal.userId, html, title, isPublic });
   if ("quota" in result) {
@@ -105,18 +74,9 @@ export async function POST(req: Request): Promise<Response> {
 //             (email grant beats domain grant). No view_token (owner-only).
 //   - all   : owned ++ shared, owned first.
 export async function GET(req: Request): Promise<Response> {
-  const principal = await authenticate(req);
-  if (!principal) {
-    return unauthorized(
-      req.headers.get("authorization")
-        ? "Invalid, expired, or revoked credential."
-        : "Missing Bearer credential."
-    );
-  }
-  if (!hasScope(principal, "docs.read")) return forbiddenScope("docs.read");
-
-  const limited = await rateLimit(req, principal, "read");
-  if (limited) return limited;
+  const auth = await requireApiKey(req, "docs.read", "read");
+  if ("response" in auth) return auth.response;
+  const { principal } = auth;
 
   const url = new URL(req.url);
   let limit = DEFAULT_LIST_LIMIT;
