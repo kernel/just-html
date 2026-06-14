@@ -1,6 +1,6 @@
 import { oauthEmpty, oauthError } from "@/lib/auth/responses";
 import { clientIp } from "@/lib/auth/request";
-import { checkLimits } from "@/lib/auth/ratelimit";
+import { enforceRateLimit } from "@/lib/auth/ratelimit";
 import { query } from "@/lib/db";
 import { sha256Hex } from "@/lib/auth/tokens";
 import { audit } from "@/lib/auth/audit";
@@ -12,11 +12,10 @@ export const dynamic = "force-dynamic";
 // a malformed body.
 export async function POST(req: Request): Promise<Response> {
   const ip = clientIp(req);
-  const tripped = await checkLimits([
+  const tripped = await enforceRateLimit(req, [
     ip ? { key: `revoke:ip:${ip}`, limit: 30, window: "hour" } : null,
   ]);
   if (tripped) {
-    audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     return oauthError("rate_limited", `Retry after ${tripped.retryAfter} seconds.`, {
       status: 429,
       headers: { "Retry-After": String(tripped.retryAfter) },

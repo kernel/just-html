@@ -1,7 +1,7 @@
 import { agentError, jsonResponse } from "@/lib/auth/responses";
 import { isEmailish } from "@/lib/auth/url";
 import { clientIp } from "@/lib/auth/request";
-import { checkLimits, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
+import { enforceRateLimit, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
 import { createRegistration } from "@/lib/auth/claim";
 import { sendClaimEmail } from "@/lib/auth/email";
 import { audit } from "@/lib/auth/audit";
@@ -84,14 +84,13 @@ export async function POST(req: Request): Promise<Response> {
   // the email-send caps (per-email 5/h + 20/day, per-IP 30/h, global 500/h)
   // ALSO apply, checked alongside the registration caps before we mint anything
   // (authmd-implementation.md §6).
-  const tripped = await checkLimits([
+  const tripped = await enforceRateLimit(req, [
     ip ? { key: `ident:ip:${ip}`, limit: 10, window: "hour" } : null,
     { key: `ident:email:${email}`, limit: 10, window: "hour" },
     { key: "ident:global", limit: 100, window: "hour" },
     ...EMAIL_SEND_LIMITS(email, ip),
   ]);
   if (tripped) {
-    audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     return agentError(
       429,
       "rate_limited",

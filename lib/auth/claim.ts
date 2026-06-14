@@ -4,12 +4,14 @@ import {
   mintClaimAttemptId,
   mintClaimToken,
   mintUserCode,
+  mintApiKey,
   sha256Hex,
 } from "@/lib/auth/tokens";
 import {
   CLAIM_WINDOW_S,
   USER_CODE_TTL_S,
   POLL_INTERVAL_S,
+  SCOPE_PG_ARRAY,
 } from "@/lib/auth/config";
 
 // Registration + claim-attempt minting shared by /agent/identity and
@@ -129,6 +131,45 @@ export async function findByClaimToken(
 }
 
 /**
+ * Discriminated result of the "look up by claim_token, then classify" precheck
+ * that was triple-copied (with DIVERGENT status codes) across oauth2/token,
+ * /agent/identity/claim, and /agent/identity/claim/complete (Theme T5). This
+ * extracts only the LOOKUP LOGIC — each handler maps the union to its own
+ * existing HTTP status codes / error envelope and emits its own audit events.
+ *
+ * IMPORTANT: the three handlers check `claimed` vs `expired` in DIFFERENT
+ * precedence. oauth2/token checks the registration window BEFORE the claimed
+ * branch (an expired-but-claimed reg is `expired`, not issued); /claim and
+ * /claim/complete check claimed BEFORE expiry (a claimed reg is always 409,
+ * even past its window). So `precedence` selects which discriminant wins when a
+ * row is both claimed and past its window — preserving each handler's exact
+ * current behavior.
+ */
+export type LiveRegistration =
+  | { kind: "notFound" }
+  | { kind: "claimed"; reg: RegistrationRow }
+  | { kind: "expired"; reg: RegistrationRow }
+  | { kind: "live"; reg: RegistrationRow };
+
+export async function resolveLiveRegistration(
+  claimToken: string,
+  precedence: "expiredFirst" | "claimedFirst"
+): Promise<LiveRegistration> {
+  const reg = await findByClaimToken(claimToken);
+  if (!reg) return { kind: "notFound" };
+  const expired = new Date(reg.claim_expires_at).getTime() <= Date.now();
+  const claimed = reg.claimed_at != null;
+  if (precedence === "expiredFirst") {
+    if (expired) return { kind: "expired", reg };
+    if (claimed) return { kind: "claimed", reg };
+  } else {
+    if (claimed) return { kind: "claimed", reg };
+    if (expired) return { kind: "expired", reg };
+  }
+  return { kind: "live", reg };
+}
+
+/**
  * Confirm a claim in one transaction: consume the code, find-or-create the
  * users row (the ONLY place accounts are created), and bind the registration.
  * The ceremony does NOT mint or backfill a browser session (inbox possession is
@@ -160,6 +201,73 @@ export async function confirmClaim(opts: {
     );
     await client.query("COMMIT");
     return userId;
+  } catch (e) {
+    await client.query("ROLLBACK").catch(() => {});
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Plain result of the one-time API-key issuance transaction. oauth2/token maps
+ * this to HTTP (and emits the token.issued audit on success). Mirrors the three
+ * outcomes the inline transaction used to return as Responses.
+ */
+export type IssueResult =
+  | { kind: "notLive" } // registration vanished or has no bound user (under the lock)
+  | { kind: "alreadyIssued" } // credential_issued_at already set
+  | {
+      kind: "issued";
+      apiKey: string;
+      userId: number;
+      apiKeyId: number;
+      publicId: string;
+    };
+
+/**
+ * Mint the long-lived API key in a transaction guarded against double-issue.
+ * Locks the registration row and re-checks credential_issued_at under the lock
+ * so two concurrent first-polls can't both mint a key. Returns a PLAIN result;
+ * the caller (oauth2/token) maps it to the OAuth envelope and audits.
+ */
+export async function issueCredential(regId: number): Promise<IssueResult> {
+  const apiKey = mintApiKey();
+  const client = await getPool().connect();
+  try {
+    await client.query("BEGIN");
+    const { rows: lockRows } = await client.query(
+      `SELECT user_id, credential_issued_at, public_id FROM agent_registrations
+       WHERE id = $1 FOR UPDATE`,
+      [regId]
+    );
+    const lock = lockRows[0];
+    if (!lock || lock.user_id == null) {
+      await client.query("ROLLBACK");
+      return { kind: "notLive" };
+    }
+    if (lock.credential_issued_at != null) {
+      await client.query("ROLLBACK");
+      return { kind: "alreadyIssued" };
+    }
+    const { rows: keyRows } = await client.query(
+      `INSERT INTO api_keys (user_id, registration_id, token_hash, prefix, scopes, created_via)
+       VALUES ($1, $2, $3, $4, $5::text[], 'auth.md')
+       RETURNING id`,
+      [lock.user_id, regId, sha256Hex(apiKey), apiKey.slice(0, 12), SCOPE_PG_ARRAY]
+    );
+    await client.query(
+      `UPDATE agent_registrations SET credential_issued_at = now() WHERE id = $1`,
+      [regId]
+    );
+    await client.query("COMMIT");
+    return {
+      kind: "issued",
+      apiKey,
+      userId: lock.user_id as number,
+      apiKeyId: keyRows[0].id as number,
+      publicId: lock.public_id as string,
+    };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     throw e;

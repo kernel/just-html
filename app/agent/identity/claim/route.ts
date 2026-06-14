@@ -1,8 +1,8 @@
 import { agentError, jsonResponse } from "@/lib/auth/responses";
 import { isEmailish } from "@/lib/auth/url";
 import { clientIp } from "@/lib/auth/request";
-import { checkLimits, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
-import { findByClaimToken, mintAttempt } from "@/lib/auth/claim";
+import { enforceRateLimit, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
+import { resolveLiveRegistration, mintAttempt } from "@/lib/auth/claim";
 import { sendClaimEmail } from "@/lib/auth/email";
 import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
@@ -33,21 +33,24 @@ export async function POST(req: Request): Promise<Response> {
     return agentError(400, "invalid_request", "email: must be an email address.");
   }
 
-  const reg = await findByClaimToken(claimToken);
-  if (!reg) {
+  // Shared lookup (Theme T5). /claim checks the claimed branch BEFORE expiry
+  // (a claimed reg is always 409, even past its window) — `claimedFirst`.
+  const resolved = await resolveLiveRegistration(claimToken, "claimedFirst");
+  if (resolved.kind === "notFound") {
     return agentError(401, "invalid_claim_token", "The claim token is invalid.");
   }
-  if (reg.claimed_at) {
+  if (resolved.kind === "claimed") {
     return agentError(
       409,
       "claimed_or_in_flight",
       "This registration has already been claimed."
     );
   }
-  if (new Date(reg.claim_expires_at).getTime() <= Date.now()) {
-    audit(req, "registration.expired", { registrationId: reg.id });
+  if (resolved.kind === "expired") {
+    audit(req, "registration.expired", { registrationId: resolved.reg.id });
     return agentError(410, "claim_expired", "Registration has expired.");
   }
+  const reg = resolved.reg;
 
   // A corrected email applies to the (still-unclaimed) registration binding,
   // and is the address we re-mint + re-email against.
@@ -57,12 +60,11 @@ export async function POST(req: Request): Promise<Response> {
   const ip = clientIp(req);
   // Per-IP re-mint cap (§6 #5), plus the shared email-send caps (§6 #11–13) —
   // a re-mint re-sends the claim email.
-  const tripped = await checkLimits([
+  const tripped = await enforceRateLimit(req, [
     ip ? { key: `claim:ip:${ip}`, limit: 30, window: "hour" } : null,
     ...EMAIL_SEND_LIMITS(effectiveEmail, ip),
   ]);
   if (tripped) {
-    audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     return agentError(
       429,
       "rate_limited",

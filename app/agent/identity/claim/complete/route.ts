@@ -1,7 +1,7 @@
 import { agentError, jsonResponse } from "@/lib/auth/responses";
 import { clientIp } from "@/lib/auth/request";
-import { checkLimits } from "@/lib/auth/ratelimit";
-import { findByClaimToken, confirmClaim } from "@/lib/auth/claim";
+import { enforceRateLimit } from "@/lib/auth/ratelimit";
+import { resolveLiveRegistration, confirmClaim } from "@/lib/auth/claim";
 import { sha256Hex, safeEqualHex } from "@/lib/auth/tokens";
 import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
@@ -41,11 +41,10 @@ export async function POST(req: Request): Promise<Response> {
   // (mirrors the /claim form's per-IP cap; the per-code 5-attempt budget below
   // is the primary control).
   const ip = clientIp(req);
-  const tripped = await checkLimits([
+  const tripped = await enforceRateLimit(req, [
     ip ? { key: `claimcomplete:ip:${ip}`, limit: 30, window: "hour" } : null,
   ]);
   if (tripped) {
-    audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     return agentError(
       429,
       "rate_limited",
@@ -54,21 +53,24 @@ export async function POST(req: Request): Promise<Response> {
     );
   }
 
-  const reg = await findByClaimToken(claimToken);
-  if (!reg) {
+  // Shared lookup (Theme T5). /claim/complete checks the claimed branch BEFORE
+  // expiry (a claimed reg is always 409, even past its window) — `claimedFirst`.
+  const resolved = await resolveLiveRegistration(claimToken, "claimedFirst");
+  if (resolved.kind === "notFound") {
     return agentError(401, "invalid_claim_token", "The claim token is invalid.");
   }
-  if (reg.claimed_at) {
+  if (resolved.kind === "claimed") {
     return agentError(
       409,
       "claimed_or_in_flight",
       "This registration has already been claimed."
     );
   }
-  if (new Date(reg.claim_expires_at).getTime() <= Date.now()) {
-    audit(req, "registration.expired", { registrationId: reg.id });
+  if (resolved.kind === "expired") {
+    audit(req, "registration.expired", { registrationId: resolved.reg.id });
     return agentError(410, "claim_expired", "Registration has expired.");
   }
+  const reg = resolved.reg;
 
   // Resolve the live attempt for this registration.
   const { rows: attemptRows } = await query<{

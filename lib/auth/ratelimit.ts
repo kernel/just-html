@@ -1,4 +1,5 @@
 import { query } from "@/lib/db";
+import { audit } from "@/lib/auth/audit";
 
 // Fixed-window rate limiting on Postgres counters (§6). One atomic
 // upsert-and-return per check. Increment-then-check: rejected requests still
@@ -121,4 +122,27 @@ export async function checkLimits(
     if (!res.ok) return { key: c.key, limit: c.limit, retryAfter: res.retryAfter };
   }
   return null;
+}
+
+/**
+ * Run the checks and, on a trip, emit the standard audit event before
+ * returning the tripped result. This is the one place the
+ * `checkLimits → if tripped: audit("rate_limit.tripped") → 429` preamble lives
+ * (Theme T5). Returns the tripped result (key/limit/retryAfter) or null if all
+ * checks passed. The CALLER maps a non-null result to ITS OWN 429 response —
+ * status, Retry-After header, and body wording stay per-handler (the OAuth
+ * envelope, the agent JSON envelope, or the /login HTML page), so this helper
+ * never decides the response shape.
+ */
+export async function enforceRateLimit(
+  req: Request,
+  checks: Array<LimitCheck | null>
+): Promise<{ key: string; limit: number; retryAfter: number } | null> {
+  const tripped = await checkLimits(checks);
+  if (tripped) {
+    audit(req, "rate_limit.tripped", {
+      meta: { key: tripped.key, limit: tripped.limit },
+    });
+  }
+  return tripped;
 }

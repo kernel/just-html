@@ -1,11 +1,10 @@
 import { oauthResponse, oauthError } from "@/lib/auth/responses";
 import { clientIp } from "@/lib/auth/request";
-import { checkLimits } from "@/lib/auth/ratelimit";
-import { findByClaimToken } from "@/lib/auth/claim";
-import { query, getPool } from "@/lib/db";
-import { mintApiKey, sha256Hex } from "@/lib/auth/tokens";
+import { enforceRateLimit } from "@/lib/auth/ratelimit";
+import { resolveLiveRegistration, issueCredential } from "@/lib/auth/claim";
+import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
-import { POLL_INTERVAL_S, SCOPE_STRING, SCOPE_PG_ARRAY } from "@/lib/auth/config";
+import { POLL_INTERVAL_S, SCOPE_STRING } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
@@ -16,11 +15,10 @@ const CLAIM_GRANT = "urn:workos:agent-auth:grant-type:claim";
 // (RFC 8628 device-flow semantics over RFC 6749 transport).
 export async function POST(req: Request): Promise<Response> {
   const ip = clientIp(req);
-  const tripped = await checkLimits([
+  const tripped = await enforceRateLimit(req, [
     ip ? { key: `token:ip:${ip}`, limit: 300, window: "hour" } : null,
   ]);
   if (tripped) {
-    audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     return oauthError("rate_limited", `Retry after ${tripped.retryAfter} seconds.`, {
       status: 429,
       headers: { "Retry-After": String(tripped.retryAfter) },
@@ -47,26 +45,30 @@ export async function POST(req: Request): Promise<Response> {
     return oauthError("invalid_request", "claim_token: required.");
   }
 
-  const reg = await findByClaimToken(claimToken);
+  // Shared lookup (Theme T5). oauth2/token checks the registration window
+  // BEFORE the claimed branch, so an expired-but-claimed reg is `expired`, not
+  // issued — `expiredFirst` preserves that precedence.
+  const resolved = await resolveLiveRegistration(claimToken, "expiredFirst");
   // 1. Unknown token — deliberately conflated with expired (no enumeration).
-  if (!reg) {
+  if (resolved.kind === "notFound") {
     return oauthError("expired_token", "Unknown or expired claim_token.");
   }
   // 2. Registration window closed.
-  if (new Date(reg.claim_expires_at).getTime() <= Date.now()) {
-    audit(req, "registration.expired", { registrationId: reg.id });
+  if (resolved.kind === "expired") {
+    audit(req, "registration.expired", { registrationId: resolved.reg.id });
     return oauthError("expired_token", "The claim ceremony window has closed.");
   }
+  const reg = resolved.reg;
 
   // 4. Already claimed → issue key exactly once.
-  if (reg.claimed_at) {
+  if (resolved.kind === "claimed") {
     if (reg.credential_issued_at) {
       return oauthError("invalid_grant", "Credential already issued for this registration.");
     }
     return issueKey(req, reg.id);
   }
 
-  // 3. Not yet claimed: check current attempt state, slow_down, then pending.
+  // 3. Not yet claimed (live): check current attempt state, slow_down, then pending.
   const { rows: attemptRows } = await query<{
     consumed_at: string | null;
     expires_at: string;
@@ -99,59 +101,29 @@ export async function POST(req: Request): Promise<Response> {
   return oauthError("authorization_pending", "The user has not yet completed the ceremony.");
 }
 
-// Mint the long-lived API key in a transaction guarded against double-issue.
+// Mint the long-lived API key (transaction guarded against double-issue lives
+// in claim.ts/issueCredential) and map the plain result to the OAuth envelope.
 async function issueKey(req: Request, regId: number): Promise<Response> {
-  const apiKey = mintApiKey();
-  const client = await getPool().connect();
-  try {
-    await client.query("BEGIN");
-    // Lock the registration row; re-check credential_issued_at under the lock so
-    // two concurrent first-polls can't both mint a key.
-    const { rows: lockRows } = await client.query(
-      `SELECT user_id, credential_issued_at, public_id FROM agent_registrations
-       WHERE id = $1 FOR UPDATE`,
-      [regId]
-    );
-    const lock = lockRows[0];
-    if (!lock || lock.user_id == null) {
-      await client.query("ROLLBACK");
-      return oauthError("expired_token", "Unknown or expired claim_token.");
-    }
-    if (lock.credential_issued_at != null) {
-      await client.query("ROLLBACK");
-      return oauthError("invalid_grant", "Credential already issued for this registration.");
-    }
-    const { rows: keyRows } = await client.query(
-      `INSERT INTO api_keys (user_id, registration_id, token_hash, prefix, scopes, created_via)
-       VALUES ($1, $2, $3, $4, $5::text[], 'auth.md')
-       RETURNING id`,
-      [lock.user_id, regId, sha256Hex(apiKey), apiKey.slice(0, 12), SCOPE_PG_ARRAY]
-    );
-    await client.query(
-      `UPDATE agent_registrations SET credential_issued_at = now() WHERE id = $1`,
-      [regId]
-    );
-    await client.query("COMMIT");
-
-    const apiKeyId = keyRows[0].id as number;
-    audit(req, "token.issued", {
-      registrationId: regId,
-      userId: lock.user_id as number,
-      apiKeyId,
-      meta: { api_key_id: apiKeyId, scope: SCOPE_STRING },
-    });
-
-    return oauthResponse({
-      access_token: apiKey,
-      token_type: "Bearer",
-      scope: SCOPE_STRING,
-      credential_type: "api_key",
-      registration_id: lock.public_id as string,
-    });
-  } catch (e) {
-    await client.query("ROLLBACK").catch(() => {});
-    throw e;
-  } finally {
-    client.release();
+  const result = await issueCredential(regId);
+  if (result.kind === "notLive") {
+    return oauthError("expired_token", "Unknown or expired claim_token.");
   }
+  if (result.kind === "alreadyIssued") {
+    return oauthError("invalid_grant", "Credential already issued for this registration.");
+  }
+
+  audit(req, "token.issued", {
+    registrationId: regId,
+    userId: result.userId,
+    apiKeyId: result.apiKeyId,
+    meta: { api_key_id: result.apiKeyId, scope: SCOPE_STRING },
+  });
+
+  return oauthResponse({
+    access_token: result.apiKey,
+    token_type: "Bearer",
+    scope: SCOPE_STRING,
+    credential_type: "api_key",
+    registration_id: result.publicId,
+  });
 }

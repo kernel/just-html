@@ -2,7 +2,7 @@ import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
 import { getSession } from "@/lib/auth/session";
 import { sanitizeNext, loginLanding, isEmailish } from "@/lib/auth/url";
 import { originOk, clientIp } from "@/lib/auth/request";
-import { checkLimits, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
+import { enforceRateLimit, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
 import { mintLoginToken, sha256Hex } from "@/lib/auth/tokens";
 import { sendLoginEmail } from "@/lib/auth/email";
 import { query } from "@/lib/db";
@@ -146,9 +146,8 @@ export async function POST(req: Request): Promise<Response> {
   // Email-send caps (recalibrated 2026-06-12): per-IP 30/h, per-email 5/h +
   // 20/day, global 500/h. Shared with B9 claim-email registration so one
   // recipient/IP draws from a single send budget (see ratelimit.ts).
-  const tripped = await checkLimits(EMAIL_SEND_LIMITS(lower, ip));
+  const tripped = await enforceRateLimit(req, EMAIL_SEND_LIMITS(lower, ip));
   if (tripped) {
-    audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
     const mins = Math.ceil(tripped.retryAfter / 60);
     return htmlResponse(
       manPage({
