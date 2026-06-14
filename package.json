@@ -10,6 +10,7 @@
     "migrate": "node --env-file=.env scripts/migrate.mjs",
     "migrate:status": "node --env-file=.env scripts/migrate.mjs status",
     "gen:skill": "tsx scripts/gen-skill.ts",
+    "test": "vitest run",
     "e2e": "node --env-file=.env node_modules/.bin/tsx scripts/e2e.ts"
   },
   "dependencies": {
@@ -26,7 +27,8 @@
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "tsx": "^4.22.4",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^4.1.8"
   },
   "packageManager": "npm@10.9.2"
 }

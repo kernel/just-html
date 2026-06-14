@@ -151,22 +151,45 @@ export type LiveRegistration =
   | { kind: "expired"; reg: RegistrationRow }
   | { kind: "live"; reg: RegistrationRow };
 
+export type Precedence = "expiredFirst" | "claimedFirst";
+
+/**
+ * PURE classification of a (found) registration row's state into the
+ * discriminant the handlers branch on. No DB, no I/O — a function of the row's
+ * claim_expires_at / claimed_at, the reference `now`, and the `precedence`.
+ *
+ * `precedence` only matters when a row is BOTH claimed AND past its window:
+ *   - "expiredFirst" (oauth2/token): window closed wins → "expired"
+ *   - "claimedFirst" (/claim, /claim/complete): claimed wins → "claimed"
+ * resolveLiveRegistration does the lookup, then delegates here. The "notFound"
+ * case is owned by resolveLiveRegistration (a missing row), so this returns
+ * only the three states reachable from an existing row.
+ */
+export function classifyRegistration(
+  row: Pick<RegistrationRow, "claim_expires_at" | "claimed_at">,
+  now: number,
+  precedence: Precedence
+): "claimed" | "expired" | "live" {
+  const expired = new Date(row.claim_expires_at).getTime() <= now;
+  const claimed = row.claimed_at != null;
+  if (precedence === "expiredFirst") {
+    if (expired) return "expired";
+    if (claimed) return "claimed";
+  } else {
+    if (claimed) return "claimed";
+    if (expired) return "expired";
+  }
+  return "live";
+}
+
 export async function resolveLiveRegistration(
   claimToken: string,
-  precedence: "expiredFirst" | "claimedFirst"
+  precedence: Precedence
 ): Promise<LiveRegistration> {
   const reg = await findByClaimToken(claimToken);
   if (!reg) return { kind: "notFound" };
-  const expired = new Date(reg.claim_expires_at).getTime() <= Date.now();
-  const claimed = reg.claimed_at != null;
-  if (precedence === "expiredFirst") {
-    if (expired) return { kind: "expired", reg };
-    if (claimed) return { kind: "claimed", reg };
-  } else {
-    if (claimed) return { kind: "claimed", reg };
-    if (expired) return { kind: "expired", reg };
-  }
-  return { kind: "live", reg };
+  const kind = classifyRegistration(reg, Date.now(), precedence);
+  return { kind, reg };
 }
 
 /**
