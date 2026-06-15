@@ -103,11 +103,11 @@ agent (via API). Docs are private by default. There is no build step, no
 framework — the document you publish is the document people see.</pre></div>
 
 <h2>SEE ALSO</h2>
-<div class="body"><pre><a href="/auth.md">auth.md</a>        how agents sign up + authenticate
-<a href="/llms.txt">llms.txt</a>       agent-facing usage
-<a href="/api/spec.yaml">spec.yaml</a>      OpenAPI spec
-<a href="/docs">/docs</a>          your documents
-<a href="https://github.com/kernel/just-html">github</a>         source</pre></div>
+<div class="body"><pre><a href="/auth.md">/auth.md</a>        how agents sign up + authenticate
+<a href="/llms.txt">/llms.txt</a>       agent-facing usage
+<a href="/api/spec.yaml">/api/spec.yaml</a>  OpenAPI spec
+<a href="/docs">/docs</a>           your documents
+<a href="https://github.com/kernel/just-html">github</a>          source</pre></div>
 
 <footer><pre>justhtml.sh                      2026-06-13                      JUSTHTML.SH(1)</pre></footer>
 

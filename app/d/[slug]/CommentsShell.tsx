@@ -413,19 +413,25 @@ export default function CommentsShell(props: Props) {
   // data-rail="open|closed" attribute drives both via the <style> rules below.
   // The selection toolbar stays SELECTION-GATED (unchanged) — the drawer/scrim
   // is the only new chrome.
-  const [railOpen, setRailOpen] = useState(true);
+  // Default rail visibility is decided by the effect below. A doc with ZERO
+  // comments at load starts with the rail HIDDEN on every viewport (toggle to
+  // open it and start the first thread); based on the load-time count so a live
+  // comment change never clobbers a manual toggle.
+  const hadCommentsAtLoad = props.initialThreads.length > 0;
+  const [railOpen, setRailOpen] = useState(false);
   const isMobileRef = useRef(false);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
-    // Default per breakpoint: desktop open, mobile closed.
+    // Desktop: open by default ONLY if the doc already has comments. Mobile:
+    // always closed by default (the toggle opens the right drawer).
     const applyDefault = () => {
       isMobileRef.current = mq.matches;
-      setRailOpen(!mq.matches);
+      setRailOpen(!mq.matches && hadCommentsAtLoad);
     };
     applyDefault();
     mq.addEventListener("change", applyDefault);
     return () => mq.removeEventListener("change", applyDefault);
-  }, []);
+  }, [hadCommentsAtLoad]);
   // The count shown in the toggle: number of threads (visible roots).
   const commentCount = threads.length;
 
