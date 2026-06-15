@@ -8,24 +8,38 @@ import { audit } from "@/lib/auth/audit";
 
 export const dynamic = "force-dynamic";
 
-function confirmPage(token: string, next: string): string {
+// GET render for a link that still has a token to try. This is an INVISIBLE
+// auto-submit shim: the GET itself never consumes the token (scanners/prefetchers
+// fetch GETs and would burn a single-use link). It renders the same POST form the
+// POST handler expects (identical hidden `token` + `next` fields) and a tiny
+// inline <script> that submits it on load, so the human is signed in without a
+// visible button click. The form lives OUTSIDE <noscript> so the script can reach
+// it; only the visible "sign in" button + instructions sit inside <noscript> for
+// the no-JS fallback. The auto-submit is same-origin (page served from our
+// origin, posts to /login/verify) so the POST Origin/CSRF check still passes.
+// This is a deliberate, contained exception to zero-JS, like the homepage copy
+// button.
+function signingInPage(token: string, next: string): string {
   return manPage({
-    title: "justhtml.sh — confirm sign in",
+    title: "justhtml.sh — signing you in",
     bodyHtml: `
-<h2>CONFIRM SIGN IN</h2>
-<div class="body"><pre>Click the button to finish signing in on this device.</pre></div>
+<h2>SIGNING YOU IN</h2>
+<div class="body"><pre>Signing you in…</pre></div>
 
-<h2>CONTINUE</h2>
-<div class="body">
-<form method="POST" action="/login/verify">
+<form id="verifyform" method="POST" action="/login/verify">
 <input type="hidden" name="token" value="${esc(token)}">
 <input type="hidden" name="next" value="${esc(next)}">
-<pre><button type="submit">sign in</button></pre>
+<noscript>
+<div class="body"><pre>Click the button to finish signing in on this device.
+<button type="submit">sign in</button></pre></div>
+</noscript>
 </form>
-</div>
+<script>document.getElementById('verifyform').submit();</script>
 
+<noscript>
 <div class="body"><pre>This link is single-use. If it's expired or already used you'll
 be asked to <a href="/login">request a new one</a>.</pre></div>
+</noscript>
 `,
   });
 }
@@ -58,8 +72,10 @@ will take you straight to where this link was headed.`
   });
 }
 
-// GET /login/verify?token=…&next=… — render the confirm page. Does NOT consume
-// the token (scanners/prefetchers fetch GETs and would burn a single-use link).
+// GET /login/verify?token=…&next=… — render the invisible auto-submit shim.
+// Does NOT consume the token (scanners/prefetchers fetch GETs and would burn a
+// single-use link); only the POST consumes. A token-less hit gets the dead-link
+// page (410) with no form/script, so we never auto-submit into an error.
 export function GET(req: Request): Response {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
@@ -72,7 +88,7 @@ export function GET(req: Request): Response {
   // next) → /docs").
   const next = loginLanding(url.searchParams.get("next"));
   if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
-  return htmlResponse(confirmPage(token, next));
+  return htmlResponse(signingInPage(token, next));
 }
 
 // POST /login/verify (form: token, next) — atomic single-use consume, mint
