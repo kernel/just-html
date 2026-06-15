@@ -70,9 +70,39 @@ async function am(path: string, init: RequestInit = {}) {
   return r.json() as Promise<any>;
 }
 
+// Every inbox we create is tracked here so the run can delete ALL of them on
+// every exit path (see cleanupInboxes / the finally in run()). A mid-run
+// assertion failure that throws used to leak the inboxes created so far; they
+// accumulate until AgentMail returns 403 "Inbox limit exceeded" and break future
+// runs. Tracking + finally cleanup makes leaks impossible regardless of outcome.
+const createdInboxes: string[] = [];
+
 async function createInbox(): Promise<string> {
   const inbox = await am("/inboxes", { method: "POST", body: "{}" });
-  return inbox.inbox_id as string;
+  const id = inbox.inbox_id as string;
+  createdInboxes.push(id);
+  return id;
+}
+
+// Best-effort delete of every inbox we created. Swallows individual delete
+// errors so one failed delete never masks the run's real result or leaks the
+// rest. Idempotent: clears the list so a double-call can't double-delete.
+async function cleanupInboxes(): Promise<void> {
+  const ids = createdInboxes.splice(0);
+  for (const id of ids) {
+    // Raw fetch (not am()): a successful DELETE returns 202 with an EMPTY body,
+    // which am()'s r.json() would throw on — that would log a spurious "failed"
+    // for a delete that actually worked. We only care about the HTTP status here.
+    try {
+      const r = await fetch(`${AM}/inboxes/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${AM_KEY}` },
+      });
+      if (!r.ok) console.log(`  (cleanup) delete inbox ${id} -> ${r.status}`);
+    } catch (e) {
+      console.log(`  (cleanup) failed to delete inbox ${id}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
 }
 
 // Poll an inbox until a message whose subject matches `subjectIncludes` arrives;
@@ -263,10 +293,29 @@ async function main() {
   await jh("/oauth2/revoke", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token: ownerKey }) });
   const afterRevoke = await jh("/api/v1/docs", { headers: { Authorization: `Bearer ${ownerKey}` } });
   check("revoked key is rejected (401)", afterRevoke.status === 401, `status ${afterRevoke.status}`);
+}
 
-  // --- Cleanup (best-effort; revoked key can't delete docs, so do it before? leave soft doc) ---
-  await am(`/inboxes/${encodeURIComponent(ownerInbox)}`, { method: "DELETE" }).catch(() => {});
-  await am(`/inboxes/${encodeURIComponent(granteeInbox)}`, { method: "DELETE" }).catch(() => {});
+// Orchestrate the run so inbox cleanup is GUARANTEED on every exit path. main()
+// only runs the assertions (it no longer deletes inboxes, prints the summary, or
+// sets the exit code). Whether main() resolves or throws, the finally deletes all
+// tracked inboxes best-effort; only then do we print the summary and set the exit
+// code (still exit 1 on any failed check OR a thrown error, AFTER cleanup; exit 0
+// only when nothing threw and every check passed). The owner doc was already
+// soft-deleted inside main() (Phase 6), so that behaviour is unchanged.
+async function run() {
+  let threw: unknown;
+  try {
+    await main();
+  } catch (e) {
+    threw = e;
+  } finally {
+    await cleanupInboxes();
+  }
+
+  if (threw) {
+    console.error("\nE2E ERROR:", threw instanceof Error ? threw.message : threw);
+    process.exit(1);
+  }
 
   console.log(`\n${passed} checks passed, ${failures.length} failed.`);
   if (failures.length) {
@@ -276,7 +325,4 @@ async function main() {
   console.log("E2E PASSED ✅");
 }
 
-main().catch((e) => {
-  console.error("\nE2E ERROR:", e instanceof Error ? e.message : e);
-  process.exit(1);
-});
+run();
