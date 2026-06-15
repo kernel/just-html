@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<!--
+  VARIANT A — right drawer.
+
+  MAPS TO PRODUCTION: this is the CommentsShell.tsx layout. The .jh-bar is the
+  chrome bar; .jh-docwrap holds the SANDBOXED, origin-less iframe (the user
+  HTML + injected overlay); .jh-rail is the variant-B google-docs rail. The
+  rail OVERLAY/DRAWER lives in the SHELL, on top of the iframe — it can never
+  live inside the iframe (cross-origin, sandboxed). That is exactly why a
+  drawer-over-iframe works: the shell stacks the rail above the doc with z-index
+  + a scrim; the doc keeps full width underneath.
+
+  DESKTOP (>768px): side-by-side, as today. The "💬 N" button in the bar
+  COLLAPSES the rail (reclaim width) and re-opens it. Default = open.
+  MOBILE (<=768px): doc is FULL WIDTH; rail is OFF by default. "💬 N" slides a
+  full-height drawer in from the RIGHT over the doc, with a scrim + ✕ close.
+
+  TAP-A-HIGHLIGHT ON MOBILE: the iframe overlay posts jh:focus{id}. The shell
+  hears it, OPENS the drawer, and focuses that thread's card. So a highlight tap
+  is itself an open affordance — the founder's core ask.
+
+  ZERO COMMENTS: JH.total===0 → no rail, no button (handled in init); matches
+  production PlainShell (zero comments = zero chrome).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>git-restage(1) — justhtml.sh</title>
+<link rel="stylesheet" href="shell.css" />
+<style>
+  /* Default (desktop) two-pane. Collapsed state hides the rail entirely. */
+  .jh-stage[data-rail="closed"] .jh-rail { display: none; }
+
+  @media (max-width: 768px) {
+    /* MOBILE: doc full width; rail becomes a right drawer overlay. */
+    .jh-rail {
+      position: absolute; top: 0; right: 0; bottom: 0;
+      width: min(86vw, 340px);
+      transform: translateX(100%);
+      transition: transform .24s ease;
+      border-left: 1px solid #ccc;
+      box-shadow: -6px 0 24px rgba(0,0,0,.18);
+      z-index: 25;
+    }
+    .jh-stage[data-rail="open"] .jh-rail { transform: translateX(0); }
+    /* When closed on mobile we still keep it in the DOM but off-screen, so the
+       doc is genuinely full-width (the bug fix). */
+    .jh-stage[data-rail="closed"] .jh-rail { display: block; }
+    .jh-seltool { right: 8px; }
+  }
+  @media (min-width: 769px) { .jh-scrim { display: none; } }
+</style>
+</head>
+<body>
+  <div class="jh-bar">
+    <span class="jh-title">git-restage(1)</span>
+    <span class="jh-barmeta">
+      <button class="jh-commentbtn" id="toggle" aria-pressed="true">💬 <span id="cnt"></span></button>
+      <a href="#">history</a>
+      <span>made with <a href="#">justhtml.sh</a></span>
+    </span>
+  </div>
+
+  <div class="jh-stage" id="stage" data-rail="open">
+    <div class="jh-docwrap">
+      <iframe id="doc" src="doc.html" sandbox="allow-scripts" referrerpolicy="no-referrer" title="git-restage(1)"></iframe>
+      <div class="jh-seltool" id="seltool" hidden>
+        <button title="add comment">💬</button>
+        <button title="add reaction">😊</button>
+      </div>
+    </div>
+    <div class="jh-scrim" id="scrim"></div>
+    <aside class="jh-rail" id="rail"></aside>
+  </div>
+
+<script src="mock.js"></script>
+<script>
+  var stage = document.getElementById('stage');
+  var rail = document.getElementById('rail');
+  var scrim = document.getElementById('scrim');
+  var toggle = document.getElementById('toggle');
+  var seltool = document.getElementById('seltool');
+  document.getElementById('cnt').textContent = JH.count;
+
+  // ZERO COMMENTS guard.
+  if (JH.total === 0) { toggle.style.display = 'none'; rail.style.display = 'none'; }
+
+  function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+
+  function renderRail() {
+    JH.renderRail(rail, {
+      closeable: true,
+      onClose: closeRail,
+      onFocus: function (id) {
+        // rail card tap → scroll/highlight handled inside iframe overlay in prod
+        // (jh:focus key). Demo: no-op beyond the card focus mock.js already did.
+      },
+    });
+  }
+  function openRail() {
+    stage.setAttribute('data-rail', 'open');
+    toggle.setAttribute('aria-pressed', 'true');
+    if (isMobile()) scrim.setAttribute('data-open', '1');
+  }
+  function closeRail() {
+    stage.setAttribute('data-rail', 'closed');
+    toggle.setAttribute('aria-pressed', 'false');
+    scrim.removeAttribute('data-open');
+  }
+  function toggleRail() {
+    if (stage.getAttribute('data-rail') === 'open') closeRail(); else openRail();
+  }
+
+  renderRail();
+  toggle.addEventListener('click', toggleRail);
+  scrim.addEventListener('click', closeRail);
+
+  // Default state per breakpoint: desktop open, mobile closed.
+  function applyDefault() {
+    if (isMobile()) closeRail(); else openRail();
+  }
+  applyDefault();
+  window.matchMedia('(max-width: 768px)').addEventListener('change', applyDefault);
+
+  // iframe overlay messages.
+  window.addEventListener('message', function (ev) {
+    if (ev.source !== document.getElementById('doc').contentWindow) return;
+    var d = ev.data; if (!d || typeof d !== 'object') return;
+    if (d.type === 'jh:focus' && typeof d.id === 'number') {
+      openRail();              // tapping a highlight OPENS the drawer (mobile + desktop-if-collapsed)
+      JH.focusCard(rail, d.id);
+      seltool.hidden = true;
+    } else if (d.type === 'jh:selection') {
+      seltool.hidden = false;  // selection toolbar still works
+    } else if (d.type === 'jh:reactionToggle') {
+      openRail();
+    }
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<!--
+  index.html — side-by-side comparison of the four mobile comment-rail variants.
+
+  Each variant is shown in a PHONE-WIDTH (390px) iframe so the mobile collapsed
+  behavior is immediately visible (this is where the founder's bug lives). Each
+  also links to a full-width view to confirm the desktop side-by-side + collapse.
+
+  These are DEMOS for choosing a direction. They do not touch production app/ or
+  lib/ code. Nothing committed.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>justhtml.sh — mobile comment-rail variants</title>
+<style>
+  :root { color-scheme: light; --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  html, body { margin: 0; background: #f4f4f4; }
+  body { font-family: var(--mono); color: #111; padding: 28px 24px 80px; }
+  h1 { font-size: 18px; font-weight: 700; }
+  .lede { font-size: 13px; color: #555; max-width: 760px; line-height: 1.6; }
+  .lede code { background: #e8e8e8; padding: 0 4px; border-radius: 3px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr));
+    gap: 32px 28px; margin-top: 32px;
+  }
+  .card { display: flex; flex-direction: column; }
+  .card h2 { font-size: 14px; margin: 0 0 4px; }
+  .card .desc { font-size: 12px; color: #555; line-height: 1.55; margin: 0 0 12px; min-height: 56px; }
+  .phone {
+    width: 390px; height: 760px; max-width: 100%;
+    border: 10px solid #1a1a1a; border-radius: 30px; overflow: hidden;
+    box-shadow: 0 10px 40px rgba(0,0,0,.22); background: #fff;
+  }
+  .phone iframe { width: 390px; height: 740px; border: none; display: block; }
+  .links { margin-top: 10px; font-size: 12px; }
+  .links a { color: #1352c9; }
+  .note { font-size: 11px; color: #888; margin-top: 6px; max-width: 390px; }
+  .tip {
+    background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 14px 16px;
+    font-size: 12px; color: #444; line-height: 1.6; max-width: 760px; margin-top: 20px;
+  }
+  .tip b { color: #111; }
+</style>
+</head>
+<body>
+  <h1>justhtml.sh — comment rail on mobile · 4 variants</h1>
+  <p class="lede">
+    Fixing: on a phone the rail eats ~75% of the viewport, crushing the doc (sandboxed
+    iframe) into a ~90px one-word-per-line column. Every variant hides the rail by
+    default on mobile, keeps the doc full-width and readable, and exposes it via the
+    <code>💬 N</code> affordance in the chrome bar. Each desktop layout keeps the
+    current side-by-side and adds a collapse toggle. Phone frame = 390px so mobile
+    behavior shows immediately. Resize to <code>&gt;768px</code> (or open full) for
+    desktop.
+  </p>
+
+  <div class="tip">
+    <b>Try this in each frame:</b> the doc starts full-width with the rail hidden.
+    Tap <b>💬 N</b> in the bar to reveal the rail. Tap a <b>yellow highlight</b> inside
+    the document — it opens the rail focused on that thread (the core mobile
+    interaction). Tap the close <b>✕</b> / scrim / back to dismiss.
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+<script>
+  var VARIANTS = [
+    { id: 'a', label: 'A — right drawer',
+      desc: 'Mobile: doc full-width; 💬 N slides a full-height drawer in from the right over the doc, with scrim + ✕. Tapping a highlight opens it focused. Desktop: side-by-side + 💬 toggle collapses the rail.' },
+    { id: 'b', label: 'B — bottom sheet',
+      desc: 'Mobile: 💬 N raises a ~72vh bottom sheet with a drag handle; doc stays visible above it (keeps context). Native-feeling. Desktop: side-by-side + collapse.' },
+    { id: 'c', label: 'C — full-screen view',
+      desc: 'Mobile: bar becomes doc / 💬 N tabs; each fills the whole viewport when active (nothing cramped). Tapping a highlight switches to comments. Desktop: side-by-side + collapse.' },
+    { id: 'd', label: 'D — gutter + peek (synthesis)',
+      desc: 'Mobile: doc full-width + a thin 28px dot-gutter (marginalia, y-aligned to highlights). Tap a dot/highlight → single-thread peek (~42vh). 💬 N / “see all” → full sheet. Desktop: side-by-side + collapse.' },
+  ];
+  var grid = document.getElementById('grid');
+  VARIANTS.forEach(function (v) {
+    var el = document.createElement('div');
+    el.className = 'card';
+    el.innerHTML =
+      '<h2>' + v.label + '</h2>' +
+      '<p class="desc">' + v.desc + '</p>' +
+      '<div class="phone"><iframe src="variant-' + v.id + '.html" title="' + v.label + '"></iframe></div>' +
+      '<p class="links"><a href="variant-' + v.id + '.html" target="_blank">open full-width (desktop layout) ↗</a></p>' +
+      '<p class="note">Above = 390px phone frame (rail hidden by default). Full-width link shows the desktop side-by-side + collapse toggle.</p>';
+    grid.appendChild(el);
+  });
+</script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<!--
+  VARIANT C — full-screen comments view (tab swap).
+
+  MAPS TO PRODUCTION: same shell. .jh-docwrap = sandboxed origin-less iframe;
+  rail in the shell. On mobile, instead of overlaying, the shell SWAPS which
+  pane is visible: either the doc OR the rail fills the viewport. The chrome bar
+  becomes the tab switcher ("doc" / "💬 N"). Each surface gets the FULL width
+  when active — so both the doc AND the comment cards are maximally readable
+  (no 90px column, and no cramped overlay either).
+
+  DESKTOP (>768px): side-by-side, default open; "💬 N" collapses/re-opens the
+  rail. Tabs are hidden on desktop (the side-by-side already shows both).
+  MOBILE (<=768px): "doc" tab shows the iframe full width (default); "💬 N" tab
+  shows the rail full width with a "‹ back to doc" affordance.
+
+  TAP-A-HIGHLIGHT ON MOBILE: jh:focus{id} → switch to the comments tab and
+  scroll to the thread. Trade-off: you lose sight of the doc while reading the
+  thread (you context-switch fully), but each surface is never cramped. Best
+  when threads are long.
+
+  ZERO COMMENTS: no tab, doc shown plainly.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>git-restage(1) — justhtml.sh</title>
+<link rel="stylesheet" href="shell.css" />
+<style>
+  /* Tab switcher in the bar — only meaningful on mobile. */
+  .jh-tabs { display: none; gap: 0; }
+  .jh-tab {
+    font: inherit; font-size: 12px; border: 1px solid #ccc; background: #fafafa;
+    color: #111; padding: 2px 11px; cursor: pointer; border-radius: 0;
+  }
+  .jh-tab:first-child { border-radius: 6px 0 0 6px; border-right: none; }
+  .jh-tab:last-child { border-radius: 0 6px 6px 0; }
+  .jh-tab[aria-selected="true"] { background: #111; color: #fff; border-color: #111; }
+
+  /* desktop collapse via the same toggle (shown on desktop only) */
+  .jh-stage[data-rail="closed"] .jh-rail { display: none; }
+  .jh-railback { display: none; }
+
+  @media (max-width: 768px) {
+    .jh-tabs { display: inline-flex; }
+    .jh-commentbtn { display: none; }      /* tabs replace the single button on mobile */
+    /* viewport swap: whichever pane matches data-view fills the screen */
+    .jh-stage[data-view="doc"] .jh-rail { display: none; }
+    .jh-stage[data-view="doc"] .jh-docwrap { display: block; }
+    .jh-stage[data-view="comments"] .jh-docwrap { display: none; }
+    .jh-stage[data-view="comments"] .jh-rail { display: block; width: 100%; border-left: none; }
+    .jh-railback {
+      display: block; cursor: pointer; color: #555; font-size: 12px;
+      padding: 7px 10px; border-bottom: 1px solid #eee; background: #f6f6f6;
+    }
+    .jh-seltool { right: 8px; }
+  }
+  @media (min-width: 769px) { .jh-scrim { display: none; } }
+</style>
+</head>
+<body>
+  <div class="jh-bar">
+    <span class="jh-title">git-restage(1)</span>
+    <span class="jh-barmeta">
+      <span class="jh-tabs" id="tabs">
+        <button class="jh-tab" id="tab-doc" aria-selected="true">doc</button>
+        <button class="jh-tab" id="tab-comments" aria-selected="false">💬 <span id="cnt2"></span></button>
+      </span>
+      <button class="jh-commentbtn" id="toggle" aria-pressed="true">💬 <span id="cnt"></span></button>
+      <a href="#">history</a>
+      <span>made with <a href="#">justhtml.sh</a></span>
+    </span>
+  </div>
+
+  <div class="jh-stage" id="stage" data-rail="open" data-view="doc">
+    <div class="jh-docwrap">
+      <iframe id="doc" src="doc.html" sandbox="allow-scripts" referrerpolicy="no-referrer" title="git-restage(1)"></iframe>
+      <div class="jh-seltool" id="seltool" hidden>
+        <button title="add comment">💬</button>
+        <button title="add reaction">😊</button>
+      </div>
+    </div>
+    <aside class="jh-rail" id="rail">
+      <div class="jh-railback" id="back">‹ back to doc</div>
+      <div id="railbody"></div>
+    </aside>
+  </div>
+
+<script src="mock.js"></script>
+<script>
+  var stage = document.getElementById('stage');
+  var rail = document.getElementById('rail');
+  var railbody = document.getElementById('railbody');
+  var toggle = document.getElementById('toggle');
+  var tabDoc = document.getElementById('tab-doc');
+  var tabComments = document.getElementById('tab-comments');
+  var back = document.getElementById('back');
+  var seltool = document.getElementById('seltool');
+  document.getElementById('cnt').textContent = JH.count;
+  document.getElementById('cnt2').textContent = JH.count;
+
+  if (JH.total === 0) {
+    toggle.style.display = 'none';
+    document.getElementById('tabs').style.display = 'none';
+    rail.style.display = 'none';
+  }
+
+  function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+  JH.renderRail(railbody, { closeable: false });
+
+  function showView(v) {
+    stage.setAttribute('data-view', v);
+    tabDoc.setAttribute('aria-selected', v === 'doc');
+    tabComments.setAttribute('aria-selected', v === 'comments');
+  }
+  // desktop collapse
+  function openRail() { stage.setAttribute('data-rail', 'open'); toggle.setAttribute('aria-pressed', 'true'); }
+  function closeRail() { stage.setAttribute('data-rail', 'closed'); toggle.setAttribute('aria-pressed', 'false'); }
+  toggle.addEventListener('click', function () { stage.getAttribute('data-rail') === 'open' ? closeRail() : openRail(); });
+
+  tabDoc.addEventListener('click', function () { showView('doc'); });
+  tabComments.addEventListener('click', function () { showView('comments'); });
+  back.addEventListener('click', function () { showView('doc'); });
+
+  // default: mobile shows doc; desktop side-by-side
+  showView('doc');
+
+  window.addEventListener('message', function (ev) {
+    if (ev.source !== document.getElementById('doc').contentWindow) return;
+    var d = ev.data; if (!d || typeof d !== 'object') return;
+    if (d.type === 'jh:focus' && typeof d.id === 'number') {
+      if (isMobile()) showView('comments'); else openRail();
+      JH.focusCard(railbody, d.id); seltool.hidden = true;
+    } else if (d.type === 'jh:selection') {
+      seltool.hidden = false;
+    } else if (d.type === 'jh:reactionToggle') {
+      if (isMobile()) showView('comments'); else openRail();
+    }
+  });
+</script>
+</body>
+</html>

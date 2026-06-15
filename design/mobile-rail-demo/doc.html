@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<!--
+  doc.html — the MOCK user document.
+
+  In production this is the user's own HTML rendered in an ORIGIN-LESS,
+  sandboxed iframe (sandbox="allow-scripts", referrerPolicy=no-referrer) at
+  /d/:slug/raw?overlay=1. The justhtml.sh overlay (lib/docs/overlay.ts) is
+  injected into THIS iframe; it paints highlights and posts jh:* messages
+  (jh:positions, jh:focus, jh:selection ...) up to the shell. The shell owns
+  the comment rail and lays it OVER or BESIDE this iframe.
+
+  For the demo, this file fakes the overlay's two jobs that matter for the
+  mobile question:
+    1. paint highlights on anchored spans;
+    2. when a highlight is TAPPED, postMessage({type:'jh:focus', id}) to the
+       parent shell — which on mobile must OPEN the rail/sheet/view focused on
+       that thread. (This is the central mobile interaction the founder cares
+       about: "tapping a highlight opens its thread".)
+  We keep the message names identical to the real protocol so the mapping is
+  obvious.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>git-restage(1)</title>
+<style>
+  /* ALWAYS light mode. man-page flavor: serif body, mono headings. */
+  :root { color-scheme: light; }
+  html, body { background: #fff; margin: 0; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    color: #1a1a1a;
+    line-height: 1.6;
+    font-size: 16px;
+    padding: 28px 34px 120px;
+    max-width: 760px;
+  }
+  h1, h2 {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    letter-spacing: .02em;
+  }
+  h1 { font-size: 20px; border-bottom: 1px solid #ddd; padding-bottom: 8px; }
+  h2 { font-size: 14px; color: #444; margin-top: 28px; text-transform: uppercase; }
+  pre, code {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13.5px;
+  }
+  pre {
+    background: #f6f6f6; border: 1px solid #eee; border-radius: 6px;
+    padding: 10px 12px; overflow-x: auto; line-height: 1.5;
+  }
+  code { background: #f2f2f2; border-radius: 3px; padding: 0 3px; }
+  p { margin: 12px 0; }
+  .muted { color: #777; }
+
+  /* --- fake overlay highlight (mimics lib/docs/overlay.ts paint) --- */
+  .jh-hl {
+    background: rgba(255, 214, 0, .34);
+    box-shadow: inset 0 -1px 0 rgba(180,140,0,.5);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .jh-hl[data-focused="1"] { background: rgba(255, 184, 0, .62); }
+  .jh-reaction-chip {
+    font-family: ui-monospace, monospace;
+    font-size: 12px;
+    border: 1px solid #e0e0e0;
+    background: #fafafa;
+    border-radius: 9px;
+    padding: 0 6px;
+    margin-left: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+  <h1>GIT-RESTAGE(1)</h1>
+
+  <h2>Name</h2>
+  <p>git-restage — move changes back to the staging area without losing your working tree</p>
+
+  <h2>Synopsis</h2>
+  <pre>git restage [&lt;pathspec&gt;...]
+git restage --all
+git restage --interactive</pre>
+
+  <h2>Description</h2>
+  <p>
+    The <code>git restage</code> command re-adds previously unstaged changes to the
+    index. <span class="jh-hl" data-id="1">Unlike <code>git add</code>, it preserves the
+    original staging timestamps</span>, which downstream tools rely on for incremental
+    builds. Paths already staged are left untouched.
+  </p>
+  <p>
+    When invoked with no arguments, only files that were staged earlier in the
+    current session are restaged. <span class="jh-hl" data-id="2">Use <code>--all</code> to
+    restage every tracked file with modifications</span><span class="jh-reaction-chip" data-sig="rx1">🚀 2</span>,
+    including those never previously added.
+  </p>
+
+  <h2>Options</h2>
+  <p>
+    <code>--interactive</code>, <code>-i</code><br />
+    Opens the interactive restaging session. <span class="jh-hl" data-id="3">This mode is
+    not supported in detached HEAD state</span> and will exit with status 128.
+  </p>
+
+  <h2>Examples</h2>
+  <pre>$ git restage src/
+$ git restage --all
+$ git restage -i</pre>
+
+  <h2>See Also</h2>
+  <p class="muted">git-add(1), git-reset(1), git-stash(1)</p>
+
+<script>
+  // Fake overlay → shell messaging. Real overlay does much more (segment
+  // splitting, depth shading, selection); we only need TAP→focus + a position
+  // report for the demo.
+  function postFocus(id) {
+    parent.postMessage({ type: 'jh:focus', id: id }, '*');
+  }
+  document.querySelectorAll('.jh-hl').forEach(function (el) {
+    el.addEventListener('click', function () {
+      var id = parseInt(el.getAttribute('data-id'), 10);
+      document.querySelectorAll('.jh-hl').forEach(function (o) { o.removeAttribute('data-focused'); });
+      el.setAttribute('data-focused', '1');
+      postFocus(id);
+    });
+  });
+  document.querySelectorAll('.jh-reaction-chip').forEach(function (el) {
+    el.addEventListener('click', function () {
+      parent.postMessage({ type: 'jh:reactionToggle', sig: el.getAttribute('data-sig') }, '*');
+    });
+  });
+  // Report highlight y-positions so the shell can y-align cards (jh:positions).
+  function reportPositions() {
+    var pos = {};
+    document.querySelectorAll('.jh-hl').forEach(function (el) {
+      pos[el.getAttribute('data-id')] = el.getBoundingClientRect().top + (window.scrollY || 0);
+    });
+    parent.postMessage({ type: 'jh:positions', positions: pos }, '*');
+  }
+  // Fake selection → shell (selection toolbar). Tap-and-hold or text select.
+  document.addEventListener('mouseup', function () {
+    var sel = window.getSelection();
+    if (sel && sel.toString().trim().length > 2) {
+      parent.postMessage({ type: 'jh:selection', exact: sel.toString().trim().slice(0, 60) }, '*');
+    }
+  });
+  window.addEventListener('load', reportPositions);
+  window.addEventListener('resize', reportPositions);
+  parent.postMessage({ type: 'jh:ready' }, '*');
+</script>
+</body>
+</html>

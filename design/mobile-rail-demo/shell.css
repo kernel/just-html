@@ -1,0 +1,150 @@
+/*
+  shell.css — shared chrome + rail-card styling lifted from CommentsShell.tsx.
+  ALWAYS light mode, monospace UI chrome, Georgia comment bodies. No
+  prefers-color-scheme, no dark. Each variant.html adds its own RESPONSIVE
+  layout rules on top (the actual fork).
+
+  Maps to production:
+    .jh-bar      <- barStyle        (CommentsShell.tsx ~888)
+    .jh-stage    <- stageStyle      (~901)
+    .jh-rail     <- railStyle       (~907)
+    .jh-railhead <- railHeadStyle   (~917)
+    .jh-card     <- Card            (~697)
+    .jh-seltool  <- seltoolStyle    (~954)
+*/
+
+:root {
+  color-scheme: light;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  --bar-h: 2.4rem;
+  --rail-w: 320px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #fff; }
+body { font-family: var(--mono); color: #111; }
+
+/* ---- chrome bar ---- */
+.jh-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: var(--bar-h);
+  padding: 0 1rem;
+  font-family: var(--mono);
+  font-size: 13px;
+  border-bottom: 1px solid #ccc;
+  color: #111;
+  background: #fff;
+  position: relative;
+  z-index: 40;
+}
+.jh-bar .jh-title {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-weight: 700;
+}
+.jh-bar .jh-barmeta {
+  flex-shrink: 0; padding-left: 1rem;
+  display: flex; gap: 1rem; align-items: center; color: #666;
+}
+.jh-bar a { color: #666; text-decoration: none; }
+.jh-bar a:hover { text-decoration: underline; }
+
+/* The comment-count toggle that lives in the bar. This is the open
+   affordance. On mobile it is the ONLY way to reach the rail. */
+.jh-commentbtn {
+  font: inherit;
+  font-size: 12px;
+  display: inline-flex; align-items: center; gap: 5px;
+  border: 1px solid #ccc;
+  background: #fafafa;
+  color: #111;
+  border-radius: 6px;
+  padding: 2px 9px;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.jh-commentbtn:hover { background: #f0f0f0; }
+.jh-commentbtn[aria-pressed="true"] { background: #111; color: #fff; border-color: #111; }
+
+/* ---- stage (two-pane) ---- */
+.jh-stage {
+  display: flex;
+  height: calc(100% - var(--bar-h));
+  background: #fff;
+  position: relative;
+}
+.jh-docwrap { flex: 1; min-width: 0; position: relative; }
+.jh-docwrap iframe {
+  border: none; width: 100%; height: 100%; display: block; background: #fff;
+}
+
+/* ---- rail ---- */
+.jh-rail {
+  width: var(--rail-w);
+  flex-shrink: 0;
+  border-left: 1px solid #e2e2e2;
+  background: #fbfbfb;
+  position: relative;
+  overflow-y: auto;
+  font-family: var(--mono);
+}
+.jh-railhead {
+  position: sticky; top: 0;
+  background: #fbfbfb;
+  border-bottom: 1px solid #eee;
+  padding: 6px 10px;
+  font-size: 11px; color: #666;
+  display: flex; justify-content: space-between; align-items: center;
+  z-index: 5;
+}
+.jh-railhead .jh-resolvetoggle { cursor: pointer; color: #888; }
+.jh-railhead .jh-railclose {
+  cursor: pointer; color: #888; font-size: 15px; line-height: 1;
+  border: none; background: transparent; padding: 0 2px;
+}
+.jh-docreactions {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 5px 10px; border-bottom: 1px solid #eee; background: #fbfbfb;
+  font-size: 10.5px; color: #999;
+}
+.jh-cards { position: relative; padding: 6px 8px 60px; }
+
+/* ---- card ---- */
+.jh-card {
+  background: #fff; border: 1px solid #e2e2e2; border-radius: 7px;
+  margin-bottom: 7px; font-size: 12px; cursor: pointer; overflow: hidden;
+}
+.jh-card[data-focused="1"] { border-color: #111; box-shadow: 0 3px 14px rgba(0,0,0,.18); }
+.jh-card[data-orphan="1"] { border-style: dashed; border-color: #d99; }
+.jh-card .row { display: flex; gap: 7px; padding: 8px 9px; }
+.jh-card img.avatar { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; }
+.jh-card .who { font-weight: 700; color: #222; }
+.jh-card .when { color: #999; font-size: 10.5px; }
+.jh-card .body { color: #222; margin-top: 2px; font-family: Georgia, serif; font-size: 13px; line-height: 1.45; }
+.jh-card .hint { font-size: 10.5px; color: #aaa; padding: 0 9px 8px; }
+.jh-chip {
+  font-size: 11px; border: 1px solid #e0e0e0; border-radius: 9px;
+  padding: 0 6px; background: #fafafa; display: inline-block; margin-top: 5px; margin-right: 4px;
+}
+.badge { display:inline-block; font-size:9.5px; padding:0 5px; border-radius:8px; letter-spacing:.03em; }
+.badge.res { background:#eaf3ec; color:#5a7a64; }
+
+/* ---- selection toolbar (dark pill) ---- */
+.jh-seltool {
+  position: absolute; right: 8px; top: 80px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: #111; border-radius: 7px; padding: 4px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.3); z-index: 30;
+}
+.jh-seltool button {
+  width: 30px; height: 30px; border: none; background: transparent;
+  color: #fff; font-size: 15px; cursor: pointer; border-radius: 5px;
+}
+.jh-seltool button:hover { background: #333; }
+
+/* ---- scrim shared by drawer / sheet ---- */
+.jh-scrim {
+  position: absolute; inset: 0; background: rgba(0,0,0,.32);
+  z-index: 20; opacity: 0; pointer-events: none; transition: opacity .2s ease;
+}
+.jh-scrim[data-open="1"] { opacity: 1; pointer-events: auto; }

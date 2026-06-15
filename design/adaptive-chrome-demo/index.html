@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>justhtml.sh — Full Adaptive Chrome (demo)</title>
+<style>
+  :root {
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: var(--mono);
+    background: #ececec;
+    color: #111;
+    padding: 28px 28px 120px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { font-size: 12.5px; color: #555; margin: 0 0 22px; max-width: 90ch; line-height: 1.55; }
+  .legend { font-size: 12px; color: #444; background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin: 0 0 26px; max-width: 110ch; line-height: 1.6; }
+  .legend b { color: #111; }
+  .legend code { background: #f3f3f3; padding: 1px 5px; border-radius: 4px; }
+
+  .group-head { font-size: 14px; font-weight: 700; margin: 34px 0 6px; padding-bottom: 4px; border-bottom: 2px solid #111; }
+  .group-note { font-size: 12px; color: #555; margin: 0 0 16px; max-width: 100ch; line-height: 1.55; }
+
+  .row { display: flex; flex-wrap: wrap; gap: 26px; align-items: flex-start; }
+
+  .demo { margin-bottom: 14px; }
+  .demo-label { font-size: 12px; font-weight: 700; margin: 0 0 6px; }
+  .demo-label .inputs { font-weight: 400; color: #777; }
+
+  /* The framed "browser" — a fixed-size desktop frame and a mobile frame. */
+  .frame {
+    border: 1px solid #bbb;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 8px 30px rgba(0,0,0,.12);
+    background: #fff;
+  }
+  .frame.desktop { width: 940px; height: 560px; }
+  .frame.mobile  { width: 360px; height: 620px; }
+
+  /* ---- generic chrome skeleton (values come from CSS vars set per-theme) ---- */
+  .vw { display: flex; flex-direction: column; width: 100%; height: 100%; font-family: var(--mono); }
+
+  .bar {
+    display: flex; justify-content: space-between; align-items: center;
+    height: 2.4rem; flex-shrink: 0; padding: 0 1.1rem;
+    font-size: 13px;
+    border-bottom: 1px solid var(--bar-border);
+    color: var(--bar-fg);
+    background: var(--bar-bg);
+  }
+  .bar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; color: var(--bar-fg); }
+  .bar .right { flex-shrink: 0; padding-left: 1.1rem; display: flex; gap: 1rem; align-items: center; color: var(--bar-muted); font-size: 12.5px; }
+  .bar .right a { color: var(--bar-muted); text-decoration: none; }
+  .bar .right a:hover { text-decoration: underline; }
+
+  .toggle {
+    font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid var(--tog-border); background: var(--tog-bg); color: var(--tog-fg);
+    border-radius: 6px; padding: 2px 9px; cursor: pointer; line-height: 1.6;
+  }
+  .toggle.on { border-color: var(--tog-on-border); background: var(--tog-on-bg); color: var(--tog-on-fg); }
+
+  .stage { display: flex; flex: 1; min-height: 0; background: var(--stage-bg); position: relative; }
+
+  /* the mock document (a styled div standing in for the iframe) */
+  .doc {
+    flex: 1; min-width: 0; overflow-y: auto; position: relative;
+    background: var(--doc-bg); color: var(--doc-fg);
+    padding: 26px 34px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.7;
+  }
+  .doc h2 { font-size: 16px; margin: 0 0 12px; color: var(--doc-head); }
+  .doc p { margin: 0 0 13px; }
+  .doc a { color: var(--doc-link); }
+  .doc .hl { background: var(--hl-bg); color: var(--hl-fg); border-radius: 2px; box-shadow: 0 0 0 1px var(--hl-ring) inset; padding: 0 1px; cursor: pointer; }
+  .doc code { background: var(--doc-code); padding: 1px 5px; border-radius: 4px; }
+
+  /* selection toolbar floating over the doc */
+  .seltool {
+    position: absolute; right: 12px; top: 92px; display: flex; flex-direction: column; gap: 2px;
+    background: var(--sel-bg); border: 1px solid var(--sel-border); border-radius: 7px; padding: 4px;
+    box-shadow: 0 4px 14px var(--sel-shadow); z-index: 30;
+  }
+  .seltool button { width: 30px; height: 30px; border: none; background: transparent; color: var(--sel-fg); font-size: 15px; cursor: pointer; border-radius: 5px; }
+  .seltool button:hover { background: var(--sel-hover); }
+
+  /* comment rail */
+  .rail {
+    width: 318px; flex-shrink: 0; border-left: 1px solid var(--rail-border);
+    background: var(--rail-bg); position: relative; overflow-y: auto; font-family: var(--mono);
+  }
+  .rail-head {
+    position: sticky; top: 0; background: var(--rail-bg); border-bottom: 1px solid var(--rail-line);
+    padding: 6px 10px; font-size: 11px; color: var(--rail-muted);
+    display: flex; justify-content: space-between; align-items: center; z-index: 5;
+  }
+  .rail-head .act { cursor: pointer; color: var(--rail-muted); }
+  .docrx { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 5px 10px; border-bottom: 1px solid var(--rail-line); background: var(--rail-bg); }
+  .docrx .lbl { color: var(--rail-faint); font-size: 10.5px; margin-right: 2px; }
+  .signin { padding: 8px 10px; font-size: 12px; color: var(--rail-muted); border-bottom: 1px solid var(--rail-line); }
+  .signin a { color: var(--doc-link); }
+
+  .cards { position: relative; padding: 6px 8px 40px; }
+
+  .card {
+    background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 7px;
+    margin-bottom: 7px; font-size: 12px; overflow: hidden; box-shadow: var(--card-shadow);
+  }
+  .card.pinned { border-color: var(--card-pin-border); box-shadow: var(--card-pin-shadow); }
+  .card.orphaned { border: 1px dashed var(--card-orphan-border); }
+  .card .body-row { display: flex; gap: 7px; padding: 8px 9px; }
+  .card .avatar { width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; border: 1px solid var(--avatar-ring); background: var(--avatar-bg); }
+  .card .author { font-weight: 700; color: var(--card-fg); }
+  .card .time { color: var(--card-muted); font-size: 10.5px; }
+  .card .text { color: var(--card-fg); margin-top: 2px; font-family: Georgia, serif; font-size: 13px; line-height: 1.45; }
+  .card .replies-meta { padding: 0 9px 6px; color: var(--card-muted); font-size: 10.5px; }
+  .card .thread { border-top: 1px solid var(--card-line); }
+  .card .reply {
+    padding: 7px 9px 7px 26px; border-top: 1px solid var(--card-line2); background: var(--reply-bg);
+    display: flex; gap: 6px;
+  }
+  .card .reply .avatar { width: 20px; height: 20px; }
+  .card .actions { display: flex; gap: 10px; padding: 6px 9px; font-size: 11px; color: var(--card-muted); border-top: 1px solid var(--card-line2); }
+  .card .actions span { cursor: pointer; }
+  .card .composer { padding: 7px 9px; border-top: 1px solid var(--rail-line); background: var(--composer-bg); }
+  .card .composer textarea {
+    width: 100%; border: 1px solid var(--input-border); border-radius: 4px; font-family: var(--mono);
+    font-size: 12px; padding: 5px; resize: vertical; min-height: 34px; background: var(--input-bg); color: var(--card-fg);
+  }
+  .card .composer .send { font-family: var(--mono); font-size: 12px; border: 1px solid var(--btn-border); background: var(--btn-bg); color: var(--btn-fg); border-radius: 4px; padding: 3px 11px; cursor: pointer; float: right; margin-top: 5px; }
+  .card .hint { font-size: 10.5px; color: var(--card-faint); padding: 0 9px 8px; }
+
+  .rx { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+  .chip { font-size: 11px; border: 1px solid var(--chip-border); border-radius: 9px; padding: 0 6px; background: var(--chip-bg); color: var(--card-fg); cursor: pointer; }
+  .chip.mine { border-color: var(--chip-mine-border); background: var(--chip-mine-bg); color: var(--chip-mine-fg); }
+  .addrx { font-size: 11px; color: var(--card-muted); cursor: pointer; border: 1px solid var(--chip-border); border-radius: 9px; padding: 0 6px; }
+
+  .badge { display: inline-block; font-size: 9.5px; padding: 0 5px; border-radius: 8px; letter-spacing: .03em; margin-left: 3px; vertical-align: middle; }
+  .badge.res { background: var(--badge-res-bg); color: var(--badge-res-fg); }
+  .badge.orp { background: var(--badge-orp-bg); color: var(--badge-orp-fg); }
+
+  /* mobile drawer + scrim */
+  .frame.mobile .stage .rail {
+    position: absolute; top: 0; right: 0; bottom: 0; width: 86%;
+    border-left: 1px solid var(--rail-border); box-shadow: -6px 0 24px var(--drawer-shadow); z-index: 25;
+  }
+  .frame.mobile .scrim { position: absolute; inset: 0; background: var(--scrim-bg); z-index: 20; }
+  .scrim { display: none; }
+
+  .focusnote { font-size: 11.5px; color: #555; margin: 6px 0 0; max-width: 100ch; line-height: 1.5; }
+  .focusnote b { color: #111; }
+  .verdict { background: #111; color: #eee; border-radius: 10px; padding: 18px 22px; margin: 40px 0 0; max-width: 110ch; line-height: 1.6; font-size: 12.5px; }
+  .verdict h2 { color: #fff; margin: 0 0 10px; font-size: 15px; }
+  .verdict code { background: #333; color: #fff; padding: 1px 5px; border-radius: 4px; }
+  .pill { display: inline-block; font-size: 10px; background: #2b2b2b; color: #ccc; border-radius: 20px; padding: 2px 8px; margin-left: 6px; }
+</style>
+</head>
+<body>
+
+<h1>Full Adaptive Chrome — justhtml.sh viewer</h1>
+<p class="sub">
+  When a document is dark-themed, the ENTIRE chrome (top bar AND the comment rail/cards/badges/toolbar/drawer/links/💬 toggle/footer links)
+  becomes dark and reads as a seamless part of the document. Light docs keep today's exact light chrome (no regression).
+  The doc is mocked as a styled div; every chrome surface below reproduces the real <code>CommentsShell.tsx</code> / <code>PlainShell.tsx</code> visuals.
+</p>
+
+<div class="legend">
+  <b>What each variant does</b> &nbsp;•&nbsp;
+  <b>BEFORE</b>: dark doc, today's all-light chrome (the clash). &nbsp;
+  <b>A — Exact match</b>: chrome bg = doc bg, cards = doc bg lightened ~7%, hairline borders, text = doc text. Literal continuation. &nbsp;
+  <b>B — Elevated dark UI</b>: deliberate elevation steps (bar &gt; doc, cards &gt; bar) — a crafted dark app. &nbsp;
+  <b>C — Match + accent</b>: like A plus the doc's link/heading accent on toggle/links/focus rings/chips. &nbsp;
+  <b>D — Synthesis</b>: A's seamlessness + B's one elevation step for cards + C's accent, tuned. &nbsp;
+  Each row shows two dark backgrounds: <code>#0d1117</code> (near-black) and <code>#1e1e2e</code> (tinted). The rail is OPEN with real cards.
+</div>
+
+<div id="app"></div>
+
+<div class="verdict" id="verdict"></div>
+
+<script>
+/* ===========================================================================
+   PALETTE DERIVATION
+   Each variant derives its full chrome palette from a small set of sampled
+   inputs. This mirrors what the real implementation could compute from a few
+   getComputedStyle reads inside the iframe (body bg, body color, link color).
+   =========================================================================== */
+
+function hexToRgb(h){ h=h.replace('#',''); if(h.length===3)h=h.split('').map(c=>c+c).join(''); return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)]; }
+function rgbToHex(r){ return '#'+r.map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join(''); }
+function relLum(h){ const c=hexToRgb(h).map(v=>{v/=255; return v<=0.03928? v/12.92 : Math.pow((v+0.055)/1.055,2.4);}); return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2]; }
+function isDark(bg){ return relLum(bg) < 0.4; }
+function contrast(a,b){ const l1=relLum(a),l2=relLum(b); const hi=Math.max(l1,l2),lo=Math.min(l1,l2); return (hi+0.05)/(lo+0.05); }
+// lighten toward white (dark bg) or darken toward black (light bg) by t (0..1)
+function lift(h,t){ const [r,g,b]=hexToRgb(h); const target = isDark(h)?255:0; return rgbToHex([r+(target-r)*t,g+(target-g)*t,b+(target-b)*t]); }
+function mix(a,b,t){ const A=hexToRgb(a),B=hexToRgb(b); return rgbToHex([A[0]+(B[0]-A[0])*t,A[1]+(B[1]-A[1])*t,A[2]+(B[2]-A[2])*t]); }
+function rgba(h,a){ const [r,g,b]=hexToRgb(h); return `rgba(${r},${g},${b},${a})`; }
+// ensure a foreground meets a contrast target against bg, nudging toward white/black
+function ensure(fg,bg,target){ let c=fg; let i=0; while(contrast(c,bg)<target && i<24){ c=lift(c, 0.06); i++; } return c; }
+
+/* The actual document inputs we sample. */
+const DOC_NEARBLACK = { bg:'#0d1117', fg:'#c9d1d9', head:'#e6edf3', link:'#58a6ff', code:'#161b22' }; // GitHub-dark-ish
+const DOC_TINTED    = { bg:'#1e1e2e', fg:'#cdd6f4', head:'#f5e0dc', link:'#89b4fa', code:'#313244' }; // Catppuccin-ish
+const DOC_LIGHT     = { bg:'#ffffff', fg:'#111111', head:'#111111', link:'#0b62d6', code:'#f3f3f3' }; // man-page
+
+/* ---------------------------------------------------------------------------
+   THEME BUILDERS — return a flat object of CSS-var values for the skeleton.
+   Each declares which INPUTS it consumed (shown in the UI).
+   --------------------------------------------------------------------------- */
+
+// Today's real light chrome, verbatim from the source. Used for BEFORE (forced
+// onto a dark doc → the clash) and for the no-regression light proof.
+function themeLightChrome(doc){
+  return {
+    inputs: 'fixed (none)',
+    '--bar-bg':'#fff','--bar-border':'#ccc','--bar-fg':'#111','--bar-muted':'#666',
+    '--tog-border':'#ccc','--tog-bg':'#fafafa','--tog-fg':'#111','--tog-on-border':'#111','--tog-on-bg':'#111','--tog-on-fg':'#fff',
+    '--stage-bg':'#fff',
+    '--doc-bg':doc.bg,'--doc-fg':doc.fg,'--doc-head':doc.head,'--doc-link':doc.link,'--doc-code':doc.code,
+    '--hl-bg':'#fff3a0','--hl-fg':'inherit','--hl-ring':'#f1c40f',
+    '--sel-bg':'#111','--sel-border':'#111','--sel-fg':'#fff','--sel-shadow':'rgba(0,0,0,.3)','--sel-hover':'#333',
+    '--rail-bg':'#fbfbfb','--rail-border':'#e2e2e2','--rail-line':'#eee','--rail-muted':'#666','--rail-faint':'#999',
+    '--card-bg':'#fff','--card-border':'#e2e2e2','--card-shadow':'none','--card-pin-border':'#111','--card-pin-shadow':'0 3px 14px rgba(0,0,0,.18)','--card-orphan-border':'#d99',
+    '--card-fg':'#222','--card-muted':'#999','--card-faint':'#aaa','--card-line':'#f1f1f1','--card-line2':'#f6f6f6',
+    '--avatar-ring':'transparent','--avatar-bg':'#ddd','--reply-bg':'#fcfcfc','--composer-bg':'#fafafa',
+    '--input-border':'#d4d4d4','--input-bg':'#fff','--btn-border':'#111','--btn-bg':'#111','--btn-fg':'#fff',
+    '--chip-border':'#e0e0e0','--chip-bg':'#fafafa','--chip-mine-border':'#111','--chip-mine-bg':'#111','--chip-mine-fg':'#fff',
+    '--badge-res-bg':'#eaf3ec','--badge-res-fg':'#5a7a64','--badge-orp-bg':'#fbecec','--badge-orp-fg':'#b04a4a',
+    '--scrim-bg':'rgba(0,0,0,.32)','--drawer-shadow':'rgba(0,0,0,.18)',
+  };
+}
+
+// Shared dark helpers: legible highlight, avatars, scrim.
+function darkCommon(doc, accent){
+  const bg = doc.bg;
+  return {
+    // Yellow highlight → translucent warm wash + warm ring, legible on dark, text stays doc-fg.
+    '--hl-bg': rgba('#f1c40f', 0.20), '--hl-fg':'inherit', '--hl-ring': rgba('#f1c40f', 0.55),
+    // identicon avatars sit on a tinted disc with a hairline ring so they don't float.
+    '--avatar-ring': rgba(doc.fg, 0.18), '--avatar-bg': lift(bg, 0.14),
+    '--scrim-bg':'rgba(0,0,0,.55)','--drawer-shadow':'rgba(0,0,0,.6)',
+    '--doc-bg':doc.bg,'--doc-fg':doc.fg,'--doc-head':doc.head,'--doc-link':doc.link,'--doc-code':doc.code,
+  };
+}
+
+// VARIANT A — EXACT MATCH. Inputs: bg + text. Chrome bg == doc bg; cards lifted ~7%.
+function themeA(doc){
+  const bg = doc.bg, fg = ensure(doc.fg, bg, 4.5);
+  const card = lift(bg, 0.07);
+  const muted = rgba(fg, 0.6);
+  const link = doc.link; // A just reuses doc text-ish for chrome; keep doc link in doc only
+  return Object.assign({ inputs:'bg + text' }, darkCommon(doc), {
+    '--bar-bg':bg,'--bar-border':rgba(fg,0.14),'--bar-fg':fg,'--bar-muted':muted,
+    '--tog-border':rgba(fg,0.22),'--tog-bg':lift(bg,0.05),'--tog-fg':fg,'--tog-on-border':fg,'--tog-on-bg':fg,'--tog-on-fg':bg,
+    '--stage-bg':bg,
+    '--sel-bg':lift(bg,0.10),'--sel-border':rgba(fg,0.2),'--sel-fg':fg,'--sel-shadow':'rgba(0,0,0,.5)','--sel-hover':rgba(fg,0.12),
+    '--rail-bg':bg,'--rail-border':rgba(fg,0.14),'--rail-line':rgba(fg,0.10),'--rail-muted':muted,'--rail-faint':rgba(fg,0.45),
+    '--card-bg':card,'--card-border':rgba(fg,0.13),'--card-shadow':'none','--card-pin-border':fg,'--card-pin-shadow':'0 3px 14px rgba(0,0,0,.5)','--card-orphan-border':rgba('#f1948a',0.6),
+    '--card-fg':fg,'--card-muted':muted,'--card-faint':rgba(fg,0.4),'--card-line':rgba(fg,0.08),'--card-line2':rgba(fg,0.06),
+    '--reply-bg':lift(bg,0.04),'--composer-bg':lift(bg,0.04),
+    '--input-border':rgba(fg,0.22),'--input-bg':lift(bg,0.03),'--btn-border':fg,'--btn-bg':fg,'--btn-fg':bg,
+    '--chip-border':rgba(fg,0.18),'--chip-bg':lift(bg,0.10),'--chip-mine-border':fg,'--chip-mine-bg':rgba(fg,0.16),'--chip-mine-fg':fg,
+    '--badge-res-bg':rgba('#5fb37a',0.18),'--badge-res-fg':'#8fdca8','--badge-orp-bg':rgba('#e06c6c',0.18),'--badge-orp-fg':'#f1948a',
+  });
+}
+
+// VARIANT B — ELEVATED DARK UI. Inputs: bg + text. Deliberate elevation steps.
+function themeB(doc){
+  const bg = doc.bg, fg = ensure(doc.fg, bg, 4.5);
+  const bar  = lift(bg, 0.05);   // bar slightly lighter than doc
+  const rail = lift(bg, 0.04);
+  const card = lift(bg, 0.10);   // cards lighter still
+  const muted = rgba(fg, 0.58);
+  return Object.assign({ inputs:'bg + text' }, darkCommon(doc), {
+    '--bar-bg':bar,'--bar-border':rgba(fg,0.10),'--bar-fg':fg,'--bar-muted':muted,
+    '--tog-border':rgba(fg,0.2),'--tog-bg':lift(bg,0.13),'--tog-fg':fg,'--tog-on-border':lift(bg,0.3),'--tog-on-bg':lift(bg,0.22),'--tog-on-fg':fg,
+    '--stage-bg':bg,
+    '--sel-bg':lift(bg,0.16),'--sel-border':rgba(fg,0.16),'--sel-fg':fg,'--sel-shadow':'rgba(0,0,0,.55)','--sel-hover':rgba(fg,0.14),
+    '--rail-bg':rail,'--rail-border':rgba(fg,0.10),'--rail-line':rgba(fg,0.09),'--rail-muted':muted,'--rail-faint':rgba(fg,0.42),
+    '--card-bg':card,'--card-border':rgba(fg,0.10),'--card-shadow':'0 1px 3px rgba(0,0,0,.4)','--card-pin-border':lift(bg,0.4),'--card-pin-shadow':'0 4px 18px rgba(0,0,0,.55)','--card-orphan-border':rgba('#f1948a',0.55),
+    '--card-fg':fg,'--card-muted':muted,'--card-faint':rgba(fg,0.4),'--card-line':rgba(fg,0.08),'--card-line2':rgba(fg,0.06),
+    '--reply-bg':lift(bg,0.06),'--composer-bg':lift(bg,0.07),
+    '--input-border':rgba(fg,0.18),'--input-bg':lift(bg,0.04),'--btn-border':lift(bg,0.4),'--btn-bg':lift(bg,0.32),'--btn-fg':fg,
+    '--chip-border':rgba(fg,0.16),'--chip-bg':lift(bg,0.16),'--chip-mine-border':lift(bg,0.4),'--chip-mine-bg':lift(bg,0.26),'--chip-mine-fg':fg,
+    '--badge-res-bg':rgba('#5fb37a',0.2),'--badge-res-fg':'#8fdca8','--badge-orp-bg':rgba('#e06c6c',0.2),'--badge-orp-fg':'#f1948a',
+  });
+}
+
+// VARIANT C — MATCH + ACCENT. Inputs: bg + text + accent(link). Accent on toggle/links/focus/chips.
+function themeC(doc){
+  const bg = doc.bg, fg = ensure(doc.fg, bg, 4.5);
+  const card = lift(bg, 0.07);
+  const muted = rgba(fg, 0.6);
+  const accent = ensure(doc.link, bg, 4.5);          // sampled accent, contrast-guarded
+  const accentText = contrast('#0b0b0b', accent) > contrast('#fff', accent) ? '#0b0b0b' : '#fff';
+  return Object.assign({ inputs:'bg + text + accent (link)' }, darkCommon(doc, accent), {
+    '--bar-bg':bg,'--bar-border':rgba(fg,0.14),'--bar-fg':fg,'--bar-muted':muted,
+    // links in the bar take the accent
+    '--tog-border':rgba(accent,0.5),'--tog-bg':lift(bg,0.05),'--tog-fg':fg,'--tog-on-border':accent,'--tog-on-bg':accent,'--tog-on-fg':accentText,
+    '--stage-bg':bg,
+    '--sel-bg':lift(bg,0.10),'--sel-border':rgba(accent,0.45),'--sel-fg':fg,'--sel-shadow':'rgba(0,0,0,.5)','--sel-hover':rgba(accent,0.2),
+    '--rail-bg':bg,'--rail-border':rgba(fg,0.14),'--rail-line':rgba(fg,0.10),'--rail-muted':muted,'--rail-faint':rgba(fg,0.45),
+    '--card-bg':card,'--card-border':rgba(fg,0.13),'--card-shadow':'none','--card-pin-border':accent,'--card-pin-shadow':`0 0 0 1px ${rgba(accent,0.5)}, 0 3px 14px rgba(0,0,0,.5)`,'--card-orphan-border':rgba('#f1948a',0.6),
+    '--card-fg':fg,'--card-muted':muted,'--card-faint':rgba(fg,0.4),'--card-line':rgba(fg,0.08),'--card-line2':rgba(fg,0.06),
+    '--reply-bg':lift(bg,0.04),'--composer-bg':lift(bg,0.04),
+    '--input-border':rgba(accent,0.35),'--input-bg':lift(bg,0.03),'--btn-border':accent,'--btn-bg':accent,'--btn-fg':accentText,
+    '--chip-border':rgba(fg,0.18),'--chip-bg':lift(bg,0.10),'--chip-mine-border':accent,'--chip-mine-bg':rgba(accent,0.22),'--chip-mine-fg':accent,
+    '--badge-res-bg':rgba('#5fb37a',0.18),'--badge-res-fg':'#8fdca8','--badge-orp-bg':rgba('#e06c6c',0.18),'--badge-orp-fg':'#f1948a',
+  });
+}
+
+// VARIANT D — SYNTHESIS. Seamless bar/rail (= doc bg, like A), ONE elevation step
+// for cards (like B, +9%), accent from link used sparingly: toggle-active, links,
+// focus ring, "mine" chip (like C). Inputs: bg + text + accent.
+function themeD(doc){
+  const bg = doc.bg, fg = ensure(doc.fg, bg, 4.5);
+  const card = lift(bg, 0.09);
+  const muted = rgba(fg, 0.62);
+  const accent = ensure(doc.link, bg, 4.5);
+  const accentText = contrast('#0b0b0b', accent) > contrast('#fff', accent) ? '#0b0b0b' : '#fff';
+  return Object.assign({ inputs:'bg + text + accent (link)' }, darkCommon(doc, accent), {
+    '--bar-bg':bg,'--bar-border':rgba(fg,0.13),'--bar-fg':fg,'--bar-muted':muted,
+    '--tog-border':rgba(fg,0.22),'--tog-bg':lift(bg,0.06),'--tog-fg':fg,'--tog-on-border':accent,'--tog-on-bg':accent,'--tog-on-fg':accentText,
+    '--stage-bg':bg,
+    '--sel-bg':lift(bg,0.12),'--sel-border':rgba(fg,0.16),'--sel-fg':fg,'--sel-shadow':'rgba(0,0,0,.55)','--sel-hover':rgba(accent,0.22),
+    '--rail-bg':bg,'--rail-border':rgba(fg,0.13),'--rail-line':rgba(fg,0.09),'--rail-muted':muted,'--rail-faint':rgba(fg,0.45),
+    '--card-bg':card,'--card-border':rgba(fg,0.11),'--card-shadow':'0 1px 2px rgba(0,0,0,.35)','--card-pin-border':accent,'--card-pin-shadow':`0 0 0 1px ${rgba(accent,0.45)}, 0 4px 16px rgba(0,0,0,.5)`,'--card-orphan-border':rgba('#f1948a',0.55),
+    '--card-fg':fg,'--card-muted':muted,'--card-faint':rgba(fg,0.4),'--card-line':rgba(fg,0.08),'--card-line2':rgba(fg,0.06),
+    '--reply-bg':lift(bg,0.05),'--composer-bg':lift(bg,0.06),
+    '--input-border':rgba(fg,0.2),'--input-bg':lift(bg,0.04),'--btn-border':accent,'--btn-bg':accent,'--btn-fg':accentText,
+    '--chip-border':rgba(fg,0.16),'--chip-bg':lift(bg,0.12),'--chip-mine-border':accent,'--chip-mine-bg':rgba(accent,0.2),'--chip-mine-fg':accent,
+    '--badge-res-bg':rgba('#5fb37a',0.2),'--badge-res-fg':'#8fdca8','--badge-orp-bg':rgba('#e06c6c',0.2),'--badge-orp-fg':'#f1948a',
+  });
+}
+
+/* ===========================================================================
+   RENDERING — build the chrome skeleton DOM from a theme.
+   =========================================================================== */
+
+function gravatar(seed){
+  // deterministic identicon-ish svg data uri (stand-in for gravatar d=identicon)
+  let h=0; for(let i=0;i<seed.length;i++){ h=(h*31+seed.charCodeAt(i))>>>0; }
+  const hue=h%360; const c=`hsl(${hue},45%,55%)`; const bgc=`hsl(${hue},30%,88%)`;
+  const cells=[]; for(let i=0;i<15;i++){ if((h>>i)&1) cells.push(i); }
+  let rects=`<rect width="36" height="36" fill="${bgc}"/>`;
+  for(const i of cells){ const col=Math.floor(i/5), row=i%5; const x=[0,1,2,3,4][col]*7.2; const mx=(4-col)*7.2; const y=row*7.2;
+    rects+=`<rect x="${x}" y="${y}" width="7.2" height="7.2" fill="${c}"/>`;
+    rects+=`<rect x="${mx}" y="${y}" width="7.2" height="7.2" fill="${c}"/>`; }
+  const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="36" height="36">${rects}</svg>`;
+  return 'data:image/svg+xml;base64,'+btoa(svg);
+}
+
+const SAMPLE = {
+  title: 'rfc/streaming-anchors.md',
+  paras: [
+    {h:true, t:'Streaming anchors'},
+    {t:'The overlay resolves each anchor against the live DOM, then paints '},
+    {t:'segments split at every boundary. See ', hl:'the depth-shading rule', after:' for how overlapping spans compose.'},
+    {t:'Reactions stack inline via ', code:'anchorSignature()', after:' — clients count without re-grouping. The canonical impl lives in the anchor module.'},
+    {t:'A re-click toggles your own emoji off; the chip + highlight repaint with no reload.'},
+  ],
+  cards: [
+    { author:'mara', time:'Jun 12, 2:14 PM', body:'Should we clamp the segment depth at 3? Deeper stacks get unreadable.', rx:[{e:'👍',n:3,mine:true},{e:'🎉',n:1}], replies:[{author:'devon',time:'2:20 PM',body:'Agree — 3 with a “+N” affordance past that.'}], pinned:true },
+    { author:'devon', time:'Jun 12, 1:50 PM', body:'The optimistic path drops empty groups correctly now. Verified on the race case.', rx:[{e:'🚀',n:2}], replies:[], resolved:true, badge:'res' },
+    { author:'sam', time:'Jun 11, 9:02 AM', body:'This span moved after an edit — anchor no longer resolves.', rx:[], replies:[], orphaned:true, badge:'orp' },
+  ],
+  docrx: [{e:'❤️',n:5},{e:'👀',n:2}],
+};
+
+function el(html){ const t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+
+function renderChrome(theme, opts){
+  opts = opts || {};
+  const mobile = !!opts.mobile;
+  const plain = !!opts.plain;
+  const drawerOpen = mobile && !plain;
+
+  const vw = document.createElement('div');
+  vw.className = 'vw';
+  for(const k in theme){ if(k.startsWith('--')) vw.style.setProperty(k, theme[k]); }
+
+  // bar
+  const bar = el(`<div class="bar">
+    <span class="title">${SAMPLE.title}</span>
+    <span class="right">
+      ${plain ? '' : `<button class="toggle ${opts.toggleOn?'on':''}">💬 3</button>`}
+      ${plain ? '' : `<a href="#">history</a>`}
+      <span>made with <a href="#">justhtml.sh</a></span>
+    </span>
+  </div>`);
+  vw.appendChild(bar);
+
+  // stage
+  const stage = el(`<div class="stage"></div>`);
+
+  // doc
+  const doc = el(`<div class="doc"></div>`);
+  for(const p of SAMPLE.paras){
+    if(p.h){ doc.appendChild(el(`<h2>${p.t}</h2>`)); continue; }
+    let inner = p.t;
+    if(p.hl) inner += `<span class="hl">${p.hl}</span>${p.after||''}`;
+    else if(p.code) inner += `<code>${p.code}</code>${p.after||''}`;
+    inner += ` <a href="#">link</a>.`;
+    doc.appendChild(el(`<p>${inner}</p>`));
+  }
+  if(!plain){
+    doc.appendChild(el(`<div class="seltool"><button title="add comment">💬</button><button title="add reaction">😊</button></div>`));
+  }
+  stage.appendChild(doc);
+
+  if(!plain){
+    if(drawerOpen) stage.appendChild(el(`<div class="scrim" style="display:block"></div>`));
+
+    const rail = el(`<aside class="rail"></aside>`);
+    rail.appendChild(el(`<div class="rail-head"><span>3 comments</span><span class="act">show resolved</span></div>`));
+    const dr = el(`<div class="docrx"><span class="lbl">on this doc:</span></div>`);
+    for(const r of SAMPLE.docrx) dr.appendChild(el(`<span class="chip">${r.e} ${r.n}</span>`));
+    rail.appendChild(dr);
+    rail.appendChild(el(`<div class="signin"><a href="#">Sign in</a> to comment.</div>`));
+
+    const cards = el(`<div class="cards"></div>`);
+    for(const c of SAMPLE.cards){
+      const cls = 'card' + (c.pinned?' pinned':'') + (c.orphaned?' orphaned':'');
+      const card = el(`<div class="${cls}"></div>`);
+      let badge = c.badge==='res' ? `<span class="badge res">resolved</span>` : c.badge==='orp' ? `<span class="badge orp">orphaned</span>` : '';
+      const rxHtml = (c.rx||[]).map(r=>`<span class="chip ${r.mine?'mine':''}">${r.e} ${r.n}</span>`).join('') + `<span class="addrx">+ react</span>`;
+      card.appendChild(el(`<div class="body-row">
+        <img class="avatar" src="${gravatar(c.author)}" alt="">
+        <div style="min-width:0">
+          <span class="author">${c.author}</span> <span class="time">${c.time}</span>${badge}
+          <div class="text">${c.body}</div>
+          <div class="rx">${rxHtml}</div>
+        </div>
+      </div>`));
+      if(c.replies && c.replies.length){
+        card.appendChild(el(`<div class="replies-meta">${c.replies.length} repl${c.replies.length>1?'ies':'y'} ▾</div>`));
+      }
+      if(c.pinned){
+        const thread = el(`<div class="thread"></div>`);
+        for(const r of c.replies){
+          thread.appendChild(el(`<div class="reply"><img class="avatar" src="${gravatar(r.author)}" alt=""><div><span class="author">${r.author}</span> <span class="time">${r.time}</span><div class="text">${r.body}</div></div></div>`));
+        }
+        thread.appendChild(el(`<div class="actions"><span>resolve</span><span>delete</span><span>+ react</span></div>`));
+        thread.appendChild(el(`<div class="composer"><textarea placeholder="Reply…"></textarea><button class="send">Reply</button></div>`));
+        card.appendChild(thread);
+      } else {
+        card.appendChild(el(`<div class="hint">click to ${c.orphaned?'view':'reply'}…</div>`));
+      }
+      cards.appendChild(card);
+    }
+    rail.appendChild(cards);
+    stage.appendChild(rail);
+  }
+
+  vw.appendChild(stage);
+  return vw;
+}
+
+function buildDemo(label, inputs, theme, opts){
+  const wrap = el(`<div class="demo"></div>`);
+  wrap.appendChild(el(`<div class="demo-label">${label} <span class="inputs">— inputs: ${inputs}</span></div>`));
+  const frame = el(`<div class="frame ${opts&&opts.mobile?'mobile':'desktop'}"></div>`);
+  frame.appendChild(renderChrome(theme, opts));
+  wrap.appendChild(frame);
+  return wrap;
+}
+
+/* ===========================================================================
+   PAGE LAYOUT
+   =========================================================================== */
+const app = document.getElementById('app');
+
+function section(title, note){
+  app.appendChild(el(`<div class="group-head">${title}</div>`));
+  if(note) app.appendChild(el(`<div class="group-note">${note}</div>`));
+}
+function row(){ const r=el(`<div class="row"></div>`); app.appendChild(r); return r; }
+function note(html){ app.appendChild(el(`<p class="focusnote">${html}</p>`)); }
+
+// ---- BEFORE ----
+section('BEFORE — dark doc, today\'s all-light chrome (the clash)',
+  'For reference only. The light bar / light rail / white cards sit on a dark document and fight it. This is what the founder rejected.');
+let r = row();
+r.appendChild(buildDemo('BEFORE · near-black #0d1117', themeLightChrome(DOC_NEARBLACK).inputs, themeLightChrome(DOC_NEARBLACK), {toggleOn:true}));
+r.appendChild(buildDemo('BEFORE · tinted #1e1e2e', themeLightChrome(DOC_TINTED).inputs, themeLightChrome(DOC_TINTED), {toggleOn:true}));
+
+// ---- Variant A ----
+section('Variant A — EXACT MATCH', 'Chrome bg = doc bg, cards = doc bg lightened ~7%, borders are subtle hairlines of the text color, text = doc text, muted = text at low opacity. Literal continuation of the document.');
+r = row();
+r.appendChild(buildDemo('A · near-black', themeA(DOC_NEARBLACK).inputs, themeA(DOC_NEARBLACK), {toggleOn:true}));
+r.appendChild(buildDemo('A · tinted', themeA(DOC_TINTED).inputs, themeA(DOC_TINTED), {toggleOn:true}));
+note('Bar, rail and stage are the <b>same</b> color as the doc — the seams disappear. Cards float on a +7% surface. Risk: on a mid-tone bg the +7% lift can read flat; the literal match gives the chrome no identity of its own.');
+
+// ---- Variant B ----
+section('Variant B — ELEVATED DARK UI', 'A coherent dark palette with deliberate elevation: bar +5%, rail +4%, cards +10%, buttons lighter still — reads like a crafted dark-mode app rather than a flat literal match.');
+r = row();
+r.appendChild(buildDemo('B · near-black', themeB(DOC_NEARBLACK).inputs, themeB(DOC_NEARBLACK), {toggleOn:true}));
+r.appendChild(buildDemo('B · tinted', themeB(DOC_TINTED).inputs, themeB(DOC_TINTED), {toggleOn:true}));
+note('Cards clearly read as crafted surfaces with shadow + elevation. Trade-off: the bar is no longer the same color as the doc, so it reads as “chrome” more than “document”. The toggle-active state is a neutral lighter chip (no accent), which is calmer but less branded.');
+
+// ---- Variant C ----
+section('Variant C — MATCH + ACCENT', 'Like A, but samples the doc\'s link/heading color as an ACCENT and uses it for the 💬 toggle active state, links, focus rings, the pinned-card ring and the “mine” reaction chip — so the chrome takes on the document\'s character.');
+r = row();
+r.appendChild(buildDemo('C · near-black (accent #58a6ff)', themeC(DOC_NEARBLACK).inputs, themeC(DOC_NEARBLACK), {toggleOn:true}));
+r.appendChild(buildDemo('C · tinted (accent #89b4fa)', themeC(DOC_TINTED).inputs, themeC(DOC_TINTED), {toggleOn:true}));
+note('The accent ties the chrome to the doc beyond just light/dark — the toggle, the pinned card ring and your reaction chip all carry the doc\'s blue. Requires a third sampled color and a contrast guard (accent is nudged until it hits AA on the bg).');
+
+// ---- Variant D ----
+section('Variant D — SYNTHESIS (recommended)', 'Seamless bar + rail = doc bg (A\'s seamlessness), ONE clear elevation step for cards at +9% with a soft shadow (B\'s craft), and the sampled accent used sparingly for toggle-active / links / focus ring / “mine” chip (C\'s character). Best balance of matched, legible, branded.');
+r = row();
+r.appendChild(buildDemo('D · near-black', themeD(DOC_NEARBLACK).inputs, themeD(DOC_NEARBLACK), {toggleOn:true}));
+r.appendChild(buildDemo('D · tinted', themeD(DOC_TINTED).inputs, themeD(DOC_TINTED), {toggleOn:true}));
+note('Bar/rail vanish into the doc; cards are unmistakably cards (one elevation step + shadow); the accent gives brand character without coloring large areas. This is the variant to ship.');
+
+// ---- Mobile drawer + PlainShell + no-regression ----
+section('Edge surfaces', 'Mobile drawer + scrim (variant D), the zero-comment PlainShell (variant D), and the no-regression light man-page through the SAME light-chrome path.');
+r = row();
+r.appendChild(buildDemo('D · mobile drawer + scrim (near-black)', themeD(DOC_NEARBLACK).inputs, themeD(DOC_NEARBLACK), {mobile:true, toggleOn:true}));
+r.appendChild(buildDemo('D · PlainShell, no rail (tinted)', themeD(DOC_TINTED).inputs, themeD(DOC_TINTED), {plain:true}));
+r.appendChild(buildDemo('NO-REGRESSION · light man-page, light chrome', themeLightChrome(DOC_LIGHT).inputs, themeLightChrome(DOC_LIGHT), {toggleOn:true}));
+note('The mobile drawer slides over a dark doc with a darker scrim (rgba(0,0,0,.55)) so the dim still reads on a dark page. PlainShell themes the bar + doc only (no rail). The light doc routed through the unchanged light-chrome path is byte-identical to today — proof of no regression.');
+
+/* ===========================================================================
+   VERDICT + derivation summary (also printed in the page)
+   =========================================================================== */
+const v = document.getElementById('verdict');
+v.innerHTML = `
+  <h2>Judgment &amp; palette-derivation inputs</h2>
+  <p><b>Recommendation: Variant D.</b> It makes the chrome feel like part of the document (bar + rail are literally the doc bg, so seams vanish — A's win) while keeping the rail/cards legible and obviously interactive (one elevation step + a soft shadow — B's win), and it carries the document's brand via a sampled accent on the few elements that benefit from it (toggle-active, links, focus ring, your reaction chip — C's win) without flooding the UI with color.</p>
+  <p><b>A</b> is the most seamless but the cards can read flat and the chrome has no identity. <b>B</b> is the most polished-app-looking but the bar stops reading as "the document" because it's a different color. <b>C</b> proves the accent idea but otherwise inherits A's flat cards. <b>D</b> takes the seamless bar/rail from A, the single card-elevation step from B, and the sampled accent from C.</p>
+  <p><b>Inputs each needs (this is the real-impl question):</b>
+  &nbsp;<span class="pill">A: bg + text</span><span class="pill">B: bg + text</span><span class="pill">C: bg + text + accent</span><span class="pill">D: bg + text + accent</span><br>
+  A and B derive everything from two sampled values (<code>getComputedStyle(body).backgroundColor</code> and <code>.color</code>). C and D need a third sample — the document's link or heading color (<code>a</code> / <code>h1</code> computed color) — as the accent. All four are derivable from a handful of computed-style reads inside the iframe; no full palette extraction needed. Light/dark is decided by the WCAG relative luminance of the sampled bg.</p>
+  <p><b>Edge cases the visual surfaced:</b></p>
+  <ul>
+    <li><b>Mid-tone bg</b> (luminance near the 0.4 light/dark threshold): the +6–8% lift produces almost no visible card separation, and the light/dark decision becomes unstable. D's soft shadow rescues card separation; the threshold needs hysteresis / a "force theme" override, and a mid-tone may want the accent border instead of a lift.</li>
+    <li><b>Low-contrast doc text</b> (text barely readable on its own bg): muted text at 60% opacity can drop below AA. The <code>ensure()</code> guard nudges the base fg to AA first, then derives muted from the corrected value — shown live (all card text here clears AA).</li>
+    <li><b>Gradient / image background</b>: a single sampled bg color is a lie — there's no one color to match. Fallback: sample the dominant/average color (or just the corner pixel), treat as the bg, and lean on D's solid card surfaces so content stays readable over whatever's behind. The bar can't be truly seamless here; an honest solid-derived bar is the safe choice.</li>
+    <li><b>Yellow highlight on dark</b>: the literal <code>#fff3a0</code> wash blows out. Solution shown: a translucent warm wash (<code>rgba(241,196,15,.20)</code>) + a 55%-opacity warm ring, with the highlighted text kept at the doc's own fg so it stays legible.</li>
+    <li><b>Accent contrast (C/D)</b>: a sampled link color can be too dark/saturated to use as a button fill or text on the dark bg. Guard: nudge the accent toward white until it hits AA on the bg, and choose black-vs-white button text by contrast. If the doc has no link, fall back to A/B (no accent).</li>
+    <li><b>Light-doc no-regression</b>: a light bg routes through the unchanged light-chrome path → today's exact <code>#fff</code>/<code>#ccc</code>/<code>#fbfbfb</code> chrome. Shown bottom-right; it is byte-identical to production.</li>
+  </ul>
+`;
+</script>
+</body>
+</html>

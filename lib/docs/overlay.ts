@@ -67,6 +67,68 @@ export const OVERLAY_SCRIPT = String.raw`
   function send(msg){ try { parent.postMessage(msg, "*"); } catch(e){} }
   function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
+  // ---- adaptive chrome: sample the doc's effective colors (jh:theme) ----
+  // Only the overlay (inside the sandboxed, opaque-origin iframe) can read the
+  // doc's COMPUTED colors; the shell can't reach across the origin. We sample
+  // bg/fg/accent via getComputedStyle and post {bg, fg, accent, isDark} so the
+  // shell can derive variant-D dark chrome (lib/docs/theme.ts buildChromePalette).
+  // Cheap; re-emitted on ready / load / a short settle to catch late CSS.
+  // isDark uses WCAG relative luminance with a small hysteresis dead-band so a
+  // mid-tone bg doesn't flip-flop across re-emits.
+  var lastDark = null; // hysteresis memory across re-emits
+  function rxParse(s){
+    if (!s) return null;
+    var m = String(s).match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s\/]+([\d.%]+))?/i);
+    if (!m) return null;
+    if (m[4] != null){ var a = (""+m[4]).indexOf("%")>=0 ? parseFloat(m[4])/100 : parseFloat(m[4]); if (a === 0) return null; }
+    return [parseFloat(m[1]), parseFloat(m[2]), parseFloat(m[3])];
+  }
+  function rxLum(rgb){
+    var c = rgb.map(function(v){ v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4); });
+    return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];
+  }
+  function sampleTheme(){
+    try {
+      var de = document.documentElement, body = document.body;
+      var deCS = de ? getComputedStyle(de) : null;
+      var bodyCS = body ? getComputedStyle(body) : null;
+      // bg: documentElement bg; if transparent, fall back to body; both transparent → white.
+      var bgRgb = deCS && rxParse(deCS.backgroundColor);
+      var gradient = false;
+      if (!bgRgb && bodyCS) bgRgb = rxParse(bodyCS.backgroundColor);
+      // gradient/image: backgroundColor transparent but a backgroundImage exists.
+      var bgImg = (deCS && deCS.backgroundImage) || (bodyCS && bodyCS.backgroundImage) || "none";
+      if (!bgRgb && bgImg && bgImg !== "none") gradient = true;
+      if (!bgRgb) bgRgb = [255,255,255]; // both transparent → treat as white (light)
+      // fg: body color (fall back to documentElement).
+      var fgRgb = (bodyCS && rxParse(bodyCS.color)) || (deCS && rxParse(deCS.color)) || [17,17,17];
+      // accent: first <a>, else first heading.
+      var accStr = null;
+      var aEl = document.querySelector("a[href], a");
+      if (!aEl) aEl = document.querySelector("h1, h2, h3");
+      if (aEl){ var ac = rxParse(getComputedStyle(aEl).color); if (ac) accStr = "rgb("+ac[0]+","+ac[1]+","+ac[2]+")"; }
+
+      var lum = rxLum(bgRgb);
+      // hysteresis dead-band around 0.4: once dark, stay dark until >0.46; once
+      // light, stay light until <0.34. First sample uses the bare 0.4 threshold.
+      var dark;
+      if (lastDark === true) dark = lum < 0.46;
+      else if (lastDark === false) dark = lum < 0.34;
+      else dark = lum < 0.4;
+      lastDark = dark;
+
+      // toggle the dark-highlight stylesheet branch (needs the style present)
+      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", !!dark); } catch(e){}
+
+      send({ type:"jh:theme",
+        bg: "rgb("+Math.round(bgRgb[0])+","+Math.round(bgRgb[1])+","+Math.round(bgRgb[2])+")",
+        fg: "rgb("+Math.round(fgRgb[0])+","+Math.round(fgRgb[1])+","+Math.round(fgRgb[2])+")",
+        accent: accStr || undefined,
+        isDark: dark,
+        gradient: gradient });
+    } catch(e){}
+  }
+
   // ---- text-content walker (anchor resolution against the live DOM) ----
   // We snapshot the text model ONCE per paint (over the pristine DOM, before any
   // segment wrapping), resolve every anchor's [start,end) against it, then split.
@@ -161,6 +223,15 @@ export const OVERLAY_SCRIPT = String.raw`
       + "span[data-jh-seg].jh-hover{background:#ffd76b}"
       + "span[data-jh-seg].jh-focus{background:#ffce3a;box-shadow:inset 0 0 0 9999px rgba(255,179,0,.18)}"
       + "span[data-jh-seg].jh-dim{opacity:.4}"
+      // DARK DOC (adaptive chrome, variant D): the yellow wash blows out on a dark
+      // page, so when the doc is dark we repaint highlights as a translucent warm
+      // wash (rgba(241,196,15,.20)) + a ~55% warm ring, keeping the doc's own text
+      // color (legible). Gated by a .jh-dark class on <html> set from sampleTheme.
+      + "html.jh-dark span[data-jh-seg].d1{background:rgba(241,196,15,.16);border-bottom-color:rgba(241,196,15,.45)}"
+      + "html.jh-dark span[data-jh-seg].d2{background:rgba(241,196,15,.24);border-bottom-color:rgba(241,196,15,.55)}"
+      + "html.jh-dark span[data-jh-seg].d3{background:rgba(241,196,15,.32);border-bottom-color:rgba(241,196,15,.7)}"
+      + "html.jh-dark span[data-jh-seg].jh-hover{background:rgba(241,196,15,.3)}"
+      + "html.jh-dark span[data-jh-seg].jh-focus{background:rgba(241,196,15,.2);box-shadow:inset 0 0 0 9999px rgba(241,196,15,.12),0 0 0 1px rgba(241,196,15,.55)}"
       + "span[data-jh-chip]{display:inline-flex;align-items:center;gap:2px;font-size:11.5px;line-height:1;"
       + "background:#fbfbfb;border:1px solid #e0e0e0;border-radius:10px;padding:1px 6px 1px 5px;margin-left:4px;"
       + "vertical-align:.12em;font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;user-select:none;"
@@ -171,6 +242,12 @@ export const OVERLAY_SCRIPT = String.raw`
       + "span[data-jh-chip] .jh-em{font-size:13px}"
       + "span[data-jh-chip] .jh-ct{color:#666}"
       + "span[data-jh-chip].mine .jh-ct{color:#3a5b8a}"
+      // dark chips: lift the surface off the dark doc, keep text readable.
+      + "html.jh-dark span[data-jh-chip]{background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.18);color:inherit}"
+      + "html.jh-dark span[data-jh-chip]:hover{background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.3)}"
+      + "html.jh-dark span[data-jh-chip].mine{background:rgba(120,170,255,.2);border-color:rgba(120,170,255,.5)}"
+      + "html.jh-dark span[data-jh-chip] .jh-ct{color:rgba(255,255,255,.6)}"
+      + "html.jh-dark span[data-jh-chip].mine .jh-ct{color:#9db8d8}"
       + ".jh-pop{position:fixed;display:none;background:#fff;border:1px solid #ccc;border-radius:6px;"
       + "box-shadow:0 4px 16px rgba(0,0,0,.18);z-index:2147483647;padding:6px 8px;font-size:11px;max-width:280px;"
       + "font-family:ui-monospace,Menlo,Consolas,monospace;color:#222}"
@@ -544,5 +621,11 @@ export const OVERLAY_SCRIPT = String.raw`
   window.addEventListener("resize", function(){ paint(); });
 
   send({type:"jh:ready"});
+  // Adaptive chrome: emit theme on ready, again on window.load, and once after a
+  // short settle to catch late-applied CSS. Cheap to re-emit; hysteresis guards
+  // flip-flop. Doesn't disturb any existing overlay behavior.
+  sampleTheme();
+  window.addEventListener("load", sampleTheme);
+  setTimeout(sampleTheme, 400);
 })();
 `;

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<!--
+  VARIANT B — bottom sheet.
+
+  MAPS TO PRODUCTION: identical shell to CommentsShell.tsx — .jh-docwrap is the
+  SANDBOXED origin-less iframe; the rail lives in the SHELL on top. On mobile the
+  same rail element is restyled as a bottom sheet (the shell overlay sits above
+  the iframe; it cannot be inside it — cross-origin). Native-feeling mobile
+  pattern (Maps/Apple sheets).
+
+  DESKTOP (>768px): side-by-side, default open. "💬 N" collapses/re-opens the
+  rail to reclaim width (same as A).
+  MOBILE (<=768px): doc FULL WIDTH; rail off by default. "💬 N" raises a bottom
+  sheet (~72vh) with a drag handle; tap the handle (or scrim) to dismiss. The
+  sheet has its own sticky header (count + show-resolved + ✕).
+
+  TAP-A-HIGHLIGHT ON MOBILE: jh:focus{id} → raise the sheet and scroll to the
+  thread. A sheet is the gentlest reveal: the doc stays visible above it so the
+  user keeps context of what they tapped (advantage over a full drawer).
+
+  ZERO COMMENTS: no button, no sheet.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>git-restage(1) — justhtml.sh</title>
+<link rel="stylesheet" href="shell.css" />
+<style>
+  .jh-sheethandle { display: none; }
+  .jh-stage[data-rail="closed"] .jh-rail { display: none; }
+
+  @media (max-width: 768px) {
+    /* MOBILE: rail becomes a bottom sheet. */
+    .jh-rail {
+      position: absolute; left: 0; right: 0; bottom: 0;
+      width: 100%;
+      height: 72vh;
+      transform: translateY(100%);
+      transition: transform .26s cubic-bezier(.2,.8,.2,1);
+      border-left: none;
+      border-top: 1px solid #ccc;
+      border-radius: 14px 14px 0 0;
+      box-shadow: 0 -8px 28px rgba(0,0,0,.2);
+      z-index: 25;
+    }
+    .jh-stage[data-rail="open"] .jh-rail { transform: translateY(0); }
+    .jh-stage[data-rail="closed"] .jh-rail { display: block; }
+    .jh-sheethandle {
+      display: block; width: 40px; height: 4px; border-radius: 3px;
+      background: #d0d0d0; margin: 8px auto 2px; cursor: grab;
+    }
+    .jh-railhead { border-radius: 14px 14px 0 0; }
+    .jh-seltool { right: 8px; }
+  }
+  @media (min-width: 769px) { .jh-scrim { display: none; } }
+</style>
+</head>
+<body>
+  <div class="jh-bar">
+    <span class="jh-title">git-restage(1)</span>
+    <span class="jh-barmeta">
+      <button class="jh-commentbtn" id="toggle" aria-pressed="true">💬 <span id="cnt"></span></button>
+      <a href="#">history</a>
+      <span>made with <a href="#">justhtml.sh</a></span>
+    </span>
+  </div>
+
+  <div class="jh-stage" id="stage" data-rail="open">
+    <div class="jh-docwrap">
+      <iframe id="doc" src="doc.html" sandbox="allow-scripts" referrerpolicy="no-referrer" title="git-restage(1)"></iframe>
+      <div class="jh-seltool" id="seltool" hidden>
+        <button title="add comment">💬</button>
+        <button title="add reaction">😊</button>
+      </div>
+    </div>
+    <div class="jh-scrim" id="scrim"></div>
+    <aside class="jh-rail" id="rail">
+      <div class="jh-sheethandle" id="handle"></div>
+      <div id="railbody"></div>
+    </aside>
+  </div>
+
+<script src="mock.js"></script>
+<script>
+  var stage = document.getElementById('stage');
+  var rail = document.getElementById('rail');
+  var railbody = document.getElementById('railbody');
+  var scrim = document.getElementById('scrim');
+  var toggle = document.getElementById('toggle');
+  var handle = document.getElementById('handle');
+  var seltool = document.getElementById('seltool');
+  document.getElementById('cnt').textContent = JH.count;
+
+  if (JH.total === 0) { toggle.style.display = 'none'; rail.style.display = 'none'; }
+
+  function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+  function renderRail() { JH.renderRail(railbody, { closeable: true, onClose: closeRail }); }
+
+  function openRail() {
+    stage.setAttribute('data-rail', 'open');
+    toggle.setAttribute('aria-pressed', 'true');
+    if (isMobile()) scrim.setAttribute('data-open', '1');
+  }
+  function closeRail() {
+    stage.setAttribute('data-rail', 'closed');
+    toggle.setAttribute('aria-pressed', 'false');
+    scrim.removeAttribute('data-open');
+  }
+  function toggleRail() { stage.getAttribute('data-rail') === 'open' ? closeRail() : openRail(); }
+
+  renderRail();
+  toggle.addEventListener('click', toggleRail);
+  scrim.addEventListener('click', closeRail);
+  handle.addEventListener('click', closeRail);
+
+  function applyDefault() { isMobile() ? closeRail() : openRail(); }
+  applyDefault();
+  window.matchMedia('(max-width: 768px)').addEventListener('change', applyDefault);
+
+  window.addEventListener('message', function (ev) {
+    if (ev.source !== document.getElementById('doc').contentWindow) return;
+    var d = ev.data; if (!d || typeof d !== 'object') return;
+    if (d.type === 'jh:focus' && typeof d.id === 'number') {
+      openRail(); JH.focusCard(railbody, d.id); seltool.hidden = true;
+    } else if (d.type === 'jh:selection') {
+      seltool.hidden = false;
+    } else if (d.type === 'jh:reactionToggle') {
+      openRail();
+    }
+  });
+</script>
+</body>
+</html>

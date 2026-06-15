@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { buildChromePalette, type ThemeSample, type ChromePalette } from "@/lib/docs/theme";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
 // architecture", "CHOSEN: variant B"). The google-docs-style comment rail. The
@@ -73,6 +74,11 @@ type Props = {
   initialDocReactions: Reaction[];
   initialAnchoredReactions: AnchoredReactionGroup[];
   version: number;
+  // Coarse SSR theme (from the stored HTML's unconditional html/body bg). Present
+  // only when the server is confident the doc is dark — gives the shell a dark
+  // initial paint so there's no light→dark flash before the overlay's jh:theme
+  // refines it. Absent (null) → render today's light chrome.
+  initialTheme: ThemeSample | null;
 };
 
 /**
@@ -114,6 +120,19 @@ export default function CommentsShell(props: Props) {
   const [activeId, setActiveId] = useState<number | null>(null);
   const [positions, setPositions] = useState<Record<number, number>>({});
   const [overlayReady, setOverlayReady] = useState(false);
+
+  // Adaptive chrome (variant D). The server may hand us a coarse dark theme for
+  // the initial paint (no flash); the overlay's jh:theme then refines/confirms it.
+  // `mode` is the single gate that keeps the door open for a future user
+  // light/dark toggle — today it is always "auto" (apply whatever the doc is).
+  const mode: "auto" = "auto";
+  const [theme, setTheme] = useState<ThemeSample | null>(props.initialTheme);
+  // Only DARK themes drive the chrome; light docs keep the literal light chrome.
+  const palette: ChromePalette | null = useMemo(
+    () => (mode === "auto" && theme && theme.isDark ? buildChromePalette(theme) : null),
+    [theme]
+  );
+  const isDark = palette !== null;
 
   // Selection state (from the overlay) → the floating toolbar + a pending draft.
   const [selection, setSelection] = useState<{ anchor: NonNullable<Anchor>; top: number; viewTop: number } | null>(null);
@@ -213,6 +232,21 @@ export default function CommentsShell(props: Props) {
           break;
         case "jh:positions":
           setPositions(d.positions || {});
+          break;
+        case "jh:theme":
+          // Adaptive chrome: the overlay sampled the doc's effective colors. Drive
+          // the variant-D palette from it (only dark themes recolor the chrome;
+          // light keeps today's literal chrome). Cheap + idempotent — re-emitted
+          // on ready/load/settle; we just store the latest sample.
+          if (typeof d.bg === "string") {
+            setTheme({
+              bg: d.bg,
+              fg: typeof d.fg === "string" ? d.fg : "#c9d1d9",
+              accent: typeof d.accent === "string" ? d.accent : undefined,
+              isDark: !!d.isDark,
+              gradient: !!d.gradient,
+            });
+          }
           break;
         case "jh:selection":
           if ((canComment || canReact) && d.anchor && d.anchor.exact) {
@@ -435,14 +469,21 @@ export default function CommentsShell(props: Props) {
   // The count shown in the toggle: number of threads (visible roots).
   const commentCount = threads.length;
 
+  // When dark, expose the variant-D palette as CSS custom properties on the
+  // wrapper. Every themed color below reads `var(--jh-x, <light-literal>)`, so
+  // when the vars are UNSET (light docs / no theme) the bytes resolve to today's
+  // exact light chrome — the no-regression guarantee. Transitions on these vars
+  // make a late jh:theme refinement a smooth fade, not a hard snap.
+  const themeVars = palette ? paletteVars(palette) : undefined;
+
   return (
-    <>
+    <div className="jh-shell" data-theme={isDark ? "dark" : "light"} style={themeVars}>
       <style>{RAIL_CSS}</style>
       <div style={barStyle}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
           {title}
         </span>
-        <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "#666" }}>
+        <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
           <button
             type="button"
             className="jh-commentbtn"
@@ -453,8 +494,8 @@ export default function CommentsShell(props: Props) {
           >
             💬 {commentCount}
           </button>
-          <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "#666" }}>history</a>
-          <span>made with <a href="/" style={{ color: "#666" }}>justhtml.sh</a></span>
+          <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "var(--jh-bar-muted, #666)" }}>history</a>
+          <span>made with <a href="/" style={{ color: "var(--jh-bar-muted, #666)" }}>justhtml.sh</a></span>
         </span>
       </div>
 
@@ -466,7 +507,7 @@ export default function CommentsShell(props: Props) {
             src={rawSrc}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
-            style={{ border: "none", width: "100%", height: "100%", display: "block", background: "#fff" }}
+            style={{ border: "none", width: "100%", height: "100%", display: "block", background: "var(--jh-stage-bg, #fff)" }}
           />
           {/* selection toolbar — overlaid on the docwrap; positioned to the
               selection's viewport-top within the iframe. Shows on selection when
@@ -509,7 +550,7 @@ export default function CommentsShell(props: Props) {
               {visibleThreads.length} comment{visibleThreads.length !== 1 ? "s" : ""}
             </span>
             <span style={{ display: "flex", gap: 12, alignItems: "center" }}>
-              <span style={{ cursor: "pointer", color: "#888" }} onClick={() => setShowResolved((s) => !s)}>
+              <span style={{ cursor: "pointer", color: "var(--jh-rail-muted, #888)" }} onClick={() => setShowResolved((s) => !s)}>
                 {showResolved ? "hide resolved" : "show resolved"}
               </span>
               {/* Close (✕) — the drawer's close affordance. Hidden on desktop
@@ -531,7 +572,7 @@ export default function CommentsShell(props: Props) {
               react chip set + a mini picker for anyone who can react. */}
           {docReactions.length > 0 || canReact ? (
             <div style={docReactionsRowStyle}>
-              <span style={{ color: "#999", fontSize: 10.5, marginRight: 2 }}>on this doc:</span>
+              <span style={{ color: "var(--jh-rail-faint, #999)", fontSize: 10.5, marginRight: 2 }}>on this doc:</span>
               <Reactions
                 reactions={docReactions}
                 canComment={canReact}
@@ -541,7 +582,7 @@ export default function CommentsShell(props: Props) {
           ) : null}
 
           {!signedIn ? (
-            <div style={{ padding: "8px 10px", fontSize: 12, color: "#666", borderBottom: "1px solid #eee" }}>
+            <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--jh-rail-muted, #666)", borderBottom: "1px solid var(--jh-rail-line, #eee)" }}>
               <a href={`/login?next=${encodeURIComponent(`/d/${slug}`)}`} target="_blank" rel="noopener">Sign in</a> to comment.
             </div>
           ) : null}
@@ -575,8 +616,68 @@ export default function CommentsShell(props: Props) {
           />
         </aside>
       </div>
-    </>
+    </div>
   );
+}
+
+// Map the derived variant-D palette to the CSS custom properties consumed by the
+// chrome styles below. Only set when dark; light leaves them unset so every
+// `var(--jh-x, <literal>)` falls back to today's exact light value.
+function paletteVars(p: ChromePalette): React.CSSProperties {
+  return {
+    ["--jh-bar-bg" as string]: p.barBg,
+    ["--jh-bar-border" as string]: p.barBorder,
+    ["--jh-bar-fg" as string]: p.barFg,
+    ["--jh-bar-muted" as string]: p.barMuted,
+    ["--jh-tog-border" as string]: p.togBorder,
+    ["--jh-tog-bg" as string]: p.togBg,
+    ["--jh-tog-fg" as string]: p.togFg,
+    ["--jh-tog-on-border" as string]: p.togOnBorder,
+    ["--jh-tog-on-bg" as string]: p.togOnBg,
+    ["--jh-tog-on-fg" as string]: p.togOnFg,
+    ["--jh-stage-bg" as string]: p.stageBg,
+    ["--jh-rail-bg" as string]: p.railBg,
+    ["--jh-rail-border" as string]: p.railBorder,
+    ["--jh-rail-line" as string]: p.railLine,
+    ["--jh-rail-muted" as string]: p.railMuted,
+    ["--jh-rail-faint" as string]: p.railFaint,
+    ["--jh-card-bg" as string]: p.cardBg,
+    ["--jh-card-border" as string]: p.cardBorder,
+    ["--jh-card-shadow" as string]: p.cardShadow,
+    ["--jh-card-pin-border" as string]: p.cardPinBorder,
+    ["--jh-card-pin-shadow" as string]: p.cardPinShadow,
+    ["--jh-card-orphan-border" as string]: p.cardOrphanBorder,
+    ["--jh-card-fg" as string]: p.cardFg,
+    ["--jh-card-muted" as string]: p.cardMuted,
+    ["--jh-card-faint" as string]: p.cardFaint,
+    ["--jh-card-line" as string]: p.cardLine,
+    ["--jh-card-line2" as string]: p.cardLine2,
+    ["--jh-avatar-ring" as string]: p.avatarRing,
+    ["--jh-avatar-bg" as string]: p.avatarBg,
+    ["--jh-reply-bg" as string]: p.replyBg,
+    ["--jh-composer-bg" as string]: p.composerBg,
+    ["--jh-input-border" as string]: p.inputBorder,
+    ["--jh-input-bg" as string]: p.inputBg,
+    ["--jh-btn-border" as string]: p.btnBorder,
+    ["--jh-btn-bg" as string]: p.btnBg,
+    ["--jh-btn-fg" as string]: p.btnFg,
+    ["--jh-chip-border" as string]: p.chipBorder,
+    ["--jh-chip-bg" as string]: p.chipBg,
+    ["--jh-chip-mine-border" as string]: p.chipMineBorder,
+    ["--jh-chip-mine-bg" as string]: p.chipMineBg,
+    ["--jh-chip-mine-fg" as string]: p.chipMineFg,
+    ["--jh-badge-res-bg" as string]: p.badgeResBg,
+    ["--jh-badge-res-fg" as string]: p.badgeResFg,
+    ["--jh-badge-orp-bg" as string]: p.badgeOrpBg,
+    ["--jh-badge-orp-fg" as string]: p.badgeOrpFg,
+    ["--jh-sel-bg" as string]: p.selBg,
+    ["--jh-sel-border" as string]: p.selBorder,
+    ["--jh-sel-fg" as string]: p.selFg,
+    ["--jh-sel-shadow" as string]: p.selShadow,
+    ["--jh-sel-hover" as string]: p.selHover,
+    ["--jh-drawer-shadow" as string]: p.drawerShadow,
+    ["--jh-scrim-bg" as string]: p.scrimBg,
+  };
 }
 
 // --------------------------- subcomponents ---------------------------
@@ -724,7 +825,7 @@ function RailCards(props: {
       ) : null}
 
       {threads.length === 0 && !draft ? (
-        <div style={{ padding: "10px", color: "#aaa", fontSize: 12 }}>
+        <div style={{ padding: "10px", color: "var(--jh-card-faint, #aaa)", fontSize: 12 }}>
           No comments yet. Select text in the document to start a thread.
         </div>
       ) : null}
@@ -755,12 +856,12 @@ const Card = forwardRef<
   const [showEmoji, setShowEmoji] = useState(false);
 
   const border = t.orphaned
-    ? "1px dashed #d99"
+    ? "1px dashed var(--jh-card-orphan-border, #d99)"
     : pinned
-      ? "1px solid #111"
+      ? "1px solid var(--jh-card-pin-border, #111)"
       : active
-        ? "1px solid #f1c40f"
-        : "1px solid #e2e2e2";
+        ? "1px solid var(--jh-card-active-border, #f1c40f)"
+        : "1px solid var(--jh-card-border, #e2e2e2)";
 
   return (
     <div
@@ -772,7 +873,7 @@ const Card = forwardRef<
         onPin();
       }}
       style={{
-        background: "#fff",
+        background: "var(--jh-card-bg, #fff)",
         border,
         borderRadius: 7,
         marginBottom: 7,
@@ -780,54 +881,59 @@ const Card = forwardRef<
         cursor: "pointer",
         overflow: "hidden",
         opacity: t.resolved ? 0.6 : 1,
-        boxShadow: pinned ? "0 3px 14px rgba(0,0,0,.18)" : active ? "0 2px 10px rgba(0,0,0,.13)" : "none",
+        boxShadow: pinned
+          ? "var(--jh-card-pin-shadow, 0 3px 14px rgba(0,0,0,.18))"
+          : active
+            ? "0 2px 10px rgba(0,0,0,.13)"
+            : "var(--jh-card-shadow, none)",
+        transition: CHROME_TRANSITION,
       }}
     >
       <div style={{ display: "flex", gap: 7, padding: "8px 9px" }}>
         {t.author_avatar ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={t.author_avatar} alt="" width={24} height={24} style={{ borderRadius: "50%", flexShrink: 0 }} />
+          <img src={t.author_avatar} alt="" width={24} height={24} style={{ borderRadius: "50%", flexShrink: 0, boxShadow: "0 0 0 1px var(--jh-avatar-ring, transparent)" }} />
         ) : null}
         <div style={{ minWidth: 0 }}>
-          <span style={{ fontWeight: 700, color: "#222" }}>{t.author ?? "someone"}</span>{" "}
-          <span style={{ color: "#999", fontSize: 10.5 }}>{fmtTime(t.created_at)}</span>{" "}
+          <span style={{ fontWeight: 700, color: "var(--jh-card-fg, #222)" }}>{t.author ?? "someone"}</span>{" "}
+          <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(t.created_at)}</span>{" "}
           {t.resolved ? <Badge kind="res">resolved</Badge> : null}
           {t.orphaned ? <Badge kind="orp">orphaned</Badge> : null}
-          <div style={{ color: "#222", marginTop: 2, fontFamily: "Georgia, serif", fontSize: 13, lineHeight: 1.45 }}>
+          <div style={{ color: "var(--jh-card-fg, #222)", marginTop: 2, fontFamily: "Georgia, serif", fontSize: 13, lineHeight: 1.45 }}>
             {t.body}
-            {t.edited_at ? <span style={{ color: "#aaa", fontSize: 10.5 }}> (edited)</span> : null}
+            {t.edited_at ? <span style={{ color: "var(--jh-card-faint, #aaa)", fontSize: 10.5 }}> (edited)</span> : null}
           </div>
           <Reactions reactions={t.reactions} canComment={canComment} onReact={onReact} />
         </div>
       </div>
 
       {t.replies.length ? (
-        <div style={{ padding: "0 9px 6px", color: "#999", fontSize: 10.5 }}>
+        <div style={{ padding: "0 9px 6px", color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>
           {t.replies.length} repl{t.replies.length > 1 ? "ies" : "y"} ▾
         </div>
       ) : null}
 
       {pinned ? (
-        <div style={{ borderTop: "1px solid #f1f1f1" }}>
+        <div style={{ borderTop: "1px solid var(--jh-card-line, #f1f1f1)" }}>
           {t.replies.map((r) => (
             <div
               key={r.id}
-              style={{ padding: "7px 9px 7px 26px", borderTop: "1px solid #f6f6f6", background: "#fcfcfc", display: "flex", gap: 6 }}
+              style={{ padding: "7px 9px 7px 26px", borderTop: "1px solid var(--jh-card-line2, #f6f6f6)", background: "var(--jh-reply-bg, #fcfcfc)", display: "flex", gap: 6 }}
             >
               {r.author_avatar ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={r.author_avatar} alt="" width={20} height={20} style={{ borderRadius: "50%" }} />
+                <img src={r.author_avatar} alt="" width={20} height={20} style={{ borderRadius: "50%", boxShadow: "0 0 0 1px var(--jh-avatar-ring, transparent)" }} />
               ) : null}
               <div>
-                <span style={{ fontWeight: 700, color: "#222" }}>{r.author ?? "someone"}</span>{" "}
-                <span style={{ color: "#999", fontSize: 10.5 }}>{fmtTime(r.created_at)}</span>
-                <div style={{ color: "#222", fontFamily: "Georgia, serif", fontSize: 13, lineHeight: 1.45 }}>{r.body}</div>
+                <span style={{ fontWeight: 700, color: "var(--jh-card-fg, #222)" }}>{r.author ?? "someone"}</span>{" "}
+                <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(r.created_at)}</span>
+                <div style={{ color: "var(--jh-card-fg, #222)", fontFamily: "Georgia, serif", fontSize: 13, lineHeight: 1.45 }}>{r.body}</div>
               </div>
             </div>
           ))}
 
           {/* actions row: resolve/unresolve, delete */}
-          <div data-no-pin style={{ display: "flex", gap: 10, padding: "6px 9px", fontSize: 11, color: "#888", borderTop: "1px solid #f6f6f6" }}>
+          <div data-no-pin style={{ display: "flex", gap: 10, padding: "6px 9px", fontSize: 11, color: "var(--jh-card-muted, #888)", borderTop: "1px solid var(--jh-card-line2, #f6f6f6)" }}>
             {canComment ? (
               <span style={{ cursor: "pointer" }} onClick={() => onResolve(!t.resolved)}>
                 {t.resolved ? "unresolve" : "resolve"}
@@ -852,7 +958,7 @@ const Card = forwardRef<
           </div>
 
           {canComment ? (
-            <div data-no-pin style={{ padding: "7px 9px", borderTop: "1px solid #eee", background: "#fafafa" }}>
+            <div data-no-pin style={{ padding: "7px 9px", borderTop: "1px solid var(--jh-rail-line, #eee)", background: "var(--jh-composer-bg, #fafafa)" }}>
               <textarea
                 value={replyText}
                 placeholder="Reply…"
@@ -875,7 +981,7 @@ const Card = forwardRef<
           ) : null}
         </div>
       ) : (
-        <div style={{ fontSize: 10.5, color: "#aaa", padding: "0 9px 8px" }}>
+        <div style={{ fontSize: 10.5, color: "var(--jh-card-faint, #aaa)", padding: "0 9px 8px" }}>
           click to {t.orphaned ? "view" : "reply"}…
         </div>
       )}
@@ -890,10 +996,10 @@ function DraftCard({ onSubmit, onCancel }: { onSubmit: (body: string) => void; o
     ref.current?.focus();
   }, []);
   return (
-    <div style={{ background: "#fff", border: "1px solid #111", borderRadius: 7, marginBottom: 7, padding: "8px 9px", boxShadow: "0 3px 14px rgba(0,0,0,.18)" }}>
+    <div style={{ background: "var(--jh-card-bg, #fff)", border: "1px solid var(--jh-card-pin-border, #111)", borderRadius: 7, marginBottom: 7, padding: "8px 9px", boxShadow: "var(--jh-card-pin-shadow, 0 3px 14px rgba(0,0,0,.18))" }}>
       <textarea ref={ref} value={text} placeholder="Comment…" onChange={(e) => setText(e.target.value)} style={composerTextarea} />
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5 }}>
-        <button onClick={onCancel} style={{ font: "inherit", background: "transparent", border: "1px solid #ccc", borderRadius: 4, padding: "3px 9px", cursor: "pointer" }}>
+        <button onClick={onCancel} style={{ font: "inherit", color: "var(--jh-card-fg, inherit)", background: "transparent", border: "1px solid var(--jh-input-border, #ccc)", borderRadius: 4, padding: "3px 9px", cursor: "pointer" }}>
           Cancel
         </button>
         <button disabled={!text.trim()} onClick={() => onSubmit(text.trim())} style={composerBtn(!text.trim())}>
@@ -913,7 +1019,7 @@ function Reactions({ reactions, canComment, onReact }: { reactions: Reaction[]; 
           key={r.emoji}
           title={r.authors.join(", ")}
           onClick={() => canComment && onReact(r.emoji)}
-          style={{ fontSize: 11, border: "1px solid #e0e0e0", borderRadius: 9, padding: "0 6px", background: "#fafafa", cursor: canComment ? "pointer" : "default" }}
+          style={{ fontSize: 11, color: "var(--jh-card-fg, inherit)", border: "1px solid var(--jh-chip-border, #e0e0e0)", borderRadius: 9, padding: "0 6px", background: "var(--jh-chip-bg, #fafafa)", cursor: canComment ? "pointer" : "default" }}
         >
           {r.emoji} {r.count}
         </span>
@@ -928,7 +1034,7 @@ function Reactions({ reactions, canComment, onReact }: { reactions: Reaction[]; 
             ))}
           </span>
         ) : (
-          <span style={{ fontSize: 11, color: "#999", cursor: "pointer", border: "1px solid #e0e0e0", borderRadius: 9, padding: "0 6px" }} onClick={() => setOpen(true)}>
+          <span style={{ fontSize: 11, color: "var(--jh-card-muted, #999)", cursor: "pointer", border: "1px solid var(--jh-chip-border, #e0e0e0)", borderRadius: 9, padding: "0 6px" }} onClick={() => setOpen(true)}>
             + react
           </span>
         )
@@ -940,8 +1046,8 @@ function Reactions({ reactions, canComment, onReact }: { reactions: Reaction[]; 
 function Badge({ kind, children }: { kind: "res" | "orp"; children: React.ReactNode }) {
   const styles =
     kind === "res"
-      ? { background: "#eaf3ec", color: "#5a7a64" }
-      : { background: "#fbecec", color: "#b04a4a" };
+      ? { background: "var(--jh-badge-res-bg, #eaf3ec)", color: "var(--jh-badge-res-fg, #5a7a64)" }
+      : { background: "var(--jh-badge-orp-bg, #fbecec)", color: "var(--jh-badge-orp-fg, #b04a4a)" };
   return (
     <span style={{ display: "inline-block", fontSize: 9.5, padding: "0 5px", borderRadius: 8, letterSpacing: ".03em", ...styles }}>
       {children}
@@ -973,8 +1079,8 @@ const RAIL_CSS = `
     width: min(86vw, 340px) !important;
     transform: translateX(100%);
     transition: transform .24s ease;
-    border-left: 1px solid #ccc;
-    box-shadow: -6px 0 24px rgba(0,0,0,.18);
+    border-left: 1px solid var(--jh-rail-border, #ccc);
+    box-shadow: -6px 0 24px var(--jh-drawer-shadow, rgba(0,0,0,.18));
     z-index: 25;
   }
   /* Keep the drawer in the DOM when closed (off-screen) so the doc is genuinely
@@ -988,6 +1094,10 @@ const RAIL_CSS = `
 
 // --------------------------- styles ---------------------------
 
+// Transition applied to every themed chrome color so a late jh:theme refinement
+// (e.g. SSR coarse theme → overlay-confirmed colors) fades instead of snapping.
+const CHROME_TRANSITION = "background-color .22s ease, color .22s ease, border-color .22s ease, box-shadow .22s ease";
+
 function commentBtnStyle(pressed: boolean): React.CSSProperties {
   return {
     font: "inherit",
@@ -995,20 +1105,21 @@ function commentBtnStyle(pressed: boolean): React.CSSProperties {
     display: "inline-flex",
     alignItems: "center",
     gap: 5,
-    border: pressed ? "1px solid #111" : "1px solid #ccc",
-    background: pressed ? "#111" : "#fafafa",
-    color: pressed ? "#fff" : "#111",
+    border: pressed ? "1px solid var(--jh-tog-on-border, #111)" : "1px solid var(--jh-tog-border, #ccc)",
+    background: pressed ? "var(--jh-tog-on-bg, #111)" : "var(--jh-tog-bg, #fafafa)",
+    color: pressed ? "var(--jh-tog-on-fg, #fff)" : "var(--jh-tog-fg, #111)",
     borderRadius: 6,
     padding: "2px 9px",
     cursor: "pointer",
     lineHeight: 1.6,
+    transition: CHROME_TRANSITION,
   };
 }
 
 const scrimStyle: React.CSSProperties = {
   position: "absolute",
   inset: 0,
-  background: "rgba(0,0,0,.32)",
+  background: "var(--jh-scrim-bg, rgba(0,0,0,.32))",
   zIndex: 20,
   opacity: 0,
   pointerEvents: "none",
@@ -1017,7 +1128,7 @@ const scrimStyle: React.CSSProperties = {
 
 const railCloseStyle: React.CSSProperties = {
   cursor: "pointer",
-  color: "#888",
+  color: "var(--jh-rail-muted, #888)",
   fontSize: 15,
   lineHeight: 1,
   border: "none",
@@ -1035,39 +1146,43 @@ const barStyle: React.CSSProperties = {
   padding: "0 1.25rem",
   fontFamily: MONO,
   fontSize: 13,
-  borderBottom: "1px solid #ccc",
-  color: "#111",
-  background: "#fff",
+  borderBottom: "1px solid var(--jh-bar-border, #ccc)",
+  color: "var(--jh-bar-fg, #111)",
+  background: "var(--jh-bar-bg, #fff)",
+  transition: CHROME_TRANSITION,
 };
 
 const stageStyle: React.CSSProperties = {
   display: "flex",
   height: "calc(100vh - 2.4rem)",
-  background: "#fff",
+  background: "var(--jh-stage-bg, #fff)",
+  transition: CHROME_TRANSITION,
 };
 
 const railStyle: React.CSSProperties = {
   width: 320,
   flexShrink: 0,
-  borderLeft: "1px solid #e2e2e2",
-  background: "#fbfbfb",
+  borderLeft: "1px solid var(--jh-rail-border, #e2e2e2)",
+  background: "var(--jh-rail-bg, #fbfbfb)",
   position: "relative",
   overflowY: "auto",
   fontFamily: MONO,
+  transition: CHROME_TRANSITION,
 };
 
 const railHeadStyle: React.CSSProperties = {
   position: "sticky",
   top: 0,
-  background: "#fbfbfb",
-  borderBottom: "1px solid #eee",
+  background: "var(--jh-rail-bg, #fbfbfb)",
+  borderBottom: "1px solid var(--jh-rail-line, #eee)",
   padding: "6px 10px",
   fontSize: 11,
-  color: "#666",
+  color: "var(--jh-rail-muted, #666)",
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
   zIndex: 5,
+  transition: CHROME_TRANSITION,
 };
 
 const docReactionsRowStyle: React.CSSProperties = {
@@ -1076,8 +1191,9 @@ const docReactionsRowStyle: React.CSSProperties = {
   gap: 4,
   flexWrap: "wrap",
   padding: "5px 10px",
-  borderBottom: "1px solid #eee",
-  background: "#fbfbfb",
+  borderBottom: "1px solid var(--jh-rail-line, #eee)",
+  background: "var(--jh-rail-bg, #fbfbfb)",
+  transition: CHROME_TRANSITION,
 };
 
 const seltoolPickerStyle: React.CSSProperties = {
@@ -1086,10 +1202,10 @@ const seltoolPickerStyle: React.CSSProperties = {
   top: 0,
   display: "flex",
   gap: 2,
-  background: "#111",
+  background: "var(--jh-sel-bg, #111)",
   borderRadius: 7,
   padding: "3px 5px",
-  boxShadow: "0 4px 14px rgba(0,0,0,.3)",
+  boxShadow: "0 4px 14px var(--jh-sel-shadow, rgba(0,0,0,.3))",
   whiteSpace: "nowrap",
 };
 
@@ -1099,10 +1215,11 @@ const seltoolStyle: React.CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 2,
-  background: "#111",
+  background: "var(--jh-sel-bg, #111)",
+  border: "1px solid var(--jh-sel-border, #111)",
   borderRadius: 7,
   padding: 4,
-  boxShadow: "0 4px 14px rgba(0,0,0,.3)",
+  boxShadow: "0 4px 14px var(--jh-sel-shadow, rgba(0,0,0,.3))",
   zIndex: 30,
 };
 
@@ -1111,7 +1228,7 @@ const seltoolBtn: React.CSSProperties = {
   height: 30,
   border: "none",
   background: "transparent",
-  color: "#fff",
+  color: "var(--jh-sel-fg, #fff)",
   fontSize: 15,
   cursor: "pointer",
   borderRadius: 5,
@@ -1119,22 +1236,24 @@ const seltoolBtn: React.CSSProperties = {
 
 const composerTextarea: React.CSSProperties = {
   width: "100%",
-  border: "1px solid #d4d4d4",
+  border: "1px solid var(--jh-input-border, #d4d4d4)",
   borderRadius: 4,
   fontFamily: MONO,
   fontSize: 12,
   padding: 5,
   resize: "vertical",
   minHeight: 34,
+  background: "var(--jh-input-bg, #fff)",
+  color: "var(--jh-card-fg, #222)",
 };
 
 function composerBtn(disabled: boolean): React.CSSProperties {
   return {
     fontFamily: MONO,
     fontSize: 12,
-    border: "1px solid #111",
-    background: "#111",
-    color: "#fff",
+    border: "1px solid var(--jh-btn-border, #111)",
+    background: "var(--jh-btn-bg, #111)",
+    color: "var(--jh-btn-fg, #fff)",
     borderRadius: 4,
     padding: "3px 11px",
     cursor: disabled ? "default" : "pointer",

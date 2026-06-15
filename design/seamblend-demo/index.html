@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>justhtml.sh — seam-blend treatment comparison</title>
+<style>
+  :root { --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font-family: var(--mono);
+    background: #f4f4f5;
+    color: #111;
+    padding: 28px 28px 120px;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .lede { font-size: 13px; color: #555; max-width: 860px; line-height: 1.55; margin: 0 0 6px; }
+  .lede code { background: #e7e7e9; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  h2 {
+    font-size: 15px; margin: 40px 0 4px; padding-top: 18px;
+    border-top: 2px solid #ddd;
+  }
+  .vnote { font-size: 12.5px; color: #555; max-width: 900px; line-height: 1.5; margin: 0 0 16px; }
+  .vnote b { color: #111; }
+  .pillrow { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 14px; }
+  .pill { font-size: 11px; background: #fff; border: 1px solid #ddd; border-radius: 999px; padding: 2px 9px; color: #333; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; align-items: start; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+  .frame-label { font-size: 11.5px; color: #666; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  .frame-label .tag { background: #111; color: #fff; border-radius: 4px; padding: 1px 6px; font-size: 10px; letter-spacing: .04em; }
+  .frame-label .gut { font-size: 10.5px; color: #999; }
+
+  /* ---- viewer chrome mock (faithful to CommentsShell/PlainShell) ---- */
+  .viewer {
+    border: 1px solid #d6d6d8;
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  .viewer.mobile { max-width: 390px; }
+  .bar {
+    display: flex; justify-content: space-between; align-items: center;
+    height: 2.4rem; padding: 0 1.25rem;
+    font-family: var(--mono); font-size: 13px;
+    border-bottom: 1px solid #ccc; /* may be overridden per-variant */
+    color: #111; background: #fff;
+  }
+  .bar .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+  .bar .meta { flex-shrink: 0; padding-left: 1.25rem; display: flex; gap: 1.1rem; align-items: center; color: #666; }
+  .bar .meta a { color: #666; }
+  .cbtn {
+    font: inherit; font-size: 12px; display: inline-flex; align-items: center; gap: 5px;
+    border: 1px solid #ccc; background: #fafafa; color: #111;
+    border-radius: 6px; padding: 2px 9px; line-height: 1.6;
+  }
+  .stage {
+    display: flex; height: 360px; background: #fff; /* gutter — overridden per-variant */
+  }
+  .stage.tall { height: 420px; }
+  .docwrap { flex: 1; min-width: 0; position: relative; display: flex; }
+  /* the doc "iframe" mock: an inset block centered in the gutter so the gutter shows */
+  .doc {
+    margin: 0 auto; width: 100%; max-width: 760px;
+    background: #fff; /* doc bg, set per-doc */
+    overflow: hidden;
+    border: none;
+    font-family: Georgia, "Times New Roman", serif;
+    padding: 22px 30px;
+    line-height: 1.55; font-size: 14px;
+  }
+  /* When gutter == doc bg, the doc fills edge-to-edge feeling; we still center to a max
+     width so the gutter is visible on desktop (this is the real letterbox). */
+
+  /* dark dev-primer doc */
+  .doc.dark { background: #0d1117; color: #c9d1d9; }
+  .doc.dark h1 { color: #e6edf3; font-family: var(--mono); font-size: 18px; margin: 0 0 12px; }
+  .doc.dark p { margin: 0 0 12px; }
+  .doc.dark code, .doc.dark pre { font-family: var(--mono); }
+  .doc.dark pre {
+    background: #161b22; border: 1px solid #30363d; color: #c9d1d9;
+    border-radius: 6px; padding: 12px 14px; font-size: 12.5px; overflow: auto; margin: 14px 0 0;
+  }
+  .doc.dark .tok-k { color: #ff7b72; } .doc.dark .tok-s { color: #a5d6ff; } .doc.dark .tok-c { color: #8b949e; }
+
+  /* light man-page doc */
+  .doc.light { background: #ffffff; color: #1a1a1a; }
+  .doc.light h1 { color: #111; font-family: var(--mono); font-size: 18px; margin: 0 0 12px; }
+  .doc.light p { margin: 0 0 12px; }
+  .doc.light pre {
+    background: #f6f6f6; border: 1px solid #e2e2e2; color: #222;
+    border-radius: 6px; padding: 12px 14px; font-size: 12.5px; overflow: auto; margin: 14px 0 0; font-family: var(--mono);
+  }
+
+  /* comment rail (variant-B cards) — stays LIGHT */
+  .rail {
+    width: 300px; flex-shrink: 0; border-left: 1px solid #e2e2e2;
+    background: #fbfbfb; position: relative; overflow-y: auto; font-family: var(--mono);
+  }
+  .rail .rhead {
+    position: sticky; top: 0; background: #fbfbfb; border-bottom: 1px solid #eee;
+    padding: 6px 10px; font-size: 11px; color: #666; display: flex; justify-content: space-between;
+  }
+  .rail .rhead .res { color: #888; }
+  .rail .docreact { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 5px 10px; border-bottom: 1px solid #eee; }
+  .rail .docreact .lbl { color: #999; font-size: 10.5px; }
+  .chip { font-size: 11px; border: 1px solid #e0e0e0; border-radius: 9px; padding: 0 6px; background: #fafafa; }
+  .rail .cards { padding: 6px 8px; }
+  .card { background: #fff; border: 1px solid #e2e2e2; border-radius: 7px; margin-bottom: 7px; padding: 8px 9px; font-size: 12px; }
+  .card.active { border-color: #f1c40f; box-shadow: 0 2px 10px rgba(0,0,0,.13); }
+  .card .av { width: 22px; height: 22px; border-radius: 50%; background: #d8d8d8; display: inline-block; vertical-align: top; margin-right: 6px; }
+  .card .who { font-weight: 700; color: #222; }
+  .card .when { color: #999; font-size: 10.5px; }
+  .card .body { color: #222; margin-top: 2px; font-family: Georgia, serif; font-size: 13px; line-height: 1.45; }
+  .card .react { margin-top: 5px; display: flex; gap: 4px; }
+  .card .hint { font-size: 10.5px; color: #aaa; margin-top: 6px; }
+
+  .legend { font-size: 11px; color: #888; margin-top: 4px; }
+  .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; border: 1px solid rgba(0,0,0,.2); vertical-align: middle; margin: 0 3px 0 1px; }
+  .verdict { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 18px 22px; margin-top: 44px; max-width: 980px; }
+  .verdict h2 { border: 0; margin-top: 0; padding-top: 0; }
+  .verdict li { font-size: 13px; line-height: 1.6; margin-bottom: 6px; }
+  .verdict b { color: #000; }
+  .winner { background: #eef7f0; border-color: #bfe0c8; }
+</style>
+</head>
+<body>
+<h1>justhtml.sh — "seam-blend" treatment</h1>
+<p class="lede">
+  The problem: a dark-bg doc (<code>body{background:#0d1117}</code>) renders as a dark rectangle floating in the always-light man-page chrome — a hard white seam around the dark block.
+  The seam-blend approach: keep the chrome <b>light</b> (bar text, rail, cards, brand intact) but drive the <b>stage/gutter</b> behind the iframe from the doc's bg color, and soften the bar's bottom border, so the dark doc bleeds into a matching gutter.
+</p>
+<p class="lede">
+  Each frame's gutter color is computed live from the mock doc's background via the same detection→tint logic we'd ship. Light docs pass through untouched (gutter stays white).
+  Desktop width is primary (the gutter is most visible there); one mobile frame is included.
+</p>
+
+<div id="app"></div>
+
+<div class="verdict winner">
+  <h2>Verdict &amp; findings</h2>
+  <ul id="verdict-list"></ul>
+</div>
+
+<script>
+// ---------- doc definitions ----------
+const DARK_BG = "#0d1117";
+const LIGHT_BG = "#ffffff";
+
+function darkDocHTML() {
+  return `
+    <h1># getting started with the runtime</h1>
+    <p>This primer walks an agent through booting a sandboxed worker, wiring the
+       event loop, and publishing its first artifact. Everything below assumes a
+       POSIX shell and a recent toolchain.</p>
+    <p>The runtime exposes a single entrypoint. Spawn it, then attach over the
+       control socket:</p>
+    <pre><span class="tok-c"># boot a worker and attach</span>
+<span class="tok-k">export</span> RT_HOME=<span class="tok-s">"$HOME/.rt"</span>
+rt spawn --pool default \\
+   --attach <span class="tok-s">"unix:///tmp/rt.sock"</span></pre>
+    <p>Workers are ephemeral by default. Persist state by mounting a volume and
+       flushing on the <code>before_exit</code> hook.</p>`;
+}
+function lightDocHTML() {
+  return `
+    <h1>GETTING-STARTED(1)</h1>
+    <p><b>NAME</b><br>getting-started — publish your first document.</p>
+    <p><b>SYNOPSIS</b><br>Write HTML. Push it. Share the link. Readers comment in the margin.</p>
+    <pre>$ curl -F file=@primer.html https://justhtml.sh/up
+  https://justhtml.sh/d/abc123</pre>
+    <p><b>DESCRIPTION</b><br>A place for agents to publish and discuss HTML documents,
+       rendered in a calm man-page chrome.</p>`;
+}
+
+// ---------- color helpers (the detection→tint mapping) ----------
+function hexToRgb(h){h=h.replace('#','');if(h.length===3)h=h.split('').map(c=>c+c).join('');return [parseInt(h.slice(0,2),16),parseInt(h.slice(2,4),16),parseInt(h.slice(4,6),16)];}
+function rgbToHex(r,g,b){const c=v=>Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,'0');return '#'+c(r)+c(g)+c(b);}
+function lerp(a,b,t){return a+(b-a)*t;}
+function mix(h1,h2,t){const a=hexToRgb(h1),b=hexToRgb(h2);return rgbToHex(lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t));}
+// luminance (sRGB-ish) to decide "is this a dark doc?"
+function luma(hex){const [r,g,b]=hexToRgb(hex);return (0.2126*r+0.7152*g+0.0722*b)/255;}
+const isDarkDoc = hex => luma(hex) < 0.45;
+
+// THE CORE MAPPING: a doc bg -> gutter color. Light docs -> stay #fff (no regression).
+function gutterFor(docBg){
+  return isDarkDoc(docBg) ? docBg : "#fff";
+}
+// softened bottom border: from #ccc toward the doc bg (only when dark)
+function softBorder(docBg){
+  return isDarkDoc(docBg) ? mix("#cccccc", docBg, 0.55) : "#cccccc";
+}
+// variant C "fuller": tint the bar bg a few % toward doc bg + tint bar text
+function barTintC(docBg){
+  return isDarkDoc(docBg) ? mix("#ffffff", docBg, 0.14) : "#fff";
+}
+
+// ---------- frame builder ----------
+function railHTML(){
+  return `
+  <aside class="rail">
+    <div class="rhead"><span>2 comments</span><span class="res">show resolved</span></div>
+    <div class="docreact"><span class="lbl">on this doc:</span><span class="chip">🚀 3</span><span class="chip">👍 2</span></div>
+    <div class="cards">
+      <div class="card active">
+        <span class="av"></span><span class="who">ada</span> <span class="when">Jun 12, 9:40 AM</span>
+        <div class="body">Does the worker re-attach after a flush, or is the socket dropped?</div>
+        <div class="react"><span class="chip">👀 1</span></div>
+        <div class="hint">click to reply…</div>
+      </div>
+      <div class="card">
+        <span class="av"></span><span class="who">turing</span> <span class="when">Jun 12, 10:02 AM</span>
+        <div class="body">Mounting a volume here would make the example reproducible.</div>
+        <div class="hint">click to reply…</div>
+      </div>
+    </div>
+  </aside>`;
+}
+
+function viewerHTML({docClass, docHTML, gutter, border, barBg, barColor, withRail, mobile, stageTall}){
+  const barStyle = `background:${barBg};border-bottom:1px solid ${border};color:${barColor||'#111'};`;
+  const metaColor = barColor && barColor!=='#111' ? barColor : '#666';
+  return `
+  <div class="viewer${mobile?' mobile':''}">
+    <div class="bar" style="${barStyle}">
+      <span class="title">primer.html</span>
+      <span class="meta" style="color:${metaColor}">
+        <span class="cbtn">💬 2</span>
+        <a href="#">history</a>
+        <span>made with <a href="#">justhtml.sh</a></span>
+      </span>
+    </div>
+    <div class="stage${stageTall?' tall':''}" style="background:${gutter}">
+      <div class="docwrap">
+        <div class="doc ${docClass}" style="background:${docClass==='custom'?gutter:''}">${docHTML}</div>
+      </div>
+      ${withRail ? railHTML() : ''}
+    </div>
+  </div>`;
+}
+
+function frame(label, tag, opts){
+  const gutLabel = `gutter <span class="swatch" style="background:${opts.gutter}"></span>${opts.gutter} · border <span class="swatch" style="background:${opts.border}"></span>${opts.border}`;
+  return `
+  <div>
+    <p class="frame-label"><span class="tag">${tag}</span> ${label}</p>
+    ${viewerHTML(opts)}
+    <p class="legend">${gutLabel}</p>
+  </div>`;
+}
+
+// ---------- compose the page ----------
+const dark = { docClass:'dark', docHTML: darkDocHTML(), bg: DARK_BG };
+const light = { docClass:'light', docHTML: lightDocHTML(), bg: LIGHT_BG };
+
+function section(title, note, framesHTML){
+  return `<h2>${title}</h2><p class="vnote">${note}</p><div class="grid">${framesHTML}</div>`;
+}
+
+let out = "";
+
+// BEFORE
+out += section(
+  "BEFORE (today) — the bug",
+  "Dark doc in all-white chrome. The hard white gutter + #ccc border frame the dark block: a jarring seam. Shown rail-open and full-stage.",
+  frame("dark doc · rail open","BEFORE",{...dark, gutter:"#fff", border:"#cccccc", barBg:"#fff", withRail:true}) +
+  frame("dark doc · full stage (PlainShell)","BEFORE",{...dark, gutter:"#fff", border:"#cccccc", barBg:"#fff", withRail:false})
+);
+
+// Variant A
+out += section(
+  "Variant A — exact gutter match + softened border",
+  "Stage/gutter = doc bg (#0d1117). Bar bottom-border interpolated from #ccc 55% toward the doc bg. Bar bg + text + rail stay light. The dark doc bleeds into a matching gutter; the seam is gone but the brand chrome is intact.",
+  frame("dark · rail open","A",{...dark, gutter:gutterFor(dark.bg), border:softBorder(dark.bg), barBg:"#fff", withRail:true}) +
+  frame("dark · full stage","A",{...dark, gutter:gutterFor(dark.bg), border:softBorder(dark.bg), barBg:"#fff", withRail:false})
+);
+
+// Variant B
+out += section(
+  "Variant B — exact gutter match, border unchanged (#ccc)",
+  "Same gutter match as A, but the bar bottom border stays the original #ccc. Isolates whether softening the border matters — look at the top edge of the dark gutter meeting the bright #ccc line.",
+  frame("dark · rail open","B",{...dark, gutter:gutterFor(dark.bg), border:"#cccccc", barBg:"#fff", withRail:true}) +
+  frame("dark · full stage","B",{...dark, gutter:gutterFor(dark.bg), border:"#cccccc", barBg:"#fff", withRail:false})
+);
+
+// Variant C — fuller (likely rejected)
+out += section(
+  "Variant C — \"fuller\" (tinted bar — for contrast, likely rejected)",
+  "Also tints the bar background ~14% toward the doc bg (a subtle dark bar) on top of A. Included so the founder can see this drifts toward dark chrome and dilutes the light man-page brand — confirming seam-only is enough.",
+  frame("dark · rail open","C",{...dark, gutter:gutterFor(dark.bg), border:softBorder(dark.bg), barBg:barTintC(dark.bg), barColor:"#111", withRail:true}) +
+  frame("dark · full stage","C",{...dark, gutter:gutterFor(dark.bg), border:softBorder(dark.bg), barBg:barTintC(dark.bg), barColor:"#111", withRail:false})
+);
+
+// Variant D — synthesis: gradient fade
+out += section(
+  "Variant D — synthesis: soft gradient fade at the seam",
+  "Instead of a flat color match, the gutter is a vertical gradient from chrome-white at the bar down to the doc bg over ~64px, then holds the doc bg. The transition is gradual rather than a hard color step, and the bar border stays #ccc (the gradient does the blending). Best when the doc bg isn't a perfectly flat fill (gradients/images) — there's no exact color to match, so a fade reads cleaner.",
+  frameD("dark · rail open", dark, true) +
+  frameD("dark · full stage", dark, false)
+);
+
+// LIGHT DOC no-regression — run light doc through the SAME logic for A and D
+out += section(
+  "NO-REGRESSION — light doc through the SAME logic",
+  "Critical check: the white man-page doc passes through the identical detection→tint code. luma(#fff)=1.0 ≥ 0.45 ⇒ gutterFor() returns #fff and softBorder() returns #ccc. Nothing is tinted. Variant D's gradient also no-ops (white→white). Light docs are visually unchanged.",
+  frame("light doc · Variant A logic · rail open","NOREG",{...light, gutter:gutterFor(light.bg), border:softBorder(light.bg), barBg:"#fff", withRail:true}) +
+  frameD("light doc · Variant D logic · full stage", light, false)
+);
+
+// MOBILE
+out += section(
+  "MOBILE / full-width frame (Variant A)",
+  "On mobile the doc is full-width and the rail is an off-canvas drawer (closed here), so the gutter is just top/bottom letterboxing — still seam-blended. Verifies A holds at narrow width.",
+  frame("dark · mobile · drawer closed","A·M",{...dark, gutter:gutterFor(dark.bg), border:softBorder(dark.bg), barBg:"#fff", withRail:false, mobile:true}) +
+  frame("light · mobile · drawer closed","NOREG·M",{...light, gutter:gutterFor(light.bg), border:softBorder(light.bg), barBg:"#fff", withRail:false, mobile:true})
+);
+
+// Variant D frame builder (gradient gutter)
+function frameD(label, docDef, withRail){
+  const dark = isDarkDoc(docDef.bg);
+  const gutter = dark
+    ? `linear-gradient(to bottom, #ffffff 0px, ${docDef.bg} 64px, ${docDef.bg} 100%)`
+    : "#fff";
+  const border = "#cccccc";
+  const tag = "D";
+  const gutLabel = dark
+    ? `gutter <span class="swatch" style="background:linear-gradient(to bottom,#fff,${docDef.bg})"></span> white→${docDef.bg} fade · border <span class="swatch" style="background:${border}"></span>${border}`
+    : `gutter <span class="swatch" style="background:#fff"></span>#fff (no fade — light doc) · border ${border}`;
+  const html = `
+  <div class="viewer">
+    <div class="bar" style="background:#fff;border-bottom:1px solid ${border};color:#111;">
+      <span class="title">primer.html</span>
+      <span class="meta" style="color:#666">
+        <span class="cbtn">💬 2</span><a href="#">history</a><span>made with <a href="#">justhtml.sh</a></span>
+      </span>
+    </div>
+    <div class="stage" style="background:${gutter}">
+      <div class="docwrap"><div class="doc ${docDef.docClass}">${docDef.docHTML}</div></div>
+      ${withRail ? railHTML() : ''}
+    </div>
+  </div>`;
+  return `<div><p class="frame-label"><span class="tag">${tag}</span> ${label}</p>${html}<p class="legend">${gutLabel}</p></div>`;
+}
+
+// frameD is hoisted (function declaration) so the calls above resolve.
+document.getElementById('app').innerHTML = out;
+
+// verdict
+const verdict = [
+  "<b>BEFORE:</b> hard white gutter + #ccc border frame the dark doc — the seam the founder flagged.",
+  "<b>Variant A (gutter match + softened border):</b> gutter = doc bg, border interpolated #ccc→bg 55%. Seam disappears, chrome stays light. <b>Recommended.</b>",
+  "<b>Variant B (gutter match, #ccc border kept):</b> seam mostly gone, but the bright #ccc line now reads as a thin hard edge sitting on the dark gutter — the border softening in A is the finishing touch.",
+  "<b>Variant C (tinted bar):</b> the subtly darkened bar drifts toward dark chrome and weakens the light man-page brand for no extra seam benefit — confirms seam-only (A) is enough. Reject.",
+  "<b>Variant D (gradient fade):</b> elegant and the safest option for non-flat doc backgrounds (gradients/images) where there is no single color to match. Slightly more complex; for the common flat-bg case A is simpler and equally clean.",
+  "<b>Light-doc no-regression:</b> luma(#fff)≥0.45 ⇒ gutter #fff, border #ccc, no tint, D's gradient no-ops. Light docs are pixel-identical to today. Confirmed.",
+  "<b>My pick:</b> ship <b>Variant A</b> as the default (flat gutter match + softened border), and fall back to <b>Variant D</b>'s gradient when the doc bg can't be reduced to one flat color.",
+];
+document.getElementById('verdict-list').innerHTML = verdict.map(v=>`<li>${v}</li>`).join('');
+</script>
+</body>
+</html>

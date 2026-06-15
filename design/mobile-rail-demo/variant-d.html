@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<!--
+  VARIANT D — synthesis: marginalia gutter + single-thread peek + full sheet.
+
+  THE IDEA: the founder's "marginalia not heavier than the document" vibe, made
+  literal on mobile. The doc stays full width, but a THIN (28px) right gutter
+  shows one small dot per anchored thread, vertically aligned to its highlight
+  (using jh:positions, exactly like desktop card alignment). The gutter is
+  marginalia — it never crushes the doc. Tapping a dot (or its highlight) raises
+  a SINGLE-THREAD peek (a short bottom sheet, ~38vh) — just that one
+  conversation, the lightest possible reveal. A "💬 N — all" button in the bar
+  (or the peek's "see all ↑") raises the FULL rail sheet (72vh) for browsing
+  everything. So: glanceable by default, one thread on demand, full rail when
+  wanted.
+
+  MAPS TO PRODUCTION: same sandboxed-iframe shell. The gutter + peek + full
+  sheet ALL live in the shell, stacked above the iframe (the rail can't live in
+  the cross-origin iframe). The dots are driven by the same jh:positions the
+  overlay already emits for card alignment, so no new protocol is needed — the
+  shell just renders markers at those y-offsets instead of (or in addition to)
+  full cards.
+
+  DESKTOP (>768px): the proven side-by-side rail (gutter hidden); "💬 N"
+  collapses/re-opens the rail. The gutter is a mobile-only affordance.
+  MOBILE (<=768px): doc full width + 28px marker gutter; tap dot/highlight →
+  single-thread peek; "💬 N" or "see all" → full sheet.
+
+  TAP-A-HIGHLIGHT ON MOBILE: jh:focus{id} → raise the single-thread peek for
+  exactly that thread. This is the tightest coupling of the four: a tap shows
+  precisely the conversation about what you tapped, nothing else, and the doc
+  stays mostly visible.
+
+  ZERO COMMENTS: no gutter, no button, no dots. Pure doc.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>git-restage(1) — justhtml.sh</title>
+<link rel="stylesheet" href="shell.css" />
+<style>
+  .jh-gutter { display: none; }
+  .jh-peek { display: none; }
+  .jh-stage[data-rail="closed"] .jh-rail { display: none; }
+
+  @media (max-width: 768px) {
+    /* full rail = bottom sheet (browse everything), off by default */
+    .jh-rail {
+      position: absolute; left: 0; right: 0; bottom: 0; width: 100%; height: 72vh;
+      transform: translateY(100%); transition: transform .26s cubic-bezier(.2,.8,.2,1);
+      border-left: none; border-top: 1px solid #ccc; border-radius: 14px 14px 0 0;
+      box-shadow: 0 -8px 28px rgba(0,0,0,.2); z-index: 26;
+    }
+    .jh-stage[data-rail="open"] .jh-rail { transform: translateY(0); }
+    .jh-stage[data-rail="closed"] .jh-rail { display: block; }
+
+    /* thin marginalia gutter pinned to the right of the doc */
+    .jh-gutter {
+      display: block; position: absolute; top: 0; right: 0; bottom: 0; width: 28px;
+      border-left: 1px solid #eee; background: #fcfcfc; z-index: 10;
+    }
+    .jh-docwrap { margin-right: 28px; }   /* keep doc text clear of the gutter */
+    .jh-dot {
+      position: absolute; right: 8px; width: 12px; height: 12px; border-radius: 50%;
+      background: #ffd600; border: 1px solid #c79b00; cursor: pointer; transform: translateY(-50%);
+    }
+    .jh-dot[data-resolved="1"] { background: #e7efe9; border-color: #b6cbbd; }
+
+    /* single-thread peek — a short sheet, just one conversation */
+    .jh-peek {
+      display: block; position: absolute; left: 0; right: 0; bottom: 0; width: 100%;
+      max-height: 42vh; overflow-y: auto;
+      background: #fbfbfb; border-top: 1px solid #ccc; border-radius: 14px 14px 0 0;
+      box-shadow: 0 -8px 28px rgba(0,0,0,.2); z-index: 27;
+      transform: translateY(100%); transition: transform .24s ease;
+      font-family: var(--mono);
+    }
+    .jh-peek[data-open="1"] { transform: translateY(0); }
+    .jh-peekhead {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 8px 10px; border-bottom: 1px solid #eee; font-size: 11px; color: #666;
+      position: sticky; top: 0; background: #fbfbfb;
+    }
+    .jh-peekhead a { color: #555; cursor: pointer; }
+    .jh-seltool { right: 36px; }   /* clear the gutter */
+  }
+  @media (min-width: 769px) { .jh-scrim { display: none; } }
+</style>
+</head>
+<body>
+  <div class="jh-bar">
+    <span class="jh-title">git-restage(1)</span>
+    <span class="jh-barmeta">
+      <button class="jh-commentbtn" id="toggle" aria-pressed="true">💬 <span id="cnt"></span></button>
+      <a href="#">history</a>
+      <span>made with <a href="#">justhtml.sh</a></span>
+    </span>
+  </div>
+
+  <div class="jh-stage" id="stage" data-rail="open">
+    <div class="jh-docwrap">
+      <iframe id="doc" src="doc.html" sandbox="allow-scripts" referrerpolicy="no-referrer" title="git-restage(1)"></iframe>
+      <div class="jh-seltool" id="seltool" hidden>
+        <button title="add comment">💬</button>
+        <button title="add reaction">😊</button>
+      </div>
+    </div>
+    <div class="jh-gutter" id="gutter"></div>
+    <div class="jh-peek" id="peek"></div>
+    <div class="jh-scrim" id="scrim"></div>
+    <aside class="jh-rail" id="rail"></aside>
+  </div>
+
+<script src="mock.js"></script>
+<script>
+  var stage = document.getElementById('stage');
+  var rail = document.getElementById('rail');
+  var gutter = document.getElementById('gutter');
+  var peek = document.getElementById('peek');
+  var scrim = document.getElementById('scrim');
+  var toggle = document.getElementById('toggle');
+  var seltool = document.getElementById('seltool');
+  var docFrame = document.getElementById('doc');
+  document.getElementById('cnt').textContent = JH.count;
+
+  if (JH.total === 0) { toggle.style.display = 'none'; rail.style.display = 'none'; gutter.style.display = 'none'; }
+
+  function isMobile() { return window.matchMedia('(max-width: 768px)').matches; }
+  JH.renderRail(rail, { closeable: true, onClose: closeFull });
+
+  // --- full sheet (browse all) ---
+  function openFull() { closePeek(); stage.setAttribute('data-rail', 'open'); toggle.setAttribute('aria-pressed', 'true'); if (isMobile()) scrim.setAttribute('data-open','1'); }
+  function closeFull() { stage.setAttribute('data-rail', 'closed'); toggle.setAttribute('aria-pressed', 'false'); scrim.removeAttribute('data-open'); }
+  toggle.addEventListener('click', function () { stage.getAttribute('data-rail') === 'open' ? closeFull() : openFull(); });
+  scrim.addEventListener('click', function () { closeFull(); });
+
+  // --- single-thread peek ---
+  function openPeek(id) {
+    var t = JH.THREADS.filter(function (x) { return x.id === id; })[0];
+    if (!t) return;
+    var h = '<div class="jh-peekhead"><span>1 comment</span><span style="display:flex;gap:12px"><a id="seeall">see all ↑</a><a id="peekclose">✕</a></span></div>';
+    h += '<div class="jh-cards" style="padding-bottom:16px">';
+    h += '<div class="jh-card" data-focused="1"><div class="row"><img class="avatar" src="' + t.avatar + '"/><div style="min-width:0">';
+    h += '<span class="who">' + t.author + '</span> <span class="when">Jun 12, 2:14 PM</span>';
+    if (t.resolved) h += ' <span class="badge res">resolved</span>';
+    h += '<div class="body">' + t.body + '</div>';
+    t.reactions.forEach(function (r) { h += '<span class="jh-chip">' + r.emoji + ' ' + r.count + '</span>'; });
+    if (t.replies.length) t.replies.forEach(function (r) { h += '<div class="body" style="margin-top:8px;padding-left:8px;border-left:2px solid #eee"><span class="who">' + r.author + '</span><br>' + r.body + '</div>'; });
+    h += '</div></div><div class="hint">click to reply…</div></div></div>';
+    peek.innerHTML = h;
+    peek.setAttribute('data-open', '1');
+    document.getElementById('peekclose').addEventListener('click', closePeek);
+    document.getElementById('seeall').addEventListener('click', function () { closePeek(); openFull(); JH.focusCard(rail, id); });
+  }
+  function closePeek() { peek.removeAttribute('data-open'); }
+
+  // --- marker gutter (driven by jh:positions, same data desktop uses) ---
+  function renderGutter(positions) {
+    gutter.innerHTML = '';
+    if (!isMobile()) return;
+    JH.THREADS.forEach(function (t) {
+      var y = positions[t.id];
+      if (y == null) return;
+      var dot = document.createElement('div');
+      dot.className = 'jh-dot';
+      dot.style.top = y + 'px';
+      if (t.resolved) dot.setAttribute('data-resolved', '1');
+      dot.title = t.author;
+      dot.addEventListener('click', function () { openPeek(t.id); });
+      gutter.appendChild(dot);
+    });
+  }
+
+  var lastPositions = {};
+  window.addEventListener('message', function (ev) {
+    if (ev.source !== docFrame.contentWindow) return;
+    var d = ev.data; if (!d || typeof d !== 'object') return;
+    if (d.type === 'jh:positions') { lastPositions = d.positions || {}; renderGutter(lastPositions); }
+    else if (d.type === 'jh:focus' && typeof d.id === 'number') { openPeek(d.id); seltool.hidden = true; }
+    else if (d.type === 'jh:selection') { seltool.hidden = false; }
+    else if (d.type === 'jh:reactionToggle') { openFull(); }
+  });
+
+  function applyDefault() { closeFull(); closePeek(); renderGutter(lastPositions); }
+  applyDefault();
+  window.matchMedia('(max-width: 768px)').addEventListener('change', applyDefault);
+</script>
+</body>
+</html>
