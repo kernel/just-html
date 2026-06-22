@@ -1101,7 +1101,7 @@ const RAIL_CSS = `
 // dark, falling back to the light literals) so it themes both ways, and pre/table
 // scroll so wide code never widens the ~320px rail.
 const JH_MD_CSS = `
-.jh-md { font-size: 13px; line-height: 1.5; color: var(--jh-card-fg, #222); overflow-wrap: anywhere; }
+.jh-md { font-family: Georgia, "Times New Roman", serif; font-size: 13px; line-height: 1.5; color: var(--jh-card-fg, #222); overflow-wrap: anywhere; }
 .jh-md > :first-child { margin-top: 0; }
 .jh-md > :last-child { margin-bottom: 0; }
 .jh-md p { margin: 0 0 8px; }
