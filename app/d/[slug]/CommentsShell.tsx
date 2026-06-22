@@ -898,12 +898,12 @@ const Card = forwardRef<
         ) : null}
         <div style={{ minWidth: 0 }}>
           <span style={{ fontWeight: 700, color: "var(--jh-card-fg, #222)" }}>{t.author ?? "someone"}</span>{" "}
-          <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(t.created_at)}</span>{" "}
+          <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(t.created_at)}</span>
+          {t.edited_at ? <span style={{ color: "var(--jh-card-faint, #aaa)", fontSize: 10.5 }}> (edited)</span> : null}{" "}
           {t.resolved ? <Badge kind="res">resolved</Badge> : null}
           {t.orphaned ? <Badge kind="orp">orphaned</Badge> : null}
           <div style={{ marginTop: 2 }}>
             <CommentMarkdown body={t.body} />
-            {t.edited_at ? <span style={{ color: "var(--jh-card-faint, #aaa)", fontSize: 10.5 }}> (edited)</span> : null}
           </div>
           <Reactions reactions={t.reactions} canComment={canComment} onReact={onReact} />
         </div>
@@ -926,7 +926,7 @@ const Card = forwardRef<
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={r.author_avatar} alt="" width={20} height={20} style={{ borderRadius: "50%", boxShadow: "0 0 0 1px var(--jh-avatar-ring, transparent)" }} />
               ) : null}
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <span style={{ fontWeight: 700, color: "var(--jh-card-fg, #222)" }}>{r.author ?? "someone"}</span>{" "}
                 <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(r.created_at)}</span>
                 <CommentMarkdown body={r.body} />

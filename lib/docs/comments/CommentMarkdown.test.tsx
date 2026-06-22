@@ -47,4 +47,31 @@ describe("CommentMarkdown", () => {
     const html = render("![x](https://evil.example/p.png)");
     expect(html).not.toContain("<img");
   });
+
+  it("keeps in-page (#fragment) links inline, not target=_blank", () => {
+    const frag = render("[jump](#section)");
+    expect(frag).toContain('href="#section"');
+    expect(frag).not.toContain('target="_blank"');
+    // external links still open a new tab
+    expect(render("[x](https://example.com)")).toContain('target="_blank"');
+  });
+
+  it("namespaces footnote ids per instance and links ref↔def within a card", () => {
+    const md = "needs a note[^1]\n\n[^1]: the note.";
+    // two cards in one tree must get distinct footnote ids (no cross-card collision)
+    const both = renderToStaticMarkup(
+      <>
+        <CommentMarkdown body={md} />
+        <CommentMarkdown body={md} />
+      </>
+    );
+    const ids = [...both.matchAll(/id="([^"]*fn-1)"/g)].map((m) => m[1]);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+    // within a single card the ref href resolves to its own definition id
+    const one = render(md);
+    const id = one.match(/id="([^"]*fn-1)"/)?.[1];
+    expect(id).toBeTruthy();
+    expect(one).toContain(`href="#${id}"`);
+  });
 });
