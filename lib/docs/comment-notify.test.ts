@@ -91,6 +91,7 @@ function routeQuery(opts: {
   participantRows?: Array<{ id: number; email: string }>;
   parentRows?: Array<{ email: string | null; body: string }>;
   grantedEmails?: string[];
+  isPublic?: boolean;
   onTokenInsert?: (params: unknown[]) => void;
   onTokenDelete?: (params: unknown[]) => void;
 }): void {
@@ -102,6 +103,9 @@ function routeQuery(opts: {
   mocks.query.mockImplementation(async (sql: string, params?: unknown[]): Promise<Rows> => {
     if (sql.includes("FROM users WHERE id =")) {
       return { rows: opts.ownerRows ?? [{ email: "owner@co.com" }] };
+    }
+    if (sql.includes("SELECT is_public FROM documents")) {
+      return { rows: [{ is_public: opts.isPublic ?? false }] };
     }
     if (sql.includes("SELECT DISTINCT u.id, u.email")) {
       return { rows: opts.participantRows ?? [] };
@@ -248,6 +252,7 @@ describe("recipient model", () => {
         { id: CAROL_ID, email: "carol@ex.com" },
       ],
       grantedEmails: [], // no grants — but a public doc skips the check entirely
+      isPublic: true, // the orchestrator re-reads is_public; this doc is public
       parentRows: [{ email: "owner@co.com", body: "root body" }],
     });
     const doc = makeDoc({ is_public: true });
@@ -264,6 +269,34 @@ describe("recipient model", () => {
     expect(tos).toEqual(["carol@ex.com", "owner@co.com"]);
     // A public doc must not consult doc_grants for participant access.
     expect(mocks.query.mock.calls.some((c) => String(c[0]).includes("FROM doc_grants"))).toBe(false);
+  });
+
+  it("reply: uses the CURRENT is_public (a public→private flip after the POST load drops a participant with no live grant)", async () => {
+    const CAROL_ID = 4;
+    routeQuery({
+      ownerRows: [{ email: "owner@co.com" }],
+      participantRows: [
+        { id: OWNER_ID, email: "owner@co.com" },
+        { id: CAROL_ID, email: "carol@ex.com" },
+      ],
+      grantedEmails: [], // carol holds no grant
+      isPublic: false, // the DB now says private…
+      parentRows: [{ email: "owner@co.com", body: "root body" }],
+    });
+    // …even though the doc row captured at POST time still said public.
+    const doc = makeDoc({ is_public: true });
+    const comment = makeComment({
+      author_user_id: ALICE_ID,
+      author_email: "alice@co.com",
+      parent_id: 88421,
+    });
+
+    const res = await sendCommentNotification({ req, doc, comment });
+
+    expect(res.notified).toBe(1);
+    const tos = mocks.sendCommentEmail.mock.calls.map((c) => c[0].to);
+    expect(tos).toEqual(["owner@co.com"]);
+    expect(tos).not.toContain("carol@ex.com");
   });
 });
 

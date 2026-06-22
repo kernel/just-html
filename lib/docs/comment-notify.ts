@@ -96,6 +96,17 @@ async function resolveRecipients(
           AND c.author_user_id IS NOT NULL`,
       [doc.id, rootId]
     );
+
+    // Re-read the CURRENT public flag instead of trusting doc.is_public captured
+    // when the POST first loaded the doc: a public→private flip in that window
+    // must not let the access gate below be skipped (which would email
+    // participants who no longer have access).
+    const { rows: pubRows } = await query<{ is_public: boolean }>(
+      `SELECT is_public FROM documents WHERE id = $1`,
+      [doc.id]
+    );
+    const isPublic = pubRows[0]?.is_public ?? false;
+
     for (const p of partRows) {
       if (p.id === authorId) continue; // never self-notify
       if (byUser.has(p.id)) continue; // already in (owner)
@@ -104,7 +115,7 @@ async function resolveRecipients(
       // commented while the doc was public before it went private, must not keep
       // receiving thread activity (or other participants' emails). Public, or a
       // live owner/email/domain grant, qualifies; anything else is dropped.
-      if (!doc.is_public) {
+      if (!isPublic) {
         const access = await resolveAccess(doc, p.email, p.id);
         if (access.kind === "none") continue;
       }
@@ -127,9 +138,12 @@ export async function sendCommentNotification(opts: {
   doc: DocRow;
   comment: CommentRow;
 }): Promise<CommentNotifyResult> {
+  const { req, doc, comment } = opts;
+  let notified = 0;
+  let recipientCount = 0;
   try {
-    const { req, doc, comment } = opts;
     const recipients = await resolveRecipients(doc, comment);
+    recipientCount = recipients.length;
     if (recipients.length === 0) return { notified: 0, recipients: 0 };
 
     const isReply = comment.parent_id !== null;
@@ -166,63 +180,65 @@ export async function sendCommentNotification(opts: {
     const next = `/d/${encodeURIComponent(doc.slug)}`;
     const docUrl = `${ORIGIN}${next}`;
 
-    let notified = 0;
     for (const r of recipients) {
-      const to = r.email.toLowerCase();
-
-      // Per-recipient daily safety cap, dedicated namespace. A tripped cap skips
-      // this recipient (the rest still go out).
-      const tripped = await checkLimits([
-        { key: `cmt-notify:addr:${to}`, limit: COMMENT_NOTIFY_PER_EMAIL_PER_DAY, window: "day" },
-      ]);
-      if (tripped) {
-        audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
-        continue;
-      }
-
-      // Mint a share-kind login token (7-day TTL). Roll back if the send fails.
-      const token = mintLoginToken();
-      const { rows } = await query<{ id: number }>(
-        `INSERT INTO login_tokens (email, token_hash, kind, expires_at)
-         VALUES ($1, $2, 'share', now() + ($3 || ' seconds')::interval)
-         RETURNING id`,
-        [to, sha256Hex(token), String(SHARE_TOKEN_TTL_S)]
-      );
-      const tokenId = rows[0].id;
-
-      const link = `${ORIGIN}/login/verify?token=${token}&next=${encodeURIComponent(next)}`;
-
-      let resendId: string | null = null;
+      // Each recipient is independent: a failure capping/minting/sending for one
+      // must neither abort the rest nor drop the running count.
       try {
-        resendId = await sendCommentEmail({
-          to,
-          authorEmail,
-          title,
-          isReply,
-          isOwnerRecipient: r.isOwner,
-          bodySnippet,
-          anchoredQuote,
-          parentAuthorEmail,
-          parentSnippet,
-          link,
-          docUrl,
-          idempotencyKey: `comment-notify-${comment.id}-${r.userId}`,
-        });
+        const to = r.email.toLowerCase();
+
+        // Per-recipient daily safety cap, dedicated namespace. A tripped cap
+        // skips this recipient (the rest still go out).
+        const tripped = await checkLimits([
+          { key: `cmt-notify:addr:${to}`, limit: COMMENT_NOTIFY_PER_EMAIL_PER_DAY, window: "day" },
+        ]);
+        if (tripped) {
+          audit(req, "rate_limit.tripped", { meta: { key: tripped.key, limit: tripped.limit } });
+          continue;
+        }
+
+        // Mint a share-kind login token (7-day TTL). Roll back if the send fails.
+        const token = mintLoginToken();
+        const { rows } = await query<{ id: number }>(
+          `INSERT INTO login_tokens (email, token_hash, kind, expires_at)
+           VALUES ($1, $2, 'share', now() + ($3 || ' seconds')::interval)
+           RETURNING id`,
+          [to, sha256Hex(token), String(SHARE_TOKEN_TTL_S)]
+        );
+        const tokenId = rows[0].id;
+
+        const link = `${ORIGIN}/login/verify?token=${token}&next=${encodeURIComponent(next)}`;
+
+        try {
+          const resendId = await sendCommentEmail({
+            to,
+            authorEmail,
+            title,
+            isReply,
+            isOwnerRecipient: r.isOwner,
+            bodySnippet,
+            anchoredQuote,
+            parentAuthorEmail,
+            parentSnippet,
+            link,
+            docUrl,
+            idempotencyKey: `comment-notify-${comment.id}-${r.userId}`,
+          });
+          audit(req, "comment_notification.sent", {
+            userId: r.userId,
+            meta: { doc_id: doc.id, comment_id: comment.id, recipient_email: to, resend_id: resendId },
+          });
+          notified += 1;
+        } catch {
+          // Send failed for this recipient — roll back the just-minted token.
+          await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});
+        }
       } catch {
-        await query(`DELETE FROM login_tokens WHERE id = $1`, [tokenId]).catch(() => {});
-        continue;
+        // Skip this recipient; the others still go out.
       }
-
-      audit(req, "comment_notification.sent", {
-        userId: r.userId,
-        meta: { doc_id: doc.id, comment_id: comment.id, recipient_email: to, resend_id: resendId },
-      });
-      notified += 1;
     }
-
-    return { notified, recipients: recipients.length };
   } catch {
     // Best-effort: a comment notification must never fail the comment write.
-    return { notified: 0, recipients: 0 };
+    // notified/recipientCount hold whatever completed before the error.
   }
+  return { notified, recipients: recipientCount };
 }
