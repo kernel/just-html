@@ -80,14 +80,24 @@ type Rows = { rows: unknown[]; rowCount?: number };
  * Route the orchestrator's queries by SQL shape. `opts` supplies the rows each
  * logical query returns; the token INSERT auto-assigns ids and records the
  * params so tests can assert on them.
+ *
+ * Reply participants are filtered through resolveAccess (a doc_grants lookup) on
+ * a private doc, so `grantedEmails` lists the participant emails that still hold
+ * a live grant (defaults to everyone returned by the participant query). A
+ * public doc short-circuits resolveAccess, so that lookup never fires there.
  */
 function routeQuery(opts: {
   ownerRows?: Array<{ email: string }>;
   participantRows?: Array<{ id: number; email: string }>;
   parentRows?: Array<{ email: string | null; body: string }>;
+  grantedEmails?: string[];
   onTokenInsert?: (params: unknown[]) => void;
   onTokenDelete?: (params: unknown[]) => void;
 }): void {
+  // Default: every participant still has access (keeps the access filter a no-op
+  // for tests that aren't exercising revocation).
+  const granted =
+    opts.grantedEmails ?? (opts.participantRows ?? []).map((p) => p.email.toLowerCase());
   let nextTokenId = 9000;
   mocks.query.mockImplementation(async (sql: string, params?: unknown[]): Promise<Rows> => {
     if (sql.includes("FROM users WHERE id =")) {
@@ -95,6 +105,12 @@ function routeQuery(opts: {
     }
     if (sql.includes("SELECT DISTINCT u.id, u.email")) {
       return { rows: opts.participantRows ?? [] };
+    }
+    if (sql.includes("FROM doc_grants")) {
+      // resolveAccess: $2 is the lowercased principal email. Return a grant row
+      // iff this email is in the granted set.
+      const email = String(params?.[1] ?? "").toLowerCase();
+      return { rows: granted.includes(email) ? [{ grantee_type: "email", role: "commenter" }] : [] };
     }
     if (sql.includes("SELECT u.email, c.body")) {
       return { rows: opts.parentRows ?? [] };
@@ -192,6 +208,62 @@ describe("recipient model", () => {
     expect(tos).toEqual(["alice@co.com", "owner@co.com"]);
     // No recipient is bob.
     expect(tos).not.toContain("bob@co.com");
+  });
+
+  it("reply: a participant who LOST access is dropped (owner still notified)", async () => {
+    // Carol authored in the thread while she had a grant, then the grant was
+    // revoked. She must NOT receive the reply (no post-revocation leakage); the
+    // owner still does.
+    const CAROL_ID = 4;
+    routeQuery({
+      ownerRows: [{ email: "owner@co.com" }],
+      participantRows: [
+        { id: OWNER_ID, email: "owner@co.com" },
+        { id: CAROL_ID, email: "carol@ex.com" },
+      ],
+      grantedEmails: [], // carol no longer holds a grant
+      parentRows: [{ email: "owner@co.com", body: "root body" }],
+    });
+    const doc = makeDoc();
+    const comment = makeComment({
+      author_user_id: ALICE_ID,
+      author_email: "alice@co.com",
+      parent_id: 88421,
+    });
+
+    const res = await sendCommentNotification({ req, doc, comment });
+
+    expect(res.notified).toBe(1);
+    const tos = mocks.sendCommentEmail.mock.calls.map((c) => c[0].to);
+    expect(tos).toEqual(["owner@co.com"]);
+    expect(tos).not.toContain("carol@ex.com");
+  });
+
+  it("reply on a PUBLIC doc: every participant is notified without an access lookup", async () => {
+    const CAROL_ID = 4;
+    routeQuery({
+      ownerRows: [{ email: "owner@co.com" }],
+      participantRows: [
+        { id: OWNER_ID, email: "owner@co.com" },
+        { id: CAROL_ID, email: "carol@ex.com" },
+      ],
+      grantedEmails: [], // no grants — but a public doc skips the check entirely
+      parentRows: [{ email: "owner@co.com", body: "root body" }],
+    });
+    const doc = makeDoc({ is_public: true });
+    const comment = makeComment({
+      author_user_id: ALICE_ID,
+      author_email: "alice@co.com",
+      parent_id: 88421,
+    });
+
+    const res = await sendCommentNotification({ req, doc, comment });
+
+    expect(res.notified).toBe(2);
+    const tos = mocks.sendCommentEmail.mock.calls.map((c) => c[0].to).sort();
+    expect(tos).toEqual(["carol@ex.com", "owner@co.com"]);
+    // A public doc must not consult doc_grants for participant access.
+    expect(mocks.query.mock.calls.some((c) => String(c[0]).includes("FROM doc_grants"))).toBe(false);
   });
 });
 
@@ -432,5 +504,27 @@ describe("thread-participant query shape", () => {
     expect(partQ!.sql).toContain("c.deleted_at IS NULL");
     expect(partQ!.sql).toContain("c.author_user_id IS NOT NULL");
     expect(partQ!.params).toEqual([doc.id, 88421]); // [doc_id, rootId = parent_id]
+  });
+
+  it("scopes the parent-context lookup by doc_id and live (deleted_at IS NULL)", async () => {
+    const seen: Array<{ sql: string; params: unknown[] }> = [];
+    mocks.query.mockImplementation(async (sql: string, params?: unknown[]): Promise<Rows> => {
+      seen.push({ sql, params: params ?? [] });
+      if (sql.includes("FROM users WHERE id =")) return { rows: [{ email: "owner@co.com" }] };
+      if (sql.includes("SELECT DISTINCT u.id, u.email")) return { rows: [] };
+      if (sql.includes("SELECT u.email, c.body")) return { rows: [{ email: "alice@co.com", body: "b" }] };
+      if (sql.includes("INSERT INTO login_tokens")) return { rows: [{ id: 1 }] };
+      return { rows: [] };
+    });
+    const doc = makeDoc();
+    const comment = makeComment({ author_user_id: BOB_ID, parent_id: 88421 });
+
+    await sendCommentNotification({ req, doc, comment });
+
+    const parentQ = seen.find((q) => q.sql.includes("SELECT u.email, c.body"));
+    expect(parentQ).toBeDefined();
+    expect(parentQ!.sql).toContain("c.doc_id = $2");
+    expect(parentQ!.sql).toContain("c.deleted_at IS NULL");
+    expect(parentQ!.params).toEqual([88421, doc.id]); // [parentId, doc_id]
   });
 });

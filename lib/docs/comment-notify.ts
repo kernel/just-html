@@ -4,18 +4,23 @@ import { sendCommentEmail } from "@/lib/auth/email";
 import { audit } from "@/lib/auth/audit";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { ORIGIN, SHARE_TOKEN_TTL_S } from "@/lib/auth/config";
+import { resolveAccess } from "@/lib/docs/grants";
 import type { DocRow } from "@/lib/docs/store";
 import type { CommentRow } from "@/lib/docs/comments";
 
-// Comment notification — the sibling of share-notify.ts. When a comment is
+// Comment notification — the share-notify.ts companion. When a comment is
 // posted, we email the people who should hear about it, each with their OWN
 // 7-day share-kind login link to /d/:slug (same mechanics as the share email).
 //
 // RECIPIENTS (the agreed model):
 //   - top-level comment (parent_id null) → the document OWNER only.
-//   - reply (parent_id set) → the OWNER PLUS every other participant in that
-//     thread. 1-level threads, so the thread root id = the reply's parent_id;
-//     participants = the distinct author_user_id across {root, all its replies}.
+//   - reply (parent_id set) → the OWNER PLUS every other thread participant who
+//     STILL has access. 1-level threads, so the thread root id = the reply's
+//     parent_id; candidate participants = the distinct author_user_id across
+//     {root, all its replies}, each then filtered through a live access check
+//     (public, or an owner/email/domain grant) — a participant who has since
+//     lost access is dropped so we don't email post-revocation thread activity
+//     or leak other participants' emails to someone who can no longer view.
 //   - ALWAYS exclude the new comment's author (no self-notification).
 //   - De-dupe by user_id (the owner may also be a participant).
 //
@@ -94,6 +99,15 @@ async function resolveRecipients(
     for (const p of partRows) {
       if (p.id === authorId) continue; // never self-notify
       if (byUser.has(p.id)) continue; // already in (owner)
+      // Only notify participants who CURRENTLY retain access. Authorship history
+      // outlives a grant — a participant whose grant was revoked, or who
+      // commented while the doc was public before it went private, must not keep
+      // receiving thread activity (or other participants' emails). Public, or a
+      // live owner/email/domain grant, qualifies; anything else is dropped.
+      if (!doc.is_public) {
+        const access = await resolveAccess(doc, p.email, p.id);
+        if (access.kind === "none") continue;
+      }
       byUser.set(p.id, { userId: p.id, email: p.email, isOwner: p.id === doc.owner_id });
     }
   }
@@ -139,8 +153,8 @@ export async function sendCommentNotification(opts: {
         `SELECT u.email, c.body
            FROM comments c
            LEFT JOIN users u ON u.id = c.author_user_id
-          WHERE c.id = $1`,
-        [comment.parent_id]
+          WHERE c.id = $1 AND c.doc_id = $2 AND c.deleted_at IS NULL`,
+        [comment.parent_id, doc.id]
       );
       const parent = parentRows[0];
       if (parent) {
