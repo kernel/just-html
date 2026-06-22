@@ -861,10 +861,18 @@ export const CommentsListResponse = registry.register(
     .openapi("CommentsListResponse", { description: "The complete all-threads view." })
 );
 
-// POST /comments 201 — { comment }.
+// POST /comments 201 — { comment, notified }.
 export const CommentCreatedResponse = registry.register(
   "CommentCreatedResponse",
-  z.object({ comment: Comment }).openapi("CommentCreatedResponse", { description: "Comment created." })
+  z
+    .object({
+      comment: Comment,
+      notified: z.number().int().openapi({
+        description:
+          "How many notification emails were sent for this comment (the owner on a top-level comment; the owner plus thread participants on a reply, minus the author). 0 when there is no one to notify or sends were suppressed.",
+      }),
+    })
+    .openapi("CommentCreatedResponse", { description: "Comment created." })
 );
 
 // PATCH /comments/{id} 200 — { comment }.

@@ -871,8 +871,15 @@ components:
       properties:
         comment:
           $ref: '#/components/schemas/Comment'
+        notified:
+          type: integer
+          description: >-
+            How many notification emails were sent for this comment (the owner on a top-level
+            comment; the owner plus thread participants on a reply, minus the author). 0 when there
+            is no one to notify or sends were suppressed.
       required:
         - comment
+        - notified
       description: Comment created.
     CommentUpdatedResponse:
       type: object
