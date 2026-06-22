@@ -324,10 +324,17 @@ ${gap(10)}`;
     context = gap(16);
   }
 
+  // The owner signs in normally (they have an account); a non-owner participant
+  // may be a share grantee with no account, so they get the "no account needed"
+  // + "was this shared with you?" recovery copy (the share email's).
+  const footer = opts.isOwnerRecipient
+    ? `<tr><td style="${CAVEAT}">Good for ${COMMENT_EXPIRY_DAYS} days. ${whyLine(true)} If the link expires, <a href="${esc(opts.docUrl)}" style="color:#666666;">open the document</a> and sign in.</td></tr>`
+    : `<tr><td style="${CAVEAT}">Signs you in on this device, no account needed. Good for ${COMMENT_EXPIRY_DAYS} days. ${whyLine(false)} If it expires, <a href="${esc(opts.docUrl)}" style="color:#666666;">open the document</a> and choose "was this shared with you? sign in".</td></tr>`;
+
   const rows = `${lead}
 ${context}${quoteBlock(opts.bodySnippet)}
 ${gap(16)}<tr><td style="${LEAD}"><a href="${esc(opts.link)}" style="${LINK}">Open the document &rarr;</a></td></tr>
-${gap(16)}<tr><td style="${CAVEAT}">Signs you in on this device, no account needed. Good for ${COMMENT_EXPIRY_DAYS} days. ${whyLine(opts.isOwnerRecipient)} If it expires, <a href="${esc(opts.docUrl)}" style="color:#666666;">open the document</a> and choose "was this shared with you? sign in".</td></tr>`;
+${gap(16)}${footer}`;
   return shell(opts.isReply ? "new reply on justhtml.sh" : "new comment on justhtml.sh", rows);
 }
 
@@ -344,17 +351,22 @@ function commentTextBody(opts: CommentEmailParts): string {
     lines.push(`On: "${opts.anchoredQuote}"`, "");
   }
 
-  lines.push(
-    `  ${opts.bodySnippet}`,
-    "",
-    "Open the document:",
-    `  ${opts.link}`,
-    "",
-    `Signs you in on this device, no account needed. Good for ${COMMENT_EXPIRY_DAYS} days.`,
-    whyLine(opts.isOwnerRecipient),
-    'If it expires, open the document directly and choose "was this shared with you? sign in":',
-    `  ${opts.docUrl}`
-  );
+  lines.push(`  ${opts.bodySnippet}`, "", "Open the document:", `  ${opts.link}`, "");
+  if (opts.isOwnerRecipient) {
+    lines.push(
+      `This sign-in link is good for ${COMMENT_EXPIRY_DAYS} days.`,
+      whyLine(true),
+      "If it expires, sign in at justhtml.sh and open the document:",
+      `  ${opts.docUrl}`
+    );
+  } else {
+    lines.push(
+      `Signs you in on this device, no account needed. Good for ${COMMENT_EXPIRY_DAYS} days.`,
+      whyLine(false),
+      'If it expires, open the document directly and choose "was this shared with you? sign in":',
+      `  ${opts.docUrl}`
+    );
+  }
   return lines.join("\n");
 }
 
