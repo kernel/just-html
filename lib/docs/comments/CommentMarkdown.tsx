@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useId, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import { memo, useId, type ComponentPropsWithoutRef } from "react";
+import ReactMarkdown, { type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkBreaks from "remark-breaks";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -32,11 +32,13 @@ const components = {
   // data-no-pin: comment bodies render inside a click-to-pin card (see CommentsShell
   // Card onClick); without it, clicking a link would also toggle the thread's pin.
   // Only off-page links open a new tab — in-page (#fragment) links, e.g. footnote
-  // back-references, must navigate within the card rather than spawn a tab.
-  a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+  // back-references, must navigate within the card rather than spawn a tab. The rest
+  // of the sanitized attributes (id, aria-*, data-footnote-*) are forwarded so
+  // footnote ref/backref anchors keep the ids their return links target.
+  a: ({ node, href, children, ...rest }: ComponentPropsWithoutRef<"a"> & ExtraProps) => {
     const inPage = href?.startsWith("#") ?? false;
     return (
-      <a href={href} data-no-pin {...(inPage ? {} : { target: "_blank", rel: "noopener noreferrer" })}>
+      <a {...rest} href={href} data-no-pin {...(inPage ? {} : { target: "_blank", rel: "noopener noreferrer" })}>
         {children}
       </a>
     );
@@ -45,8 +47,9 @@ const components = {
 
 function CommentMarkdown({ body }: { body: string }) {
   // Namespace footnote ids per comment so multiple cards in one shell DOM don't
-  // collide — a footnote ref must scroll to its own card's note, not another's.
-  const prefix = useId().replace(/:/g, "") + "-";
+  // collide — a footnote ref must scroll to its own card's note, not another's. The
+  // id is stripped to ASCII (React 19's useId returns non-alphanumeric delimiters).
+  const prefix = useId().replace(/[^a-zA-Z0-9]/g, "") + "-";
   return (
     <div className="jh-md">
       <ReactMarkdown

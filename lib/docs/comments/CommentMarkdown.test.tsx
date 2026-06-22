@@ -56,7 +56,7 @@ describe("CommentMarkdown", () => {
     expect(render("[x](https://example.com)")).toContain('target="_blank"');
   });
 
-  it("namespaces footnote ids per instance and links ref↔def within a card", () => {
+  it("namespaces footnote ids per card with working forward + back links", () => {
     const md = "needs a note[^1]\n\n[^1]: the note.";
     // two cards in one tree must get distinct footnote ids (no cross-card collision)
     const both = renderToStaticMarkup(
@@ -65,13 +65,17 @@ describe("CommentMarkdown", () => {
         <CommentMarkdown body={md} />
       </>
     );
-    const ids = [...both.matchAll(/id="([^"]*fn-1)"/g)].map((m) => m[1]);
-    expect(ids).toHaveLength(2);
-    expect(ids[0]).not.toBe(ids[1]);
-    // within a single card the ref href resolves to its own definition id
+    const defIds = [...both.matchAll(/id="([^"]*-fn-1)"/g)].map((m) => m[1]);
+    expect(defIds).toHaveLength(2);
+    expect(defIds[0]).not.toBe(defIds[1]);
+
+    // within one card, every #fragment link (forward jump + ↩ back-ref) resolves to
+    // an id in that card, and ids are ascii-safe (React 19 useId delimiters stripped)
     const one = render(md);
-    const id = one.match(/id="([^"]*fn-1)"/)?.[1];
-    expect(id).toBeTruthy();
-    expect(one).toContain(`href="#${id}"`);
+    const ids = new Set([...one.matchAll(/id="([^"]+)"/g)].map((m) => m[1]));
+    const targets = [...one.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
+    expect(targets.length).toBeGreaterThanOrEqual(2);
+    expect(targets.every((t) => ids.has(t))).toBe(true);
+    expect([...ids].every((id) => /^[A-Za-z0-9_-]+$/.test(id))).toBe(true);
   });
 });
