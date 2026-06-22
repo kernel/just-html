@@ -33,12 +33,14 @@ describe("CommentMarkdown", () => {
     expect(html).not.toContain("javascript:");
   });
 
-  it("hardens links with target and rel", () => {
+  it("hardens links with target, rel, and data-no-pin", () => {
     const html = render("[k](https://example.com)");
     expect(html).toContain('href="https://example.com"');
     expect(html).toContain('target="_blank"');
     expect(html).toContain("noopener");
     expect(html).toContain("noreferrer");
+    // a link click must not bubble to the card's click-to-pin handler
+    expect(html).toContain("data-no-pin");
   });
 
   it("strips images", () => {

@@ -23,8 +23,10 @@ const schema = {
 };
 
 const components = {
+  // data-no-pin: comment bodies render inside a click-to-pin card (see CommentsShell
+  // Card onClick); without it, clicking a link would also toggle the thread's pin.
   a: ({ href, children }: { href?: string; children?: ReactNode }) => (
-    <a href={href} target="_blank" rel="noopener noreferrer">
+    <a href={href} target="_blank" rel="noopener noreferrer" data-no-pin>
       {children}
     </a>
   ),
