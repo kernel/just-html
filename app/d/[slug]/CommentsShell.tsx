@@ -2,6 +2,7 @@
 
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildChromePalette, type ThemeSample, type ChromePalette } from "@/lib/docs/theme";
+import CommentMarkdown from "@/lib/docs/comments/CommentMarkdown";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
 // architecture", "CHOSEN: variant B"). The google-docs-style comment rail. The
@@ -479,6 +480,7 @@ export default function CommentsShell(props: Props) {
   return (
     <div className="jh-shell" data-theme={isDark ? "dark" : "light"} style={themeVars}>
       <style>{RAIL_CSS}</style>
+      <style>{JH_MD_CSS}</style>
       <div style={barStyle}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
           {title}
@@ -896,12 +898,12 @@ const Card = forwardRef<
         ) : null}
         <div style={{ minWidth: 0 }}>
           <span style={{ fontWeight: 700, color: "var(--jh-card-fg, #222)" }}>{t.author ?? "someone"}</span>{" "}
-          <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(t.created_at)}</span>{" "}
+          <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(t.created_at)}</span>
+          {t.edited_at ? <span style={{ color: "var(--jh-card-faint, #aaa)", fontSize: 10.5 }}> (edited)</span> : null}{" "}
           {t.resolved ? <Badge kind="res">resolved</Badge> : null}
           {t.orphaned ? <Badge kind="orp">orphaned</Badge> : null}
-          <div style={{ color: "var(--jh-card-fg, #222)", marginTop: 2, fontFamily: "Georgia, serif", fontSize: 13, lineHeight: 1.45 }}>
-            {t.body}
-            {t.edited_at ? <span style={{ color: "var(--jh-card-faint, #aaa)", fontSize: 10.5 }}> (edited)</span> : null}
+          <div style={{ marginTop: 2 }}>
+            <CommentMarkdown body={t.body} />
           </div>
           <Reactions reactions={t.reactions} canComment={canComment} onReact={onReact} />
         </div>
@@ -924,10 +926,10 @@ const Card = forwardRef<
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={r.author_avatar} alt="" width={20} height={20} style={{ borderRadius: "50%", boxShadow: "0 0 0 1px var(--jh-avatar-ring, transparent)" }} />
               ) : null}
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <span style={{ fontWeight: 700, color: "var(--jh-card-fg, #222)" }}>{r.author ?? "someone"}</span>{" "}
                 <span style={{ color: "var(--jh-card-muted, #999)", fontSize: 10.5 }}>{fmtTime(r.created_at)}</span>
-                <div style={{ color: "var(--jh-card-fg, #222)", fontFamily: "Georgia, serif", fontSize: 13, lineHeight: 1.45 }}>{r.body}</div>
+                <CommentMarkdown body={r.body} />
               </div>
             </div>
           ))}
@@ -1090,6 +1092,40 @@ const RAIL_CSS = `
   .jh-railclose { display: inline-block; }
   .jh-scrim { display: block; }
 }
+`;
+
+// Markdown styling for rendered comment bodies (CommentMarkdown -> .jh-md). The
+// "familiar prose" treatment: keeps the rail's serif body, lifts structure with real
+// bold, mono inline-code chips, a neutral scrolling code slab, indented lists, and a
+// left-rule blockquote. Every color reads the --jh-card-* vars (set by paletteVars in
+// dark, falling back to the light literals) so it themes both ways, and pre/table
+// scroll so wide code never widens the ~320px rail.
+const JH_MD_CSS = `
+.jh-md { font-family: Georgia, "Times New Roman", serif; font-size: 13px; line-height: 1.5; color: var(--jh-card-fg, #222); overflow-wrap: anywhere; }
+.jh-md > :first-child { margin-top: 0; }
+.jh-md > :last-child { margin-bottom: 0; }
+.jh-md p { margin: 0 0 8px; }
+.jh-md strong { font-weight: 700; }
+.jh-md em { font-style: italic; }
+.jh-md a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+.jh-md h1, .jh-md h2, .jh-md h3, .jh-md h4, .jh-md h5, .jh-md h6 { font-weight: 700; line-height: 1.3; margin: 12px 0 6px; }
+.jh-md h1 { font-size: 1.25em; }
+.jh-md h2 { font-size: 1.15em; }
+.jh-md h3 { font-size: 1.05em; }
+.jh-md h4, .jh-md h5, .jh-md h6 { font-size: 1em; }
+.jh-md ul, .jh-md ol { margin: 0 0 8px; padding-left: 20px; }
+.jh-md li { margin: 0 0 4px; }
+.jh-md li:last-child { margin-bottom: 0; }
+.jh-md li::marker { color: var(--jh-card-muted, #999); }
+.jh-md li > ul, .jh-md li > ol { margin: 4px 0 0; }
+.jh-md code { font-family: ${MONO}; font-size: 0.86em; background: var(--jh-chip-bg, #ececec); border-radius: 4px; padding: 1px 4px; overflow-wrap: anywhere; word-break: break-word; }
+.jh-md pre { margin: 0 0 8px; padding: 8px 10px; background: var(--jh-chip-bg, #ececec); border: 1px solid var(--jh-card-border, #e2e2e2); border-radius: 6px; overflow-x: auto; max-width: 100%; }
+.jh-md pre code { display: block; padding: 0; background: none; border-radius: 0; font-size: 12px; line-height: 1.45; white-space: pre; word-break: normal; overflow-wrap: normal; }
+.jh-md blockquote { margin: 0 0 8px; padding: 2px 0 2px 10px; border-left: 2px solid var(--jh-card-border, #e2e2e2); color: var(--jh-card-muted, #999); }
+.jh-md blockquote :last-child { margin-bottom: 0; }
+.jh-md table { display: block; overflow-x: auto; max-width: 100%; border-collapse: collapse; font-size: 12px; margin: 0 0 8px; }
+.jh-md th, .jh-md td { border: 1px solid var(--jh-card-border, #e2e2e2); padding: 3px 6px; text-align: left; }
+.jh-md hr { border: none; border-top: 1px solid var(--jh-card-border, #e2e2e2); margin: 10px 0; }
 `;
 
 // --------------------------- styles ---------------------------
