@@ -346,17 +346,13 @@ export const GrantListResponse = registry.register(
     .openapi("GrantListResponse", { description: "Grants on the document (owner only)." })
 );
 
-// POST /api/v1/docs/{slug}/grants 201: { slug, grant, notified? }.
+// POST /api/v1/docs/{slug}/grants 201: { slug, grant }.
 export const GrantCreatedResponse = registry.register(
   "GrantCreatedResponse",
   z
     .object({
       slug: z.string(),
       grant: Grant,
-      notified: z.boolean().optional().openapi({
-        description:
-          "Present only for email grants: true if the share-notification email was sent, false if suppressed (notify:false) or skipped (rate-limited / send failed).",
-      }),
     })
     .openapi("GrantCreatedResponse", { description: "Grant created." })
 );

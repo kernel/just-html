@@ -5,6 +5,7 @@ import { CreateCommentBody, commentBodyBadRequest } from "@/lib/docs/schemas";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { resolveAccess, type DocAccess } from "@/lib/docs/grants";
+import { sendCommentNotification } from "@/lib/docs/comment-notify";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 import {
@@ -133,6 +134,12 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
     }
     return apiError(422, "bad_parent", "parent_id must reference a live top-level comment on this document.");
   }
+
+  // Comment notification. Best-effort, like the share notification: the comment
+  // is already committed, so a send failure or tripped cap never fails the
+  // request. Notifies the owner (top-level) or the owner + thread participants
+  // (replies), minus the author.
+  await sendCommentNotification({ req, doc, comment: result.comment });
 
   return json({ comment: commentView(result.comment, []) }, 201);
 }

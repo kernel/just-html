@@ -380,11 +380,6 @@ components:
           type: string
         grant:
           $ref: '#/components/schemas/Grant'
-        notified:
-          type: boolean
-          description: >-
-            Present only for email grants: true if the share-notification email was sent, false if
-            suppressed (notify:false) or skipped (rate-limited / send failed).
       required:
         - slug
         - grant

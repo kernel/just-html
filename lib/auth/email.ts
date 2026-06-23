@@ -248,3 +248,173 @@ export async function sendShareEmail(opts: {
   }
   return data?.id ?? null;
 }
+
+// --- Comment notification (sibling of the share notification) ---
+//
+// Sent when someone comments on a doc. Recipients are the owner (top-level) and
+// the owner + thread participants (replies), minus the comment's author. Each
+// carries a single 7-day share-kind login link landing on /d/:slug (same link
+// mechanics as the share email), so the recipient signs in and reads the thread.
+// Two layouts, both inside the LOCKED Variant B man-page style:
+//   - top-level → Variant C: optional anchored-passage line, then the body quote.
+//   - reply     → Variant D: minimal parent context, then the reply quote.
+// The "why am I getting this" footer line keys off whether the recipient owns
+// the doc or is a thread participant.
+
+const COMMENT_EXPIRY_DAYS = SHARE_EXPIRY_DAYS;
+
+// Indented quoted block (the comment/reply body) — the reference's grey-rule
+// blockquote: a 2px left rule, 12px indent, LEAD type.
+function quoteBlock(text: string): string {
+  return `<tr><td>
+  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td style="border-left:2px solid #cccccc; padding:2px 0 2px 12px; ${LEAD}">${esc(text)}</td></tr></table>
+</td></tr>`;
+}
+
+/**
+ * Subject line, mirroring `shareSubject`'s shape:
+ *   top-level: `<author> commented on "<title>" — justhtml.sh`
+ *   reply:     `<author> replied on "<title>" — justhtml.sh`
+ */
+export function commentSubject(authorEmail: string, title: string, isReply: boolean): string {
+  const verb = isReply ? "replied on" : "commented on";
+  return `${authorEmail} ${verb} "${title}" — justhtml.sh`;
+}
+
+// The two flavors of the "why am I getting this" footer sentence.
+function whyLine(isOwnerRecipient: boolean): string {
+  return isOwnerRecipient
+    ? "You're getting this because you own this document."
+    : "You're getting this because you're part of this thread.";
+}
+
+type CommentEmailParts = {
+  authorEmail: string;
+  title: string;
+  isReply: boolean;
+  isOwnerRecipient: boolean;
+  bodySnippet: string;
+  anchoredQuote?: string | null; // top-level only: the document passage (anchor.exact)
+  parentAuthorEmail?: string | null; // reply only
+  parentSnippet?: string | null; // reply only
+  link: string;
+  docUrl: string;
+};
+
+function commentHtmlBody(opts: CommentEmailParts): string {
+  const verb = opts.isReply ? "replied on" : "commented on";
+  const lead = `<tr><td style="${LEAD}">${esc(opts.authorEmail)} ${verb} <strong>"${esc(opts.title)}"</strong>.</td></tr>`;
+
+  // Context row above the body quote: the anchored passage (top-level, Variant C)
+  // or the parent snippet (reply, Variant D). Both render as a muted caveat row
+  // followed by a tight 10px gap, matching the reference.
+  let context = "";
+  if (opts.isReply) {
+    if (opts.parentSnippet) {
+      const who = opts.parentAuthorEmail ? esc(opts.parentAuthorEmail) : "an earlier comment";
+      context = `${gap(16)}<tr><td style="${CAVEAT}">In reply to ${who}: &ldquo;${esc(opts.parentSnippet)}&rdquo;</td></tr>
+${gap(10)}`;
+    } else {
+      context = gap(16);
+    }
+  } else if (opts.anchoredQuote) {
+    context = `${gap(16)}<tr><td style="${CAVEAT}">On: &ldquo;${esc(opts.anchoredQuote)}&rdquo;</td></tr>
+${gap(10)}`;
+  } else {
+    context = gap(16);
+  }
+
+  // The owner signs in normally (they have an account); a non-owner participant
+  // may be a share grantee with no account, so they get the "no account needed"
+  // + "was this shared with you?" recovery copy (the share email's).
+  const footer = opts.isOwnerRecipient
+    ? `<tr><td style="${CAVEAT}">Good for ${COMMENT_EXPIRY_DAYS} days. ${whyLine(true)} If the link expires, <a href="${esc(opts.docUrl)}" style="color:#666666;">open the document</a> and sign in.</td></tr>`
+    : `<tr><td style="${CAVEAT}">Signs you in on this device, no account needed. Good for ${COMMENT_EXPIRY_DAYS} days. ${whyLine(false)} If it expires, <a href="${esc(opts.docUrl)}" style="color:#666666;">open the document</a> and choose "was this shared with you? sign in".</td></tr>`;
+
+  const rows = `${lead}
+${context}${quoteBlock(opts.bodySnippet)}
+${gap(16)}<tr><td style="${LEAD}"><a href="${esc(opts.link)}" style="${LINK}">Open the document &rarr;</a></td></tr>
+${gap(16)}${footer}`;
+  return shell(opts.isReply ? "new reply on justhtml.sh" : "new comment on justhtml.sh", rows);
+}
+
+function commentTextBody(opts: CommentEmailParts): string {
+  const verb = opts.isReply ? "replied on" : "commented on";
+  const lines: string[] = [`${opts.authorEmail} ${verb} "${opts.title}" on justhtml.sh.`, ""];
+
+  if (opts.isReply) {
+    if (opts.parentSnippet) {
+      const who = opts.parentAuthorEmail || "an earlier comment";
+      lines.push(`In reply to ${who}: "${opts.parentSnippet}"`, "");
+    }
+  } else if (opts.anchoredQuote) {
+    lines.push(`On: "${opts.anchoredQuote}"`, "");
+  }
+
+  lines.push(`  ${opts.bodySnippet}`, "", "Open the document:", `  ${opts.link}`, "");
+  if (opts.isOwnerRecipient) {
+    lines.push(
+      `This sign-in link is good for ${COMMENT_EXPIRY_DAYS} days.`,
+      whyLine(true),
+      "If it expires, sign in at justhtml.sh and open the document:",
+      `  ${opts.docUrl}`
+    );
+  } else {
+    lines.push(
+      `Signs you in on this device, no account needed. Good for ${COMMENT_EXPIRY_DAYS} days.`,
+      whyLine(false),
+      'If it expires, open the document directly and choose "was this shared with you? sign in":',
+      `  ${opts.docUrl}`
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Send a comment-notification email. Returns the Resend message id on success,
+ * or throws on send failure so the caller can roll back the just-minted token
+ * row (the comment is already committed; a missed email is recoverable via the
+ * /d/:slug sign-in fallback).
+ */
+export async function sendCommentEmail(opts: {
+  to: string;
+  authorEmail: string;
+  title: string;
+  isReply: boolean;
+  isOwnerRecipient: boolean;
+  bodySnippet: string;
+  anchoredQuote?: string | null; // top-level, optional (anchor.exact)
+  parentAuthorEmail?: string | null; // reply
+  parentSnippet?: string | null; // reply
+  link: string;
+  docUrl: string; // bare https://justhtml.sh/d/:slug — the stale-link recovery target
+  idempotencyKey: string;
+}): Promise<string | null> {
+  const parts: CommentEmailParts = {
+    authorEmail: opts.authorEmail,
+    title: opts.title,
+    isReply: opts.isReply,
+    isOwnerRecipient: opts.isOwnerRecipient,
+    bodySnippet: opts.bodySnippet,
+    anchoredQuote: opts.anchoredQuote,
+    parentAuthorEmail: opts.parentAuthorEmail,
+    parentSnippet: opts.parentSnippet,
+    link: opts.link,
+    docUrl: opts.docUrl,
+  };
+  const { data, error } = await resend().emails.send(
+    {
+      from: RESEND_FROM,
+      to: opts.to,
+      subject: commentSubject(opts.authorEmail, opts.title, opts.isReply),
+      html: commentHtmlBody(parts),
+      text: commentTextBody(parts),
+      tags: [{ name: "flow", value: "comment_notification" }],
+    },
+    { idempotencyKey: opts.idempotencyKey }
+  );
+  if (error) {
+    throw new Error(`resend send failed: ${error.message ?? String(error)}`);
+  }
+  return data?.id ?? null;
+}

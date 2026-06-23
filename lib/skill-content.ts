@@ -123,7 +123,7 @@ Share (owner only) -> POST /docs/:slug/grants   { email|domain, role, notify? } 
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/grants \\
     -H "Authorization: Bearer $JUSTHTML_API_KEY" -H 'Content-Type: application/json' \\
     -d '{"email":"teammate@co.com","role":"editor"}'
-  # -> 201 { slug, grant, notified: true }   (notified present only for email grants)
+  # -> 201 { slug, grant }
   # Domain grants (e.g. {"domain":"co.com"}) work too; consumer providers
   # (gmail.com, ...) are rejected -> use public or the view token instead.
   # A teammate's agent registers via auth.md with that email and the grant

@@ -137,28 +137,19 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
 
   // Share notification (birthday.md "Share notifications"). Sent only for a
   // freshly created or role-changed EMAIL grant, only when notify !== false.
-  // Domain grants never notify. The grant is already committed; a send failure
-  // or rate-limit never fails the request (the /d/:slug "was this shared with
-  // you?" fallback always recovers a missed/expired link).
-  let notified: boolean | undefined;
-  if (granteeType === "email") {
-    if (notify) {
-      const res = await sendShareNotification({
-        req,
-        docId: doc.id,
-        slug: doc.slug,
-        title: doc.title || doc.slug,
-        ownerEmail: principal.email,
-        granteeEmail: grantee,
-      });
-      notified = res.sent;
-    } else {
-      notified = false;
-    }
+  // Domain grants never notify. Best-effort: the grant is already committed, so a
+  // send failure or rate-limit never fails the request (the /d/:slug "was this
+  // shared with you?" fallback always recovers a missed/expired link).
+  if (granteeType === "email" && notify) {
+    await sendShareNotification({
+      req,
+      docId: doc.id,
+      slug: doc.slug,
+      title: doc.title || doc.slug,
+      ownerEmail: principal.email,
+      granteeEmail: grantee,
+    });
   }
 
-  return json(
-    { slug: doc.slug, grant: grantView(result.grant), ...(notified !== undefined ? { notified } : {}) },
-    201
-  );
+  return json({ slug: doc.slug, grant: grantView(result.grant) }, 201);
 }
