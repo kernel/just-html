@@ -254,7 +254,7 @@ async function main() {
   });
   const grantJson = await grant.json();
   checkSchema("POST /grants", "POST", "/api/v1/docs/{slug}/grants", grant.status, grantJson);
-  check("editor grant created + notified", grant.status === 201 && grantJson.notified === true, `status ${grant.status}`);
+  check("editor grant created", grant.status === 201, `status ${grant.status}`);
   const shareEmail = await waitForEmail(granteeInbox, "shared");
   const link = (shareEmail.text.match(/https:\/\/[^\s)]+\/login\/verify\?[^\s)]+/) ??
     shareEmail.html.match(/https:\/\/[^\s"')]+\/login\/verify\?[^\s"')]+/))?.[0]?.replace(/&amp;/g, "&");

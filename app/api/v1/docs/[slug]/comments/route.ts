@@ -139,9 +139,9 @@ export async function POST(req: Request, ctx: Ctx): Promise<Response> {
   // is already committed, so a send failure or tripped cap never fails the
   // request. Notifies the owner (top-level) or the owner + thread participants
   // (replies), minus the author.
-  const { notified } = await sendCommentNotification({ req, doc, comment: result.comment });
+  await sendCommentNotification({ req, doc, comment: result.comment });
 
-  return json({ comment: commentView(result.comment, []), notified }, 201);
+  return json({ comment: commentView(result.comment, []) }, 201);
 }
 
 // GET /api/v1/docs/:slug/comments — the complete all-threads picture.

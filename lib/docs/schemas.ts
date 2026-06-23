@@ -346,17 +346,13 @@ export const GrantListResponse = registry.register(
     .openapi("GrantListResponse", { description: "Grants on the document (owner only)." })
 );
 
-// POST /api/v1/docs/{slug}/grants 201: { slug, grant, notified? }.
+// POST /api/v1/docs/{slug}/grants 201: { slug, grant }.
 export const GrantCreatedResponse = registry.register(
   "GrantCreatedResponse",
   z
     .object({
       slug: z.string(),
       grant: Grant,
-      notified: z.boolean().optional().openapi({
-        description:
-          "Present only for email grants: true if the share-notification email was sent, false if suppressed (notify:false) or skipped (rate-limited / send failed).",
-      }),
     })
     .openapi("GrantCreatedResponse", { description: "Grant created." })
 );
@@ -861,18 +857,10 @@ export const CommentsListResponse = registry.register(
     .openapi("CommentsListResponse", { description: "The complete all-threads view." })
 );
 
-// POST /comments 201 — { comment, notified }.
+// POST /comments 201 — { comment }.
 export const CommentCreatedResponse = registry.register(
   "CommentCreatedResponse",
-  z
-    .object({
-      comment: Comment,
-      notified: z.number().int().openapi({
-        description:
-          "How many notification emails were sent for this comment (the owner on a top-level comment; the owner plus thread participants on a reply, minus the author). 0 when there is no one to notify or sends were suppressed.",
-      }),
-    })
-    .openapi("CommentCreatedResponse", { description: "Comment created." })
+  z.object({ comment: Comment }).openapi("CommentCreatedResponse", { description: "Comment created." })
 );
 
 // PATCH /comments/{id} 200 — { comment }.
