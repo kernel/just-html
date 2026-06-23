@@ -866,8 +866,12 @@ components:
       properties:
         comment:
           $ref: '#/components/schemas/Comment'
+        notified:
+          type: integer
+          description: Number of notification emails sent.
       required:
         - comment
+        - notified
       description: Comment created.
     CommentUpdatedResponse:
       type: object
