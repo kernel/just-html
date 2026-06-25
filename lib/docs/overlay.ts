@@ -569,9 +569,13 @@ export const OVERLAY_SCRIPT = String.raw`
     var exact = (e > s) ? tm.full.slice(s, e) : sel.toString();
     return { exact: exact, prefix: tm.full.slice(Math.max(0, s-32), s), suffix: tm.full.slice(e, e+32) };
   }
-  document.addEventListener("mouseup", function(ev){
-    if (ev.target && ev.target.closest && (ev.target.closest("[data-jh-chip]") || ev.target.closest(".jh-pop"))) return;
-    setTimeout(function(){
+  var selectionTimer = null;
+  function fromOverlayChrome(ev){
+    var t = ev && ev.target;
+    return !!(t && t.closest && (t.closest("[data-jh-chip]") || t.closest(".jh-pop")));
+  }
+  function reportSelection(){
+    try {
       var sel = window.getSelection();
       if (!sel || !sel.rangeCount || sel.isCollapsed || !sel.toString().trim()){ send({type:"jh:selectionCleared"}); return; }
       var anchor = anchorFromSelection(sel);
@@ -580,7 +584,35 @@ export const OVERLAY_SCRIPT = String.raw`
         top: rect.top + window.scrollY, left: rect.left, right: rect.right, bottom: rect.bottom + window.scrollY,
         viewTop: rect.top
       }});
-    }, 10);
+    } catch(e) {
+      send({type:"jh:selectionCleared"});
+    }
+  }
+  function queueSelectionReport(delay){
+    if (selectionTimer) clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(function(){
+      selectionTimer = null;
+      reportSelection();
+    }, delay);
+  }
+  document.addEventListener("mouseup", function(ev){
+    if (fromOverlayChrome(ev)) return;
+    queueSelectionReport(10);
+  });
+  document.addEventListener("keyup", function(ev){
+    if (fromOverlayChrome(ev)) return;
+    queueSelectionReport(10);
+  });
+  document.addEventListener("touchend", function(ev){
+    if (fromOverlayChrome(ev)) return;
+    queueSelectionReport(80);
+  }, {passive:true});
+  document.addEventListener("pointerup", function(ev){
+    if (fromOverlayChrome(ev)) return;
+    queueSelectionReport(30);
+  });
+  document.addEventListener("selectionchange", function(){
+    queueSelectionReport(120);
   });
 
   window.addEventListener("message", function(ev){
