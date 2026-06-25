@@ -570,13 +570,25 @@ export const OVERLAY_SCRIPT = String.raw`
     return { exact: exact, prefix: tm.full.slice(Math.max(0, s-32), s), suffix: tm.full.slice(e, e+32) };
   }
   var selectionTimer = null;
+  var selectionTimerDueAt = 0;
   function fromOverlayChrome(ev){
     var t = ev && ev.target;
     return !!(t && t.closest && (t.closest("[data-jh-chip]") || t.closest(".jh-pop")));
   }
+  function isSelectionInOverlayChrome(sel){
+    if (!sel || !sel.rangeCount) return false;
+    var r = sel.getRangeAt(0);
+    function inChrome(node){
+      if (!node) return false;
+      var el = node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement;
+      return !!(el && el.closest && (el.closest("[data-jh-chip]") || el.closest(".jh-pop")));
+    }
+    return inChrome(r.startContainer) || inChrome(r.endContainer) || inChrome(r.commonAncestorContainer);
+  }
   function reportSelection(){
     try {
       var sel = window.getSelection();
+      if (isSelectionInOverlayChrome(sel)){ send({type:"jh:selectionCleared"}); return; }
       if (!sel || !sel.rangeCount || sel.isCollapsed || !sel.toString().trim()){ send({type:"jh:selectionCleared"}); return; }
       var anchor = anchorFromSelection(sel);
       var rect = sel.getRangeAt(0).getBoundingClientRect();
@@ -589,11 +601,15 @@ export const OVERLAY_SCRIPT = String.raw`
     }
   }
   function queueSelectionReport(delay){
+    var dueAt = Date.now() + delay;
+    if (selectionTimer && dueAt <= selectionTimerDueAt) return;
     if (selectionTimer) clearTimeout(selectionTimer);
+    selectionTimerDueAt = dueAt;
     selectionTimer = setTimeout(function(){
       selectionTimer = null;
+      selectionTimerDueAt = 0;
       reportSelection();
-    }, delay);
+    }, Math.max(0, selectionTimerDueAt - Date.now()));
   }
   document.addEventListener("mouseup", function(ev){
     if (fromOverlayChrome(ev)) return;
