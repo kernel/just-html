@@ -697,9 +697,9 @@ function SelectionToolbar({
   onComment: () => void;
   onReact: (emoji: string) => void;
 }) {
-  // The iframe spans the docwrap; the selection rect's viewport-top maps onto the
-  // docwrap (both share the top edge). Clamp into view.
-  const top = Math.max(8, viewTop);
+  // The iframe spans the docwrap; iframe viewport coordinates map onto this
+  // wrapper, then CSS clamps the toolbar inside the visible pane.
+  const top = `max(8px, min(${Math.max(8, Math.round(viewTop))}px, calc(100% - 84px)))`;
   const [picking, setPicking] = useState(false);
   return (
     <div style={{ ...seltoolStyle, top }}>
