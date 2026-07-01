@@ -12,8 +12,6 @@
 //                     { type:"jh:focus", key }            (focus a key from the rail; null clears)
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
-//                     { type:"jh:setThemeMode", mode }    ("light"|"dark" force the highlight
-//                                                          treatment; "auto"/null = sample the doc)
 //   overlay → shell:  { type:"jh:ready" }
 //                     { type:"jh:positions", positions:{ [id]: yTopPx } }  (comment highlight y)
 //                     { type:"jh:selection", anchor:{exact,prefix,suffix}, rect:{...} }
@@ -65,7 +63,6 @@ export const OVERLAY_SCRIPT = String.raw`
   var focusKey = null;       // focused (pinned) key
   var lastClickKeys = null;  // covering set of the last focus click (for cycle)
   var lastClickPos = -1;     // doc-text offset of the last focus click (cycle reset on move)
-  var forcedMode = null;     // "light"|"dark" from the shell's theme toggle; null = auto (sample the doc)
 
   function send(msg){ try { parent.postMessage(msg, "*"); } catch(e){} }
   function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -120,13 +117,11 @@ export const OVERLAY_SCRIPT = String.raw`
       else dark = lum < 0.4;
       lastDark = dark;
 
-      // The highlight treatment follows the shell's explicit light/dark toggle
-      // when one is set (forcedMode), otherwise the sampled darkness. jh:theme
-      // still reports the SAMPLED value below so the shell's auto path stays honest.
-      var effDark = forcedMode === "dark" ? true : forcedMode === "light" ? false : dark;
-
-      // toggle the dark-highlight stylesheet branch (needs the style present)
-      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", !!effDark); } catch(e){}
+      // toggle the dark-highlight stylesheet branch (needs the style present).
+      // Keyed on the doc's SAMPLED darkness — never the chrome theme — because the
+      // highlight is painted ON the document, so it must contrast with the page's
+      // real background regardless of what the viewer picked for the rail chrome.
+      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", !!dark); } catch(e){}
 
       send({ type:"jh:theme",
         bg: "rgb("+Math.round(bgRgb[0])+","+Math.round(bgRgb[1])+","+Math.round(bgRgb[2])+")",
@@ -159,6 +154,24 @@ export const OVERLAY_SCRIPT = String.raw`
       var e = nodes[i];
       if (offset >= e.start && offset <= e.start + e.node.nodeValue.length)
         return { node: e.node, offset: offset - e.start };
+    }
+    return null;
+  }
+  // Like locate but forward-biased for a range START: an offset sitting exactly on
+  // a text-node boundary resolves to the NEXT node's start, not the previous node's
+  // end. Otherwise a range whose first character is the start of a block (a heading,
+  // a paragraph) begins at the block's leading edge, and wrapping it pulls the whole
+  // block into an inline <span> — whose background never paints, so the highlight
+  // silently vanishes. Bias the start inward so we wrap the text, not the block.
+  function locateStart(nodes, offset){
+    for (var i=0;i<nodes.length;i++){
+      var e = nodes[i], len = e.node.nodeValue.length;
+      if (offset >= e.start && offset < e.start + len) return { node: e.node, offset: offset - e.start };
+      if (offset === e.start + len){
+        var nx = nodes[i+1];
+        if (nx && nx.start === offset) return { node: nx.node, offset: 0 };
+        return { node: e.node, offset: len };
+      }
     }
     return null;
   }
@@ -199,7 +212,7 @@ export const OVERLAY_SCRIPT = String.raw`
   }
 
   function mkRange(nodes, start, len){
-    var a = locate(nodes, start), b = locate(nodes, start+len);
+    var a = locateStart(nodes, start), b = locate(nodes, start+len);
     if (!a || !b) return null;
     try { var r = document.createRange(); r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset); return r; } catch(e){ return null; }
   }
@@ -235,8 +248,7 @@ export const OVERLAY_SCRIPT = String.raw`
       // invisible on a dark page, so when the doc is dark we repaint highlights as a
       // stronger warm amber wash (~.30–.54 alpha by depth) with a near-opaque warm
       // underline — legible on dark while keeping the doc's own (light) text
-      // readable. Gated by a .jh-dark class on <html> set from sampleTheme (which
-      // honors the shell's light/dark toggle via forcedMode).
+      // readable. Gated by a .jh-dark class on <html> set from sampleTheme.
       + "html.jh-dark span[data-jh-seg].d1{background:rgba(245,197,24,.30);border-bottom-color:rgba(245,197,24,.95)}"
       + "html.jh-dark span[data-jh-seg].d2{background:rgba(245,197,24,.42);border-bottom-color:rgba(245,197,24,.98)}"
       + "html.jh-dark span[data-jh-seg].d3{background:rgba(245,197,24,.54);border-bottom-color:#f5c518}"
@@ -647,7 +659,6 @@ export const OVERLAY_SCRIPT = String.raw`
     }
     else if (d.type === "jh:scrollTo"){ var sk = (typeof d.id === "number") ? "c:"+d.id : String(d.id); scrollToKey(sk); }
     else if (d.type === "jh:clearSelection"){ var s=window.getSelection(); if(s) s.removeAllRanges(); }
-    else if (d.type === "jh:setThemeMode"){ forcedMode = (d.mode === "dark" || d.mode === "light") ? d.mode : null; sampleTheme(); }
     else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
   });
 
