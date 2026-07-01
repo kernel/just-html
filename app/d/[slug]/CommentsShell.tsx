@@ -36,6 +36,13 @@ const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace
 // react with the wider allowed set, but the human picker stays small.
 const EMOJIS = ["👍", "👎", "🎉", "❤️", "😄", "🚀", "👀"];
 
+type ThemeMode = "auto" | "light" | "dark";
+const THEME_MODE_KEY = "jh:theme-mode";
+// Fallback dark base when a viewer FORCES dark on a doc we didn't sample as dark
+// (a light doc, or before the overlay's first jh:theme). Real dark docs keep
+// their own sampled colors so the chrome matches the page.
+const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#c9d1d9", isDark: true };
+
 type Reaction = { emoji: string; count: number; authors: string[] };
 type Anchor = { exact: string; prefix?: string; suffix?: string; start?: number; end?: number } | null;
 // Anchored reaction group (one per span), as returned by GET /comments grouped by
@@ -124,14 +131,40 @@ export default function CommentsShell(props: Props) {
 
   // Adaptive chrome (variant D). The server may hand us a coarse dark theme for
   // the initial paint (no flash); the overlay's jh:theme then refines/confirms it.
-  // `mode` is the single gate that keeps the door open for a future user
-  // light/dark toggle — today it is always "auto" (apply whatever the doc is).
-  const mode: "auto" = "auto";
   const [theme, setTheme] = useState<ThemeSample | null>(props.initialTheme);
-  // Only DARK themes drive the chrome; light docs keep the literal light chrome.
+  // Viewer theme preference: "auto" (match the document — the default, and
+  // today's behavior) or an explicit light/dark. Persisted per viewer in
+  // localStorage as a GLOBAL preference (not per-doc). localStorage is
+  // client-only, so we start "auto" for SSR and hydrate on mount.
+  const [mode, setMode] = useState<ThemeMode>("auto");
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(THEME_MODE_KEY);
+      if (saved === "auto" || saved === "light" || saved === "dark") setMode(saved);
+    } catch {
+      /* localStorage blocked (private mode) — stay on auto. */
+    }
+  }, []);
+  const chooseMode = useCallback((m: ThemeMode) => {
+    setMode(m);
+    try {
+      localStorage.setItem(THEME_MODE_KEY, m);
+    } catch {
+      /* best effort — the choice still applies for this session. */
+    }
+  }, []);
+  // The theme that actually drives the chrome. light → today's literal light
+  // chrome (palette null); dark → variant-D palette from the doc's sampled dark
+  // colors when it really is dark, else a default dark base; auto → dark only
+  // when the doc sampled dark (unchanged behavior).
+  const effectiveTheme: ThemeSample | null = useMemo(() => {
+    if (mode === "light") return null;
+    if (mode === "dark") return theme && theme.isDark ? theme : DEFAULT_DARK;
+    return theme && theme.isDark ? theme : null;
+  }, [mode, theme]);
   const palette: ChromePalette | null = useMemo(
-    () => (mode === "auto" && theme && theme.isDark ? buildChromePalette(theme) : null),
-    [theme]
+    () => (effectiveTheme ? buildChromePalette(effectiveTheme) : null),
+    [effectiveTheme]
   );
   const isDark = palette !== null;
 
@@ -430,6 +463,12 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
   }, [activeId, overlayReady, postToOverlay]);
 
+  // Tell the overlay which highlight treatment to paint. A forced light/dark
+  // overrides the overlay's own doc-darkness sampling; "auto" hands control back.
+  useEffect(() => {
+    if (overlayReady) postToOverlay({ type: "jh:setThemeMode", mode });
+  }, [mode, overlayReady, postToOverlay]);
+
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]
@@ -486,6 +525,7 @@ export default function CommentsShell(props: Props) {
           {title}
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
+          <ThemeToggle mode={mode} onChange={chooseMode} />
           <button
             type="button"
             className="jh-commentbtn"
@@ -683,6 +723,35 @@ function paletteVars(p: ChromePalette): React.CSSProperties {
 }
 
 // --------------------------- subcomponents ---------------------------
+
+// Light / dark / auto theme control in the chrome bar. Segmented, monospace,
+// themed off the same --jh-tog-* vars as the comment toggle so it recolors in
+// dark. "auto" (◐) matches the document; ☀/☾ force the choice and persist it.
+const THEME_OPTS: { m: ThemeMode; glyph: string; label: string }[] = [
+  { m: "light", glyph: "☀", label: "light" },
+  { m: "dark", glyph: "☾", label: "dark" },
+  { m: "auto", glyph: "◐", label: "auto (match the document)" },
+];
+
+function ThemeToggle({ mode, onChange }: { mode: ThemeMode; onChange: (m: ThemeMode) => void }) {
+  return (
+    <span role="group" aria-label="theme" style={themeToggleWrap}>
+      {THEME_OPTS.map((o) => (
+        <button
+          key={o.m}
+          type="button"
+          title={o.label}
+          aria-label={`theme: ${o.label}`}
+          aria-pressed={mode === o.m}
+          onClick={() => onChange(o.m)}
+          style={themeSegStyle(mode === o.m)}
+        >
+          {o.glyph}
+        </button>
+      ))}
+    </span>
+  );
+}
 
 function SelectionToolbar({
   viewTop,
@@ -1148,6 +1217,31 @@ function commentBtnStyle(pressed: boolean): React.CSSProperties {
     padding: "2px 9px",
     cursor: "pointer",
     lineHeight: 1.6,
+    transition: CHROME_TRANSITION,
+  };
+}
+
+const themeToggleWrap: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  height: 22,
+  border: "1px solid var(--jh-tog-border, #ccc)",
+  borderRadius: 6,
+  overflow: "hidden",
+};
+
+function themeSegStyle(on: boolean): React.CSSProperties {
+  return {
+    font: "inherit",
+    fontSize: 12,
+    lineHeight: 1,
+    minWidth: 24,
+    height: "100%",
+    padding: "0 6px",
+    border: "none",
+    cursor: "pointer",
+    background: on ? "var(--jh-tog-on-bg, #111)" : "var(--jh-tog-bg, #fafafa)",
+    color: on ? "var(--jh-tog-on-fg, #fff)" : "var(--jh-tog-fg, #111)",
     transition: CHROME_TRANSITION,
   };
 }

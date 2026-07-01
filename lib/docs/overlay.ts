@@ -12,6 +12,8 @@
 //                     { type:"jh:focus", key }            (focus a key from the rail; null clears)
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
+//                     { type:"jh:setThemeMode", mode }    ("light"|"dark" force the highlight
+//                                                          treatment; "auto"/null = sample the doc)
 //   overlay → shell:  { type:"jh:ready" }
 //                     { type:"jh:positions", positions:{ [id]: yTopPx } }  (comment highlight y)
 //                     { type:"jh:selection", anchor:{exact,prefix,suffix}, rect:{...} }
@@ -63,6 +65,7 @@ export const OVERLAY_SCRIPT = String.raw`
   var focusKey = null;       // focused (pinned) key
   var lastClickKeys = null;  // covering set of the last focus click (for cycle)
   var lastClickPos = -1;     // doc-text offset of the last focus click (cycle reset on move)
+  var forcedMode = null;     // "light"|"dark" from the shell's theme toggle; null = auto (sample the doc)
 
   function send(msg){ try { parent.postMessage(msg, "*"); } catch(e){} }
   function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -117,8 +120,13 @@ export const OVERLAY_SCRIPT = String.raw`
       else dark = lum < 0.4;
       lastDark = dark;
 
+      // The highlight treatment follows the shell's explicit light/dark toggle
+      // when one is set (forcedMode), otherwise the sampled darkness. jh:theme
+      // still reports the SAMPLED value below so the shell's auto path stays honest.
+      var effDark = forcedMode === "dark" ? true : forcedMode === "light" ? false : dark;
+
       // toggle the dark-highlight stylesheet branch (needs the style present)
-      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", !!dark); } catch(e){}
+      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", !!effDark); } catch(e){}
 
       send({ type:"jh:theme",
         bg: "rgb("+Math.round(bgRgb[0])+","+Math.round(bgRgb[1])+","+Math.round(bgRgb[2])+")",
@@ -223,15 +231,17 @@ export const OVERLAY_SCRIPT = String.raw`
       + "span[data-jh-seg].jh-hover{background:#ffd76b}"
       + "span[data-jh-seg].jh-focus{background:#ffce3a;box-shadow:inset 0 0 0 9999px rgba(255,179,0,.18)}"
       + "span[data-jh-seg].jh-dim{opacity:.4}"
-      // DARK DOC (adaptive chrome, variant D): the yellow wash blows out on a dark
-      // page, so when the doc is dark we repaint highlights as a translucent warm
-      // wash (rgba(241,196,15,.20)) + a ~55% warm ring, keeping the doc's own text
-      // color (legible). Gated by a .jh-dark class on <html> set from sampleTheme.
-      + "html.jh-dark span[data-jh-seg].d1{background:rgba(241,196,15,.16);border-bottom-color:rgba(241,196,15,.45)}"
-      + "html.jh-dark span[data-jh-seg].d2{background:rgba(241,196,15,.24);border-bottom-color:rgba(241,196,15,.55)}"
-      + "html.jh-dark span[data-jh-seg].d3{background:rgba(241,196,15,.32);border-bottom-color:rgba(241,196,15,.7)}"
-      + "html.jh-dark span[data-jh-seg].jh-hover{background:rgba(241,196,15,.3)}"
-      + "html.jh-dark span[data-jh-seg].jh-focus{background:rgba(241,196,15,.2);box-shadow:inset 0 0 0 9999px rgba(241,196,15,.12),0 0 0 1px rgba(241,196,15,.55)}"
+      // DARK DOC (adaptive chrome, variant D): the light #fff3bf wash is nearly
+      // invisible on a dark page, so when the doc is dark we repaint highlights as a
+      // stronger warm amber wash (~.30–.54 alpha by depth) with a near-opaque warm
+      // underline — legible on dark while keeping the doc's own (light) text
+      // readable. Gated by a .jh-dark class on <html> set from sampleTheme (which
+      // honors the shell's light/dark toggle via forcedMode).
+      + "html.jh-dark span[data-jh-seg].d1{background:rgba(245,197,24,.30);border-bottom-color:rgba(245,197,24,.95)}"
+      + "html.jh-dark span[data-jh-seg].d2{background:rgba(245,197,24,.42);border-bottom-color:rgba(245,197,24,.98)}"
+      + "html.jh-dark span[data-jh-seg].d3{background:rgba(245,197,24,.54);border-bottom-color:#f5c518}"
+      + "html.jh-dark span[data-jh-seg].jh-hover{background:rgba(245,197,24,.5)}"
+      + "html.jh-dark span[data-jh-seg].jh-focus{background:rgba(245,197,24,.44);box-shadow:inset 0 0 0 9999px rgba(245,197,24,.12),0 0 0 1px rgba(245,197,24,.95)}"
       + "span[data-jh-chip]{display:inline-flex;align-items:center;gap:2px;font-size:11.5px;line-height:1;"
       + "background:#fbfbfb;border:1px solid #e0e0e0;border-radius:10px;padding:1px 6px 1px 5px;margin-left:4px;"
       + "vertical-align:.12em;font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;user-select:none;"
@@ -637,6 +647,7 @@ export const OVERLAY_SCRIPT = String.raw`
     }
     else if (d.type === "jh:scrollTo"){ var sk = (typeof d.id === "number") ? "c:"+d.id : String(d.id); scrollToKey(sk); }
     else if (d.type === "jh:clearSelection"){ var s=window.getSelection(); if(s) s.removeAllRanges(); }
+    else if (d.type === "jh:setThemeMode"){ forcedMode = (d.mode === "dark" || d.mode === "light") ? d.mode : null; sampleTheme(); }
     else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
   });
 
