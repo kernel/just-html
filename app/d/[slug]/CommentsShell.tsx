@@ -463,12 +463,6 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
   }, [activeId, overlayReady, postToOverlay]);
 
-  // Tell the overlay which highlight treatment to paint. A forced light/dark
-  // overrides the overlay's own doc-darkness sampling; "auto" hands control back.
-  useEffect(() => {
-    if (overlayReady) postToOverlay({ type: "jh:setThemeMode", mode });
-  }, [mode, overlayReady, postToOverlay]);
-
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]
