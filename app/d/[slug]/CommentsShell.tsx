@@ -555,6 +555,10 @@ export default function CommentsShell(props: Props) {
               canComment={canComment}
               canReact={canReact}
               onComment={() => {
+                // Open the rail so the draft composer is actually visible — on a
+                // doc with no comments (desktop) or on mobile the rail starts
+                // closed, and a draft dropped into a hidden rail looks like a no-op.
+                setRailOpen(true);
                 setDraft({ anchor: selection.anchor, top: selection.top });
                 setSelection(null);
                 postToOverlay({ type: "jh:clearSelection" });

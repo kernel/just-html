@@ -244,16 +244,16 @@ export const OVERLAY_SCRIPT = String.raw`
       + "span[data-jh-seg].jh-hover{background:#ffd76b}"
       + "span[data-jh-seg].jh-focus{background:#ffce3a;box-shadow:inset 0 0 0 9999px rgba(255,179,0,.18)}"
       + "span[data-jh-seg].jh-dim{opacity:.4}"
-      // DARK DOC (adaptive chrome, variant D): the light #fff3bf wash is nearly
-      // invisible on a dark page, so when the doc is dark we repaint highlights as a
-      // stronger warm amber wash (~.30–.54 alpha by depth) with a near-opaque warm
-      // underline — legible on dark while keeping the doc's own (light) text
-      // readable. Gated by a .jh-dark class on <html> set from sampleTheme.
-      + "html.jh-dark span[data-jh-seg].d1{background:rgba(245,197,24,.30);border-bottom-color:rgba(245,197,24,.95)}"
-      + "html.jh-dark span[data-jh-seg].d2{background:rgba(245,197,24,.42);border-bottom-color:rgba(245,197,24,.98)}"
-      + "html.jh-dark span[data-jh-seg].d3{background:rgba(245,197,24,.54);border-bottom-color:#f5c518}"
-      + "html.jh-dark span[data-jh-seg].jh-hover{background:rgba(245,197,24,.5)}"
-      + "html.jh-dark span[data-jh-seg].jh-focus{background:rgba(245,197,24,.44);box-shadow:inset 0 0 0 9999px rgba(245,197,24,.12),0 0 0 1px rgba(245,197,24,.95)}"
+      // DARK DOC (adaptive chrome, variant D): a filled wash reads as muddy on a
+      // dark page, so instead of a background we mark the span with a warm amber
+      // UNDERLINE (depth = opacity) and leave the doc's own text untouched. Hover
+      // and focus add a faint transient wash for feedback only. Gated by a .jh-dark
+      // class on <html> set from sampleTheme.
+      + "html.jh-dark span[data-jh-seg].d1{background:transparent;border-bottom:2px solid rgba(245,197,24,.8)}"
+      + "html.jh-dark span[data-jh-seg].d2{background:transparent;border-bottom:2px solid rgba(245,197,24,.92)}"
+      + "html.jh-dark span[data-jh-seg].d3{background:transparent;border-bottom:2px solid #f5c518}"
+      + "html.jh-dark span[data-jh-seg].jh-hover{background:rgba(245,197,24,.14)}"
+      + "html.jh-dark span[data-jh-seg].jh-focus{background:rgba(245,197,24,.2);box-shadow:0 0 0 1px rgba(245,197,24,.85)}"
       + "span[data-jh-chip]{display:inline-flex;align-items:center;gap:2px;font-size:11.5px;line-height:1;"
       + "background:#fbfbfb;border:1px solid #e0e0e0;border-radius:10px;padding:1px 6px 1px 5px;margin-left:4px;"
       + "vertical-align:.12em;font-family:ui-monospace,Menlo,Consolas,monospace;cursor:pointer;user-select:none;"
