@@ -12,6 +12,7 @@
 //                     { type:"jh:focus", key }            (focus a key from the rail; null clears)
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
+//                     { type:"jh:themeMode", mode }        ("dark"|"light" force doc theme; else auto)
 //   overlay → shell:  { type:"jh:ready" }
 //                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight }
 //                          (comment highlight y + total doc height, in doc space)
@@ -77,6 +78,7 @@ export const OVERLAY_SCRIPT = String.raw`
   // isDark uses WCAG relative luminance with a small hysteresis dead-band so a
   // mid-tone bg doesn't flip-flop across re-emits.
   var lastDark = null; // hysteresis memory across re-emits
+  var forcedScheme = null; // viewer toggle: null = auto (doc as authored); "dark"|"light" force it
   function rxParse(s){
     if (!s) return null;
     var m = String(s).match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s\/]+([\d.%]+))?/i);
@@ -130,6 +132,38 @@ export const OVERLAY_SCRIPT = String.raw`
         accent: accStr || undefined,
         isDark: dark,
         gradient: gradient });
+    } catch(e){}
+  }
+
+  // ---- forced document theme (viewer's light/dark toggle) ----
+  // The toggle themes the chrome (bar/rail) in the shell; this makes it also repaint
+  // the DOCUMENT. color-scheme flips UA defaults (canvas, form controls, scrollbars);
+  // the !important bg/color forces the canvas even over an authored background, so an
+  // explicit pick wins. Per-element authored colors still cascade — we can't invert an
+  // arbitrary design, and @media(prefers-color-scheme) can't be driven from script.
+  // "auto" removes the override entirely, restoring the doc exactly as authored.
+  function applyDocScheme(){
+    try {
+      var de = document.documentElement; if (!de) return;
+      var st = document.getElementById("jh-doc-theme");
+      if (!forcedScheme){
+        de.classList.remove("jh-force-dark", "jh-force-light");
+        de.style.colorScheme = "";
+        if (st && st.parentNode) st.parentNode.removeChild(st);
+        return;
+      }
+      if (!st){
+        st = document.createElement("style"); st.id = "jh-doc-theme";
+        st.textContent =
+          "html.jh-force-dark{color-scheme:dark}"
+          + "html.jh-force-dark,html.jh-force-dark body{background-color:#0d1117!important;color:#c9d1d9!important}"
+          + "html.jh-force-light{color-scheme:light}"
+          + "html.jh-force-light,html.jh-force-light body{background-color:#ffffff!important;color:#111111!important}";
+        (document.head || de).appendChild(st);
+      }
+      de.classList.toggle("jh-force-dark", forcedScheme === "dark");
+      de.classList.toggle("jh-force-light", forcedScheme === "light");
+      de.style.colorScheme = forcedScheme;
     } catch(e){}
   }
 
@@ -660,6 +694,11 @@ export const OVERLAY_SCRIPT = String.raw`
     }
     else if (d.type === "jh:scrollTo"){ var sk = (typeof d.id === "number") ? "c:"+d.id : String(d.id); scrollToKey(sk); }
     else if (d.type === "jh:clearSelection"){ var s=window.getSelection(); if(s) s.removeAllRanges(); }
+    else if (d.type === "jh:themeMode"){
+      forcedScheme = (d.mode === "dark" || d.mode === "light") ? d.mode : null;
+      applyDocScheme();
+      sampleTheme(); // re-read colors so the chrome + highlight follow the forced doc theme
+    }
     else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
   });
 

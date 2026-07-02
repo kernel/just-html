@@ -468,6 +468,15 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
   }, [activeId, overlayReady, postToOverlay]);
 
+  // Forward the theme toggle into the iframe so the overlay repaints the DOCUMENT
+  // (not just the chrome): "dark"/"light" force the doc's color-scheme + background,
+  // "auto" leaves it as authored. The overlay re-samples after applying, so the
+  // chrome palette and highlight treatment follow the doc through the existing
+  // jh:theme round-trip — no separate wiring needed here.
+  useEffect(() => {
+    if (overlayReady) postToOverlay({ type: "jh:themeMode", mode });
+  }, [mode, overlayReady, postToOverlay]);
+
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]
