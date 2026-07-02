@@ -156,7 +156,7 @@ export const OVERLAY_SCRIPT = String.raw`
         st = document.createElement("style"); st.id = "jh-doc-theme";
         st.textContent =
           "html.jh-force-dark{color-scheme:dark}"
-          + "html.jh-force-dark,html.jh-force-dark body{background-color:#0d1117!important;color:#c9d1d9!important}"
+          + "html.jh-force-dark,html.jh-force-dark body{background-color:#0d1117!important;color:#ffffff!important}"
           + "html.jh-force-light{color-scheme:light}"
           + "html.jh-force-light,html.jh-force-light body{background-color:#ffffff!important;color:#111111!important}";
         (document.head || de).appendChild(st);
