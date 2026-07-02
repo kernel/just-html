@@ -590,7 +590,14 @@ export const OVERLAY_SCRIPT = String.raw`
       rec.segEls.forEach(function(el){ var rt = el.getBoundingClientRect().top + window.scrollY; if (rt < top) top = rt; });
       if (top !== Infinity) pos[it.id] = top;
     });
-    send({type:"jh:positions", positions: pos, docHeight: document.documentElement.scrollHeight});
+    // Content height, NOT documentElement.scrollHeight. The latter is max(content,
+    // viewport); since the shell sizes the iframe to this value, it inflates to the
+    // iframe's own height and ratchets upward on any transient overshoot — a blank tail
+    // below the doc and a rail so tall the comments never scroll into view. The body's
+    // box height is viewport-independent, so it reports the true content height.
+    var b = document.body;
+    var docH = b ? Math.max(b.scrollHeight, b.offsetHeight) : document.documentElement.scrollHeight;
+    send({type:"jh:positions", positions: pos, docHeight: docH});
   }
 
   function scrollToKey(key){
