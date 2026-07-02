@@ -105,6 +105,12 @@ export const OVERLAY_SCRIPT = String.raw`
       if (!bgRgb) bgRgb = [255,255,255]; // both transparent → treat as white (light)
       // fg: body color (fall back to documentElement).
       var fgRgb = (bodyCS && rxParse(bodyCS.color)) || (deCS && rxParse(deCS.color)) || [17,17,17];
+      // When the viewer FORCES a theme, report the forced bg/fg so the chrome palette
+      // (rail + comment cards, derived from this sample) matches the forced document —
+      // e.g. comment text is white in forced dark, not a gray lifted from the doc's own
+      // authored fg. Auto (no force) keeps sampling the doc so the chrome adapts to it.
+      if (forcedScheme === "dark"){ bgRgb = [13,17,23]; fgRgb = [255,255,255]; }
+      else if (forcedScheme === "light"){ bgRgb = [255,255,255]; fgRgb = [17,17,17]; }
       // accent: first <a>, else first heading.
       var accStr = null;
       var aEl = document.querySelector("a[href], a");

@@ -41,7 +41,7 @@ const THEME_MODE_KEY = "jh:theme-mode";
 // Fallback dark base when a viewer FORCES dark on a doc we didn't sample as dark
 // (a light doc, or before the overlay's first jh:theme). Real dark docs keep
 // their own sampled colors so the chrome matches the page.
-const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#c9d1d9", isDark: true };
+const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#ffffff", isDark: true };
 
 type Reaction = { emoji: string; count: number; authors: string[] };
 type Anchor = { exact: string; prefix?: string; suffix?: string; start?: number; end?: number } | null;
