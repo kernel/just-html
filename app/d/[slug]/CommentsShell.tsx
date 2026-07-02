@@ -512,15 +512,27 @@ export default function CommentsShell(props: Props) {
   // The count shown in the toggle: number of threads (visible roots).
   const commentCount = threads.length;
 
-  // Docs-style scroll sync (desktop only): cards are laid out at their highlight's
-  // absolute document Y, so the rail must scroll in lockstep with the document or a
-  // deep comment's card is stranded far below an empty rail. On mobile the rail is
-  // an overlay drawer with no doc alongside it, so cards stack normally instead.
+  // Docs-style scroll sync: cards are laid out at their highlight's absolute
+  // document Y, so the rail must scroll in lockstep with the document or a deep
+  // comment's card is stranded far below an empty rail.
   useEffect(() => {
-    if (isMobile) return;
     const el = railRef.current;
-    if (el) el.scrollTop = docScrollY;
-  }, [docScrollY, isMobile]);
+    if (!el) return;
+    // Mobile drawer: cards stack from the top (no absolute Y), so clear any leftover
+    // desktop scroll offset — a stale large scrollTop would open the drawer scrolled
+    // past the stacked cards onto empty space.
+    if (isMobile) {
+      el.scrollTop = 0;
+      return;
+    }
+    // The cards list starts BELOW the sticky header + doc-reaction/sign-in rows, but
+    // card Y is measured from the document top. Offset the sync by that chrome height
+    // (the list's own offsetTop) so a card lines up with its highlight instead of
+    // sitting that far below it.
+    const cards = el.querySelector("[data-jh-cards]") as HTMLElement | null;
+    const chromeH = cards ? cards.offsetTop : 0;
+    el.scrollTop = docScrollY + chromeH;
+  }, [docScrollY, isMobile, railOpen]);
 
   // When dark, expose the variant-D palette as CSS custom properties on the
   // wrapper. Every themed color below reads `var(--jh-x, <light-literal>)`, so
@@ -900,7 +912,7 @@ function RailCards(props: {
   }, [threads, positions, aligned]);
 
   return (
-    <div style={{ position: "relative", padding: "6px 8px 200px", minHeight: aligned && docHeight ? docHeight : undefined }}>
+    <div data-jh-cards="" style={{ position: "relative", padding: "6px 8px 200px", minHeight: aligned && docHeight ? docHeight : undefined }}>
       {threads.map((t) => (
         <Card
           key={t.id}
@@ -923,10 +935,16 @@ function RailCards(props: {
       ))}
 
       {draft ? (
-        <DraftCard
-          onSubmit={onSubmitDraft}
-          onCancel={onCancelDraft}
-        />
+        aligned ? (
+          // Place the composer at the selection's document Y so, once the rail is
+          // synced to the doc scroll, it opens next to the selected text — not
+          // stranded at the top of a list that's scrolled far away.
+          <div style={{ position: "absolute", left: 8, right: 8, top: Math.max(0, draft.top) }}>
+            <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+          </div>
+        ) : (
+          <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+        )
       ) : null}
 
       {threads.length === 0 && !draft ? (
