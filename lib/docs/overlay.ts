@@ -136,12 +136,69 @@ export const OVERLAY_SCRIPT = String.raw`
   }
 
   // ---- forced document theme (viewer's light/dark toggle) ----
-  // The toggle themes the chrome (bar/rail) in the shell; this makes it also repaint
-  // the DOCUMENT. color-scheme flips UA defaults (canvas, form controls, scrollbars);
-  // the !important bg/color forces the canvas even over an authored background, so an
-  // explicit pick wins. Per-element authored colors still cascade — we can't invert an
-  // arbitrary design, and @media(prefers-color-scheme) can't be driven from script.
-  // "auto" removes the override entirely, restoring the doc exactly as authored.
+  // The toggle themes the chrome (bar/rail) in the shell; this repaints the DOCUMENT.
+  // Setting body color alone doesn't work — authored rules like p,li{color:#1a1a1a}
+  // beat inheritance. And blanket-whitening every element breaks anything with its own
+  // (light) background: code blocks, badges, callout boxes would get white-on-light.
+  // So: force color-scheme + the page background, then WALK the DOM and recolor only
+  // the text of elements sitting ON that page background. Any element with its own
+  // background (or a code block) keeps its authored colors, and so does its subtree —
+  // "leave code alone", generalized. Links keep their accent. "auto" removes it all.
+  // (@media(prefers-color-scheme) still can't be driven from script.)
+  var FG_SKIP = { SCRIPT:1, STYLE:1, PRE:1, CODE:1, SVG:1, IMG:1, CANVAS:1, VIDEO:1, IFRAME:1, A:1, BUTTON:1, INPUT:1, SELECT:1, TEXTAREA:1, OPTION:1, NOSCRIPT:1 };
+  function ownsBackground(el){
+    try {
+      var bg = getComputedStyle(el).backgroundColor;
+      if (!bg || bg === "transparent") return false;
+      var m = bg.match(/rgba?\(([^)]+)\)/);
+      if (m){ var p = m[1].split(","); return p.length < 4 || parseFloat(p[3]) > 0.05; }
+      return true;
+    } catch(e){ return false; }
+  }
+  function isSurface(el, tag){ return tag === "PRE" || tag === "CODE" || ownsBackground(el); }
+  // PASS 1 — before any whitening, pin each surface's authored text color inline. A
+  // surface (code block / anything with its own background) often has no color of its
+  // own and relies on inheriting the body's dark text; once we whiten its ancestor
+  // that inheritance would turn its text white on a light surface. A direct inline
+  // color beats inheritance, so this preserves the authored look ("keep font color").
+  function pinSurfaces(el){
+    var kids = el.children;
+    for (var i = 0; i < kids.length; i++){
+      var c = kids[i], tag = c.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") continue;
+      if (isSurface(c, tag)){
+        if (!c.hasAttribute("data-jh-fg-pin")){
+          c.setAttribute("data-jh-fg-pin", c.style.color);
+          c.style.color = getComputedStyle(c).color;
+        }
+      } else {
+        pinSurfaces(c);
+      }
+    }
+  }
+  // PASS 2 — recolor text of elements sitting ON the page background; skip surfaces
+  // (and their subtrees), links, media, and painted highlight segments.
+  function whitenPage(el){
+    var kids = el.children;
+    for (var i = 0; i < kids.length; i++){
+      var c = kids[i], tag = c.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") continue;
+      if (isSurface(c, tag)) continue;
+      if (!FG_SKIP[tag] && !c.hasAttribute("data-jh-seg")) c.classList.add("jh-doc-fg");
+      whitenPage(c);
+    }
+  }
+  function markForcedText(){
+    try {
+      var pinned = document.querySelectorAll("[data-jh-fg-pin]");
+      for (var i = 0; i < pinned.length; i++){ var e = pinned[i]; e.style.color = e.getAttribute("data-jh-fg-pin") || ""; e.removeAttribute("data-jh-fg-pin"); }
+      var whited = document.querySelectorAll(".jh-doc-fg");
+      for (var j = 0; j < whited.length; j++) whited[j].classList.remove("jh-doc-fg");
+      if (!forcedScheme || !document.body) return;
+      pinSurfaces(document.body);
+      whitenPage(document.body);
+    } catch(e){}
+  }
   function applyDocScheme(){
     try {
       var de = document.documentElement; if (!de) return;
@@ -150,20 +207,24 @@ export const OVERLAY_SCRIPT = String.raw`
         de.classList.remove("jh-force-dark", "jh-force-light");
         de.style.colorScheme = "";
         if (st && st.parentNode) st.parentNode.removeChild(st);
+        markForcedText();
         return;
       }
       if (!st){
         st = document.createElement("style"); st.id = "jh-doc-theme";
         st.textContent =
           "html.jh-force-dark{color-scheme:dark}"
-          + "html.jh-force-dark,html.jh-force-dark body{background-color:#0d1117!important;color:#ffffff!important}"
+          + "html.jh-force-dark,html.jh-force-dark body{background-color:#0d1117!important}"
+          + "html.jh-force-dark .jh-doc-fg{color:#fff!important}"
           + "html.jh-force-light{color-scheme:light}"
-          + "html.jh-force-light,html.jh-force-light body{background-color:#ffffff!important;color:#111111!important}";
+          + "html.jh-force-light,html.jh-force-light body{background-color:#ffffff!important}"
+          + "html.jh-force-light .jh-doc-fg{color:#111!important}";
         (document.head || de).appendChild(st);
       }
       de.classList.toggle("jh-force-dark", forcedScheme === "dark");
       de.classList.toggle("jh-force-light", forcedScheme === "light");
       de.style.colorScheme = forcedScheme;
+      markForcedText();
     } catch(e){}
   }
 
