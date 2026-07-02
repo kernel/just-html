@@ -127,6 +127,11 @@ export default function CommentsShell(props: Props) {
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [positions, setPositions] = useState<Record<number, number>>({});
+  // The doc's live scroll offset + total height (from the overlay). On desktop the
+  // rail scrolls to match docScrollY so each card tracks its highlight instead of
+  // being stranded at an absolute Y in an otherwise-empty rail.
+  const [docScrollY, setDocScrollY] = useState(0);
+  const [docHeight, setDocHeight] = useState(0);
   const [overlayReady, setOverlayReady] = useState(false);
 
   // Adaptive chrome (variant D). The server may hand us a coarse dark theme for
@@ -266,6 +271,8 @@ export default function CommentsShell(props: Props) {
           break;
         case "jh:positions":
           setPositions(d.positions || {});
+          if (typeof d.scrollY === "number") setDocScrollY(d.scrollY);
+          if (typeof d.docHeight === "number") setDocHeight(d.docHeight);
           break;
         case "jh:theme":
           // Adaptive chrome: the overlay sampled the doc's effective colors. Drive
@@ -463,12 +470,6 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
   }, [activeId, overlayReady, postToOverlay]);
 
-  // Tell the overlay which highlight treatment to paint. A forced light/dark
-  // overrides the overlay's own doc-darkness sampling; "auto" hands control back.
-  useEffect(() => {
-    if (overlayReady) postToOverlay({ type: "jh:setThemeMode", mode });
-  }, [mode, overlayReady, postToOverlay]);
-
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]
@@ -494,12 +495,14 @@ export default function CommentsShell(props: Props) {
   const hadCommentsAtLoad = props.initialThreads.length > 0;
   const [railOpen, setRailOpen] = useState(false);
   const isMobileRef = useRef(false);
+  const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
     // Desktop: open by default ONLY if the doc already has comments. Mobile:
     // always closed by default (the toggle opens the right drawer).
     const applyDefault = () => {
       isMobileRef.current = mq.matches;
+      setIsMobile(mq.matches);
       setRailOpen(!mq.matches && hadCommentsAtLoad);
     };
     applyDefault();
@@ -508,6 +511,31 @@ export default function CommentsShell(props: Props) {
   }, [hadCommentsAtLoad]);
   // The count shown in the toggle: number of threads (visible roots).
   const commentCount = threads.length;
+
+  // Docs-style scroll sync: cards are laid out at their highlight's absolute
+  // document Y, so the rail must scroll in lockstep with the document or a deep
+  // comment's card is stranded far below an empty rail.
+  useEffect(() => {
+    const el = railRef.current;
+    if (!el) return;
+    // Mobile drawer: cards stack from the top (no absolute Y), so clear any leftover
+    // desktop scroll offset — a stale large scrollTop would open the drawer scrolled
+    // past the stacked cards onto empty space.
+    if (isMobile) {
+      el.scrollTop = 0;
+      return;
+    }
+    // The cards list starts BELOW the sticky header + doc-reaction/sign-in rows, but
+    // card Y is measured from the document top. Offset the sync by that chrome height
+    // (the list's own offsetTop) so a card lines up with its highlight instead of
+    // sitting that far below it.
+    const cards = el.querySelector("[data-jh-cards]") as HTMLElement | null;
+    const chromeH = cards ? cards.offsetTop : 0;
+    el.scrollTop = docScrollY + chromeH;
+    // docHeight is a dep though unused above: when it grows (late layout / resize) the
+    // rail's scrollHeight grows with it, so a scrollTop the browser previously clamped
+    // too low must be reapplied — otherwise cards stay offset until the next doc scroll.
+  }, [docScrollY, docHeight, isMobile, railOpen]);
 
   // When dark, expose the variant-D palette as CSS custom properties on the
   // wrapper. Every themed color below reads `var(--jh-x, <light-literal>)`, so
@@ -561,6 +589,10 @@ export default function CommentsShell(props: Props) {
               canComment={canComment}
               canReact={canReact}
               onComment={() => {
+                // Open the rail so the draft composer is actually visible — on a
+                // doc with no comments (desktop) or on mobile the rail starts
+                // closed, and a draft dropped into a hidden rail looks like a no-op.
+                setRailOpen(true);
                 setDraft({ anchor: selection.anchor, top: selection.top });
                 setSelection(null);
                 postToOverlay({ type: "jh:clearSelection" });
@@ -632,6 +664,8 @@ export default function CommentsShell(props: Props) {
           <RailCards
             threads={visibleThreads}
             positions={positions}
+            aligned={!isMobile}
+            docHeight={docHeight}
             pinnedId={pinnedId}
             activeId={activeId}
             canComment={canComment}
@@ -806,6 +840,8 @@ function SelectionToolbar({
 function RailCards(props: {
   threads: Thread[];
   positions: Record<number, number>;
+  aligned: boolean;
+  docHeight: number;
   pinnedId: number | null;
   activeId: number | null;
   canComment: boolean;
@@ -822,6 +858,8 @@ function RailCards(props: {
   const {
     threads,
     positions,
+    aligned,
+    docHeight,
     pinnedId,
     activeId,
     canComment,
@@ -844,8 +882,19 @@ function RailCards(props: {
   const [, force] = useState(0);
 
   useEffect(() => {
-    // Re-clamp after layout: walk cards in DOM order, push each down so its top
-    // is >= previous card's bottom + gap, and >= its anchor y.
+    // Mobile (drawer, no doc alongside): stack cards normally — clear any Y offset
+    // from a previous desktop layout so nothing is stranded below an empty drawer.
+    if (!aligned) {
+      for (const t of threads) {
+        const el = cardRefs.current.get(t.id);
+        if (el && el.style.marginTop) el.style.marginTop = "";
+      }
+      return;
+    }
+    // Desktop: re-clamp after layout — walk cards in DOM order, push each down so
+    // its top is >= previous card's bottom + gap, and >= its anchor y. The rail
+    // scrolls in lockstep with the document (see CommentsShell), so a card sits
+    // next to its highlight.
     const anchored = threads.filter((t) => t.group === "anchored");
     let lastBottom = 0;
     let changed = false;
@@ -863,10 +912,10 @@ function RailCards(props: {
       lastBottom = el.offsetTop + el.offsetHeight + 8;
     }
     if (changed) force((n) => n + 1);
-  }, [threads, positions]);
+  }, [threads, positions, aligned]);
 
   return (
-    <div style={{ position: "relative", padding: "6px 8px 200px" }}>
+    <div data-jh-cards="" style={{ position: "relative", padding: "6px 8px 200px", minHeight: aligned && docHeight ? docHeight : undefined }}>
       {threads.map((t) => (
         <Card
           key={t.id}
@@ -889,10 +938,16 @@ function RailCards(props: {
       ))}
 
       {draft ? (
-        <DraftCard
-          onSubmit={onSubmitDraft}
-          onCancel={onCancelDraft}
-        />
+        aligned ? (
+          // Place the composer at the selection's document Y so, once the rail is
+          // synced to the doc scroll, it opens next to the selected text — not
+          // stranded at the top of a list that's scrolled far away.
+          <div style={{ position: "absolute", left: 8, right: 8, top: Math.max(0, draft.top) }}>
+            <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+          </div>
+        ) : (
+          <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
+        )
       ) : null}
 
       {threads.length === 0 && !draft ? (
