@@ -341,6 +341,16 @@ export default function CommentsShell(props: Props) {
     return () => window.removeEventListener("message", onMsg);
   }, [paintAnchors, paintReactionGroups, me, avatars, postToOverlay, canComment, canReact]);
 
+  // Handshake: the overlay fires jh:ready when its script runs, which can beat
+  // this component's listener — the SSR'd iframe starts fetching before React
+  // hydrates — and a missed ready means anchors are never sent. Ping until the
+  // overlay answers (it replies to jh:ping with jh:ready).
+  useEffect(() => {
+    if (overlayReady) return;
+    const t = setInterval(() => postToOverlay({ type: "jh:ping" }), 250);
+    return () => clearInterval(t);
+  }, [overlayReady, postToOverlay]);
+
   const reload = useCallback(async () => {
     const r = await fetch(`${apiBase}/comments${tokenQuery}`, { credentials: "same-origin" });
     if (r.ok) {
