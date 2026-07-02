@@ -532,7 +532,10 @@ export default function CommentsShell(props: Props) {
     const cards = el.querySelector("[data-jh-cards]") as HTMLElement | null;
     const chromeH = cards ? cards.offsetTop : 0;
     el.scrollTop = docScrollY + chromeH;
-  }, [docScrollY, isMobile, railOpen]);
+    // docHeight is a dep though unused above: when it grows (late layout / resize) the
+    // rail's scrollHeight grows with it, so a scrollTop the browser previously clamped
+    // too low must be reapplied — otherwise cards stay offset until the next doc scroll.
+  }, [docScrollY, docHeight, isMobile, railOpen]);
 
   // When dark, expose the variant-D palette as CSS custom properties on the
   // wrapper. Every themed color below reads `var(--jh-x, <light-literal>)`, so
