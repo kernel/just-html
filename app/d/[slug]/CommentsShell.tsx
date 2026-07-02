@@ -41,7 +41,7 @@ const THEME_MODE_KEY = "jh:theme-mode";
 // Fallback dark base when a viewer FORCES dark on a doc we didn't sample as dark
 // (a light doc, or before the overlay's first jh:theme). Real dark docs keep
 // their own sampled colors so the chrome matches the page.
-const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#c9d1d9", isDark: true };
+const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#ffffff", isDark: true };
 
 type Reaction = { emoji: string; count: number; authors: string[] };
 type Anchor = { exact: string; prefix?: string; suffix?: string; start?: number; end?: number } | null;
@@ -469,6 +469,15 @@ export default function CommentsShell(props: Props) {
   useEffect(() => {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
   }, [activeId, overlayReady, postToOverlay]);
+
+  // Forward the theme toggle into the iframe so the overlay repaints the DOCUMENT
+  // (not just the chrome): "dark"/"light" force the doc's color-scheme + background,
+  // "auto" leaves it as authored. The overlay re-samples after applying, so the
+  // chrome palette and highlight treatment follow the doc through the existing
+  // jh:theme round-trip — no separate wiring needed here.
+  useEffect(() => {
+    if (overlayReady) postToOverlay({ type: "jh:themeMode", mode });
+  }, [mode, overlayReady, postToOverlay]);
 
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),

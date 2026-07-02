@@ -12,6 +12,7 @@
 //                     { type:"jh:focus", key }            (focus a key from the rail; null clears)
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
+//                     { type:"jh:themeMode", mode }        ("dark"|"light" force doc theme; else auto)
 //   overlay → shell:  { type:"jh:ready" }
 //                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight, scrollY }
 //                          (comment highlight y in doc space; doc scroll for rail sync)
@@ -77,6 +78,7 @@ export const OVERLAY_SCRIPT = String.raw`
   // isDark uses WCAG relative luminance with a small hysteresis dead-band so a
   // mid-tone bg doesn't flip-flop across re-emits.
   var lastDark = null; // hysteresis memory across re-emits
+  var forcedScheme = null; // viewer toggle: null = auto (doc as authored); "dark"|"light" force it
   function rxParse(s){
     if (!s) return null;
     var m = String(s).match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s\/]+([\d.%]+))?/i);
@@ -103,6 +105,12 @@ export const OVERLAY_SCRIPT = String.raw`
       if (!bgRgb) bgRgb = [255,255,255]; // both transparent → treat as white (light)
       // fg: body color (fall back to documentElement).
       var fgRgb = (bodyCS && rxParse(bodyCS.color)) || (deCS && rxParse(deCS.color)) || [17,17,17];
+      // When the viewer FORCES a theme, report the forced bg/fg so the chrome palette
+      // (rail + comment cards, derived from this sample) matches the forced document —
+      // e.g. comment text is white in forced dark, not a gray lifted from the doc's own
+      // authored fg. Auto (no force) keeps sampling the doc so the chrome adapts to it.
+      if (forcedScheme === "dark"){ bgRgb = [13,17,23]; fgRgb = [255,255,255]; }
+      else if (forcedScheme === "light"){ bgRgb = [255,255,255]; fgRgb = [17,17,17]; }
       // accent: first <a>, else first heading.
       var accStr = null;
       var aEl = document.querySelector("a[href], a");
@@ -130,6 +138,99 @@ export const OVERLAY_SCRIPT = String.raw`
         accent: accStr || undefined,
         isDark: dark,
         gradient: gradient });
+    } catch(e){}
+  }
+
+  // ---- forced document theme (viewer's light/dark toggle) ----
+  // The toggle themes the chrome (bar/rail) in the shell; this repaints the DOCUMENT.
+  // Setting body color alone doesn't work — authored rules like p,li{color:#1a1a1a}
+  // beat inheritance. And blanket-whitening every element breaks anything with its own
+  // (light) background: code blocks, badges, callout boxes would get white-on-light.
+  // So: force color-scheme + the page background, then WALK the DOM and recolor only
+  // the text of elements sitting ON that page background. Any element with its own
+  // background (or a code block) keeps its authored colors, and so does its subtree —
+  // "leave code alone", generalized. Links keep their accent. "auto" removes it all.
+  // (@media(prefers-color-scheme) still can't be driven from script.)
+  var FG_SKIP = { SCRIPT:1, STYLE:1, PRE:1, CODE:1, SVG:1, IMG:1, CANVAS:1, VIDEO:1, IFRAME:1, A:1, BUTTON:1, INPUT:1, SELECT:1, TEXTAREA:1, OPTION:1, NOSCRIPT:1 };
+  function ownsBackground(el){
+    try {
+      var bg = getComputedStyle(el).backgroundColor;
+      if (!bg || bg === "transparent") return false;
+      var m = bg.match(/rgba?\(([^)]+)\)/);
+      if (m){ var p = m[1].split(","); return p.length < 4 || parseFloat(p[3]) > 0.05; }
+      return true;
+    } catch(e){ return false; }
+  }
+  function isSurface(el, tag){ return tag === "PRE" || tag === "CODE" || ownsBackground(el); }
+  // PASS 1 — before any whitening, pin each surface's authored text color inline. A
+  // surface (code block / anything with its own background) often has no color of its
+  // own and relies on inheriting the body's dark text; once we whiten its ancestor
+  // that inheritance would turn its text white on a light surface. A direct inline
+  // color beats inheritance, so this preserves the authored look ("keep font color").
+  function pinSurfaces(el){
+    var kids = el.children;
+    for (var i = 0; i < kids.length; i++){
+      var c = kids[i], tag = c.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") continue;
+      if (isSurface(c, tag)){
+        if (!c.hasAttribute("data-jh-fg-pin")){
+          c.setAttribute("data-jh-fg-pin", c.style.color);
+          c.style.color = getComputedStyle(c).color;
+        }
+      } else {
+        pinSurfaces(c);
+      }
+    }
+  }
+  // PASS 2 — recolor text of elements sitting ON the page background; skip surfaces
+  // (and their subtrees), links, media, and painted highlight segments.
+  function whitenPage(el){
+    var kids = el.children;
+    for (var i = 0; i < kids.length; i++){
+      var c = kids[i], tag = c.tagName;
+      if (tag === "SCRIPT" || tag === "STYLE") continue;
+      if (isSurface(c, tag)) continue;
+      if (!FG_SKIP[tag] && !c.hasAttribute("data-jh-seg")) c.classList.add("jh-doc-fg");
+      whitenPage(c);
+    }
+  }
+  function markForcedText(){
+    try {
+      var pinned = document.querySelectorAll("[data-jh-fg-pin]");
+      for (var i = 0; i < pinned.length; i++){ var e = pinned[i]; e.style.color = e.getAttribute("data-jh-fg-pin") || ""; e.removeAttribute("data-jh-fg-pin"); }
+      var whited = document.querySelectorAll(".jh-doc-fg");
+      for (var j = 0; j < whited.length; j++) whited[j].classList.remove("jh-doc-fg");
+      if (!forcedScheme || !document.body) return;
+      pinSurfaces(document.body);
+      whitenPage(document.body);
+    } catch(e){}
+  }
+  function applyDocScheme(){
+    try {
+      var de = document.documentElement; if (!de) return;
+      var st = document.getElementById("jh-doc-theme");
+      if (!forcedScheme){
+        de.classList.remove("jh-force-dark", "jh-force-light");
+        de.style.colorScheme = "";
+        if (st && st.parentNode) st.parentNode.removeChild(st);
+        markForcedText();
+        return;
+      }
+      if (!st){
+        st = document.createElement("style"); st.id = "jh-doc-theme";
+        st.textContent =
+          "html.jh-force-dark{color-scheme:dark}"
+          + "html.jh-force-dark,html.jh-force-dark body{background-color:#0d1117!important}"
+          + "html.jh-force-dark .jh-doc-fg{color:#fff!important}"
+          + "html.jh-force-light{color-scheme:light}"
+          + "html.jh-force-light,html.jh-force-light body{background-color:#ffffff!important}"
+          + "html.jh-force-light .jh-doc-fg{color:#111!important}";
+        (document.head || de).appendChild(st);
+      }
+      de.classList.toggle("jh-force-dark", forcedScheme === "dark");
+      de.classList.toggle("jh-force-light", forcedScheme === "light");
+      de.style.colorScheme = forcedScheme;
+      markForcedText();
     } catch(e){}
   }
 
@@ -660,6 +761,11 @@ export const OVERLAY_SCRIPT = String.raw`
     }
     else if (d.type === "jh:scrollTo"){ var sk = (typeof d.id === "number") ? "c:"+d.id : String(d.id); scrollToKey(sk); }
     else if (d.type === "jh:clearSelection"){ var s=window.getSelection(); if(s) s.removeAllRanges(); }
+    else if (d.type === "jh:themeMode"){
+      forcedScheme = (d.mode === "dark" || d.mode === "light") ? d.mode : null;
+      applyDocScheme();
+      sampleTheme(); // re-read colors so the chrome + highlight follow the forced doc theme
+    }
     else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
   });
 
