@@ -10,11 +10,11 @@
 //                          reactions:[{emoji,count,mine,authors}]}] }
 //                     { type:"jh:active", id }            (hover sync; comment id or "rx:<sig>")
 //                     { type:"jh:focus", key }            (focus a key from the rail; null clears)
-//                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
 //   overlay → shell:  { type:"jh:ready" }
-//                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight, scrollY }
-//                          (comment highlight y in doc space; doc scroll for rail sync)
+//                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight }
+//                          (comment highlight y in doc space; docHeight sizes the
+//                          shell's iframe so the parent page owns the one scrollbar)
 //                     { type:"jh:selection", anchor:{exact,prefix,suffix}, rect:{...} }
 //                     { type:"jh:selectionCleared" }
 //                     { type:"jh:focus", key, keys }      (a segment was clicked: focused key + full covering set)
@@ -556,12 +556,7 @@ export const OVERLAY_SCRIPT = String.raw`
       rec.segEls.forEach(function(el){ var rt = el.getBoundingClientRect().top + window.scrollY; if (rt < top) top = rt; });
       if (top !== Infinity) pos[it.id] = top;
     });
-    send({type:"jh:positions", positions: pos, docHeight: document.documentElement.scrollHeight, scrollY: window.scrollY});
-  }
-
-  function scrollToKey(key){
-    var rec = byKey[key]; if (!rec || !rec.segEls.length) return;
-    rec.segEls[0].scrollIntoView({block:"center", behavior:"smooth"});
+    send({type:"jh:positions", positions: pos, docHeight: document.documentElement.scrollHeight});
   }
 
   // ---- selection → anchor ----
@@ -604,8 +599,7 @@ export const OVERLAY_SCRIPT = String.raw`
       var anchor = anchorFromSelection(sel);
       var rect = sel.getRangeAt(0).getBoundingClientRect();
       send({type:"jh:selection", anchor: anchor, rect: {
-        top: rect.top + window.scrollY, left: rect.left, right: rect.right, bottom: rect.bottom + window.scrollY,
-        viewTop: rect.top
+        top: rect.top + window.scrollY, left: rect.left, right: rect.right, bottom: rect.bottom + window.scrollY
       }});
     } catch(e) {
       send({type:"jh:selectionCleared"});
@@ -654,11 +648,12 @@ export const OVERLAY_SCRIPT = String.raw`
       setHover(key);
     }
     else if (d.type === "jh:focus"){
-      // rail → doc: focus a key (card clicked). null clears.
+      // rail → doc: focus a key (card clicked). null clears. No scrolling here —
+      // the parent page owns the scrollbar (this document never scrolls), and the
+      // shell scrolls the window to the highlight itself.
       if (d.key == null) clearFocus();
-      else { var ck = byKey[d.key]; setFocus(d.key, ck ? coverKeysOf(d.key) : [d.key]); if (ck) scrollToKey(d.key); }
+      else { var ck = byKey[d.key]; setFocus(d.key, ck ? coverKeysOf(d.key) : [d.key]); }
     }
-    else if (d.type === "jh:scrollTo"){ var sk = (typeof d.id === "number") ? "c:"+d.id : String(d.id); scrollToKey(sk); }
     else if (d.type === "jh:clearSelection"){ var s=window.getSelection(); if(s) s.removeAllRanges(); }
     else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
   });
@@ -680,7 +675,18 @@ export const OVERLAY_SCRIPT = String.raw`
   // short settle to catch late-applied CSS. Cheap to re-emit; hysteresis guards
   // flip-flop. Doesn't disturb any existing overlay behavior.
   sampleTheme();
-  window.addEventListener("load", sampleTheme);
+  window.addEventListener("load", function(){ sampleTheme(); reportPositions(); });
   setTimeout(sampleTheme, 400);
+  // The shell sizes its iframe to docHeight (single page scrollbar), so content
+  // growth it can't observe from outside — late images, fonts, dynamic docs —
+  // must be re-reported from in here.
+  if (typeof ResizeObserver !== "undefined"){
+    var ro = new ResizeObserver(function(){
+      if (ticking) return; ticking = true;
+      requestAnimationFrame(function(){ reportPositions(); ticking = false; });
+    });
+    if (document.body) ro.observe(document.body);
+    else window.addEventListener("DOMContentLoaded", function(){ if (document.body) ro.observe(document.body); });
+  }
 })();
 `;
