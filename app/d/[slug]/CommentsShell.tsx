@@ -127,10 +127,9 @@ export default function CommentsShell(props: Props) {
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [positions, setPositions] = useState<Record<number, number>>({});
-  // The doc's live scroll offset + total height (from the overlay). On desktop the
-  // rail scrolls to match docScrollY so each card tracks its highlight instead of
-  // being stranded at an absolute Y in an otherwise-empty rail.
-  const [docScrollY, setDocScrollY] = useState(0);
+  // The doc's total height (from the overlay). On desktop it sizes the iframe to its
+  // full content so the whole stage scrolls as one unit — doc and rail share a single
+  // scrollbar and the cards, laid out at their highlight's Y, track it for free.
   const [docHeight, setDocHeight] = useState(0);
   const [overlayReady, setOverlayReady] = useState(false);
 
@@ -271,7 +270,6 @@ export default function CommentsShell(props: Props) {
           break;
         case "jh:positions":
           setPositions(d.positions || {});
-          if (typeof d.scrollY === "number") setDocScrollY(d.scrollY);
           if (typeof d.docHeight === "number") setDocHeight(d.docHeight);
           break;
         case "jh:theme":
@@ -475,11 +473,6 @@ export default function CommentsShell(props: Props) {
     [threads, showResolved]
   );
 
-  // Card vertical layout: anchored cards align to their highlight y (from the
-  // overlay's reported positions) with no-overlap clamping; doc-level + orphaned
-  // stack after. Reproduces variant-b.html's docs-style alignment.
-  const railRef = useRef<HTMLDivElement>(null);
-
   // ---- Responsive rail (variant A — right drawer) ----
   // DESKTOP (>768px): side-by-side as before; the toggle collapses/expands the
   // rail to reclaim width (default = open). MOBILE (<=768px): the doc iframe is
@@ -511,31 +504,6 @@ export default function CommentsShell(props: Props) {
   }, [hadCommentsAtLoad]);
   // The count shown in the toggle: number of threads (visible roots).
   const commentCount = threads.length;
-
-  // Docs-style scroll sync: cards are laid out at their highlight's absolute
-  // document Y, so the rail must scroll in lockstep with the document or a deep
-  // comment's card is stranded far below an empty rail.
-  useEffect(() => {
-    const el = railRef.current;
-    if (!el) return;
-    // Mobile drawer: cards stack from the top (no absolute Y), so clear any leftover
-    // desktop scroll offset — a stale large scrollTop would open the drawer scrolled
-    // past the stacked cards onto empty space.
-    if (isMobile) {
-      el.scrollTop = 0;
-      return;
-    }
-    // The cards list starts BELOW the sticky header + doc-reaction/sign-in rows, but
-    // card Y is measured from the document top. Offset the sync by that chrome height
-    // (the list's own offsetTop) so a card lines up with its highlight instead of
-    // sitting that far below it.
-    const cards = el.querySelector("[data-jh-cards]") as HTMLElement | null;
-    const chromeH = cards ? cards.offsetTop : 0;
-    el.scrollTop = docScrollY + chromeH;
-    // docHeight is a dep though unused above: when it grows (late layout / resize) the
-    // rail's scrollHeight grows with it, so a scrollTop the browser previously clamped
-    // too low must be reapplied — otherwise cards stay offset until the next doc scroll.
-  }, [docScrollY, docHeight, isMobile, railOpen]);
 
   // When dark, expose the variant-D palette as CSS custom properties on the
   // wrapper. Every themed color below reads `var(--jh-x, <light-literal>)`, so
@@ -569,7 +537,16 @@ export default function CommentsShell(props: Props) {
         </span>
       </div>
 
-      <div ref={stageRef} className="jh-stage" data-rail={railOpen ? "open" : "closed"} style={stageStyle}>
+      <div
+        ref={stageRef}
+        className="jh-stage"
+        data-rail={railOpen ? "open" : "closed"}
+        // Desktop: the stage is the single scroll container. The iframe is sized to
+        // its full content (below) and the rail grows to doc height, so both columns
+        // scroll together under one scrollbar. Mobile keeps the fixed-height stage
+        // with an internally-scrolling iframe and the rail as an overlay drawer.
+        style={isMobile ? stageStyle : { ...stageStyle, overflowY: "auto", alignItems: "flex-start" }}
+      >
         <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
           <iframe
             ref={iframeRef}
@@ -577,7 +554,17 @@ export default function CommentsShell(props: Props) {
             src={rawSrc}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
-            style={{ border: "none", width: "100%", height: "100%", display: "block", background: "var(--jh-stage-bg, #fff)" }}
+            // Desktop: height = full document height so the iframe never scrolls
+            // internally (no second scrollbar); the stage scrolls it instead. Until
+            // the overlay reports docHeight, fall back to the viewport height so the
+            // doc is usable during that first paint. Mobile: fill the fixed stage.
+            style={{
+              border: "none",
+              width: "100%",
+              height: isMobile ? "100%" : docHeight ? `${docHeight}px` : "calc(100vh - 2.4rem)",
+              display: "block",
+              background: "var(--jh-stage-bg, #fff)",
+            }}
           />
           {/* selection toolbar — overlaid on the docwrap; positioned to the
               selection's viewport-top within the iframe. Shows on selection when
@@ -618,7 +605,7 @@ export default function CommentsShell(props: Props) {
           style={scrimStyle}
         />
 
-        <aside className="jh-rail" style={railStyle} ref={railRef}>
+        <aside className="jh-rail" style={isMobile ? railStyle : { ...railStyle, overflowY: "visible" }}>
           <div style={railHeadStyle}>
             <span>
               {visibleThreads.length} comment{visibleThreads.length !== 1 ? "s" : ""}
@@ -674,9 +661,21 @@ export default function CommentsShell(props: Props) {
               setPinnedId(id);
               setActiveId(id);
               // B14 rail → doc: focusing a card focuses its anchor in the document
-              // (intensify + dim others + scroll into view). Unpin clears focus.
-              if (id != null) postToOverlay({ type: "jh:focus", key: `c:${id}` });
-              else postToOverlay({ type: "jh:focus", key: null });
+              // (intensify + dim others). Unpin clears focus.
+              if (id == null) {
+                postToOverlay({ type: "jh:focus", key: null });
+                return;
+              }
+              postToOverlay({ type: "jh:focus", key: `c:${id}` });
+              // Reveal the anchor. Desktop shares one scroll container (the stage) and
+              // the iframe is full-height, so the overlay's in-frame scrollIntoView
+              // can't move it — scroll the stage to the comment's document Y. Mobile
+              // scrolls inside the iframe, which the overlay still handles.
+              const stage = stageRef.current;
+              const y = positions[id];
+              if (!isMobileRef.current && stage && typeof y === "number") {
+                stage.scrollTo({ top: Math.max(0, y - stage.clientHeight / 2), behavior: "smooth" });
+              }
             }}
             onHover={(id) => setActiveId(id)}
             onReply={postComment}
@@ -879,6 +878,11 @@ function RailCards(props: {
   // using an estimated min gap; the browser then lays them out. We measure with
   // refs after paint to refine clamping.
   const cardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+  const cardsRef = useRef<HTMLDivElement | null>(null);
+  // Height of the sticky rail header (+ optional rows) above the cards list. Cards are
+  // placed at their highlight's document Y, but the list starts this far below the
+  // rail's top — so in the shared doc+rail scroll we shift card Y up by it to align.
+  const [chromeH, setChromeH] = useState(0);
   const [, force] = useState(0);
 
   useEffect(() => {
@@ -892,16 +896,19 @@ function RailCards(props: {
       return;
     }
     // Desktop: re-clamp after layout — walk cards in DOM order, push each down so
-    // its top is >= previous card's bottom + gap, and >= its anchor y. The rail
-    // scrolls in lockstep with the document (see CommentsShell), so a card sits
-    // next to its highlight.
+    // its top is >= previous card's bottom + gap, and >= its anchor y. Doc and rail
+    // share one scroll container, so aligning a card with its highlight means placing
+    // it at the highlight's document Y minus the header height above the cards list.
+    const measuredChrome = cardsRef.current ? cardsRef.current.offsetTop : 0;
+    setChromeH(measuredChrome); // drives the draft composer's Y in render; no-op if unchanged
     const anchored = threads.filter((t) => t.group === "anchored");
     let lastBottom = 0;
     let changed = false;
     for (const t of anchored) {
       const el = cardRefs.current.get(t.id);
       if (!el) continue;
-      const want = Math.max(lastBottom, positions[t.id] ?? lastBottom);
+      const anchorY = positions[t.id];
+      const want = Math.max(lastBottom, anchorY != null ? anchorY - measuredChrome : lastBottom);
       const curMargin = parseFloat(el.style.marginTop || "0");
       const naturalTop = el.offsetTop - curMargin;
       const desiredMargin = Math.max(0, want - naturalTop);
@@ -915,7 +922,7 @@ function RailCards(props: {
   }, [threads, positions, aligned]);
 
   return (
-    <div data-jh-cards="" style={{ position: "relative", padding: "6px 8px 200px", minHeight: aligned && docHeight ? docHeight : undefined }}>
+    <div data-jh-cards="" ref={cardsRef} style={{ position: "relative", padding: "6px 8px 200px", minHeight: aligned && docHeight ? docHeight : undefined }}>
       {threads.map((t) => (
         <Card
           key={t.id}
@@ -939,10 +946,10 @@ function RailCards(props: {
 
       {draft ? (
         aligned ? (
-          // Place the composer at the selection's document Y so, once the rail is
-          // synced to the doc scroll, it opens next to the selected text — not
-          // stranded at the top of a list that's scrolled far away.
-          <div style={{ position: "absolute", left: 8, right: 8, top: Math.max(0, draft.top) }}>
+          // Place the composer at the selection's document Y (minus the header height
+          // above the list) so, in the shared doc+rail scroll, it opens next to the
+          // selected text instead of stranded far up or down the list.
+          <div style={{ position: "absolute", left: 8, right: 8, top: Math.max(0, draft.top - chromeH) }}>
             <DraftCard onSubmit={onSubmitDraft} onCancel={onCancelDraft} />
           </div>
         ) : (

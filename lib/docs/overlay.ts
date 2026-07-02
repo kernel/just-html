@@ -13,8 +13,8 @@
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
 //   overlay → shell:  { type:"jh:ready" }
-//                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight, scrollY }
-//                          (comment highlight y in doc space; doc scroll for rail sync)
+//                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight }
+//                          (comment highlight y + total doc height, in doc space)
 //                     { type:"jh:selection", anchor:{exact,prefix,suffix}, rect:{...} }
 //                     { type:"jh:selectionCleared" }
 //                     { type:"jh:focus", key, keys }      (a segment was clicked: focused key + full covering set)
@@ -556,7 +556,7 @@ export const OVERLAY_SCRIPT = String.raw`
       rec.segEls.forEach(function(el){ var rt = el.getBoundingClientRect().top + window.scrollY; if (rt < top) top = rt; });
       if (top !== Infinity) pos[it.id] = top;
     });
-    send({type:"jh:positions", positions: pos, docHeight: document.documentElement.scrollHeight, scrollY: window.scrollY});
+    send({type:"jh:positions", positions: pos, docHeight: document.documentElement.scrollHeight});
   }
 
   function scrollToKey(key){
