@@ -488,6 +488,15 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:themeMode", mode });
   }, [mode, overlayReady, postToOverlay]);
 
+  // On a mode change, drop the last sample back to the authored SSR baseline. While
+  // forced, jh:theme reports the FORCED colors; if we kept that after switching to
+  // auto, the chrome would render from the forced sample (e.g. dark on a light doc)
+  // until the overlay's fresh authored sample arrives. Resetting avoids that window;
+  // the overlay re-samples immediately after (via the jh:themeMode above).
+  useEffect(() => {
+    setTheme(props.initialTheme);
+  }, [mode, props.initialTheme]);
+
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]

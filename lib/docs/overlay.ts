@@ -795,10 +795,12 @@ export const OVERLAY_SCRIPT = String.raw`
   window.addEventListener("resize", function(){ paint(); });
 
   send({type:"jh:ready"});
-  // Adaptive chrome: emit theme on ready, again on window.load, and once after a
-  // short settle to catch late-applied CSS. Cheap to re-emit; hysteresis guards
-  // flip-flop. Doesn't disturb any existing overlay behavior.
-  sampleTheme();
+  // Adaptive chrome: do NOT sample immediately — forcedScheme is still unset here, so
+  // an eager sample would report the AUTHORED theme before the shell's jh:themeMode
+  // applies a forced one (a flash for forced viewers). The shell replies to jh:ready
+  // with jh:themeMode right away, and its handler samples with the forced mode known.
+  // These re-emits are the safety net: late-applied CSS (load) and a settle timeout,
+  // plus a fallback for any host that never sends jh:themeMode. Hysteresis guards flip-flop.
   window.addEventListener("load", sampleTheme);
   setTimeout(sampleTheme, 400);
 })();
