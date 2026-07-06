@@ -574,7 +574,9 @@ export const OVERLAY_SCRIPT = String.raw`
       var cover = (el.getAttribute("data-cover")||"").split(",").filter(Boolean);
       el.classList.remove("jh-hover","jh-focus","jh-dim");
       var depth = Math.min(3, cover.length);
-      el.className = "d"+depth; // reset base depth class
+      // Rebuild the base class but KEEP jh-doc-fg — otherwise a hover/focus recolor
+      // strips the forced-theme text color and the segment reverts to dark-on-dark.
+      el.className = "d"+depth + (el.classList.contains("jh-doc-fg") ? " jh-doc-fg" : "");
       if (focusKey){
         if (cover.indexOf(focusKey) !== -1) el.classList.add("jh-focus");
         else el.classList.add("jh-dim");

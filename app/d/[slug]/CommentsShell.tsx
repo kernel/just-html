@@ -142,6 +142,10 @@ export default function CommentsShell(props: Props) {
   // localStorage as a GLOBAL preference (not per-doc). localStorage is
   // client-only, so we start "auto" for SSR and hydrate on mount.
   const [mode, setMode] = useState<ThemeMode>("auto");
+  // Mirror mode into a ref so the jh:ready handler (not in mode's deps) reads the
+  // current value — it must send the forced theme on every ready, including reloads.
+  const modeRef = useRef<ThemeMode>(mode);
+  modeRef.current = mode;
   useEffect(() => {
     try {
       const saved = localStorage.getItem(THEME_MODE_KEY);
@@ -266,6 +270,11 @@ export default function CommentsShell(props: Props) {
       switch (d.type) {
         case "jh:ready":
           setOverlayReady(true);
+          // Send the forced theme FIRST, so the overlay applies it before it paints
+          // (no authored-doc flash), and on EVERY ready — including an iframe reload,
+          // where overlayReady stays true so the mode effect below won't re-fire and
+          // the freshly-loaded overlay would otherwise reset to the authored theme.
+          postToOverlay({ type: "jh:themeMode", mode: modeRef.current });
           postToOverlay({ type: "jh:anchors", anchors: paintAnchors });
           postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
           break;
