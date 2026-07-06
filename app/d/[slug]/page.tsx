@@ -12,7 +12,6 @@ import {
 } from "@/lib/docs/comments";
 import { detectServerTheme } from "@/lib/docs/theme";
 import CommentsShell from "./CommentsShell";
-import PlainShell from "./PlainShell";
 
 export const dynamic = "force-dynamic";
 
@@ -95,26 +94,19 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   const threadData = await allThreads(doc);
   const docReactions = threadData.doc_reactions ?? [];
   const anchoredReactions = threadData.anchored_reactions ?? [];
-  const hasComments = threadData.total > 0;
-  const hasDocReactions = docReactions.length > 0;
-  const hasAnchoredReactions = anchoredReactions.length > 0;
   const title = doc.title || doc.slug;
 
   // Adaptive chrome (variant D): coarsely detect a DARK doc from the stored
-  // HTML's unconditional html/body background so the shell renders themed at SSR
-  // (PlainShell has no JS to sample; CommentsShell uses it as the initial theme
-  // to avoid a light→dark flash before the overlay's jh:theme refines it).
-  // Conservative — a bg dark only under prefers-color-scheme is "unknown" → light.
+  // HTML's unconditional html/body background so the shell renders themed at SSR —
+  // CommentsShell uses it as the initial theme to avoid a light→dark flash before the
+  // overlay's jh:theme refines it. Conservative — a bg dark only under
+  // prefers-color-scheme is "unknown" → light.
   const serverTheme = detectServerTheme(doc.html);
 
-  // Cold path: no comments, no reactions of any kind, AND this viewer can't
-  // comment or react → plain shell (zero chrome). The moment any reaction exists
-  // (doc-level or anchored) or the viewer can interact, the rail earns its keep.
-  if (!hasComments && !hasDocReactions && !hasAnchoredReactions && !canComment && !canReact) {
-    return <PlainShell title={title} rawSrc={`/d/${encodeURIComponent(slug)}/raw${rawQuery}`} theme={serverTheme} />;
-  }
-
-  // Comments shell: overlay-injected iframe + the variant-B rail.
+  // Always the viewer shell: the light/dark toggle is a viewer feature that must be
+  // available on every doc, including ones with no comments and viewers who can't
+  // comment (the rail just stays collapsed). The doc still renders in the sandboxed
+  // iframe; the overlay is injected so the toggle can repaint the document.
   const overlayQuery = rawQuery ? `${rawQuery}&overlay=1` : "?overlay=1";
   return (
     <CommentsShell

@@ -1340,7 +1340,7 @@ const railCloseStyle: React.CSSProperties = {
 };
 
 // Viewer chrome bar — variant A (LOCKED 2026-06-13): same weights/colors as the
-// page footer. Matches PlainShell's bar so both viewer paths share one chrome.
+// page footer.
 const barStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
