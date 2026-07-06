@@ -161,7 +161,11 @@ export const OVERLAY_SCRIPT = String.raw`
       return true;
     } catch(e){ return false; }
   }
-  function isSurface(el, tag){ return tag === "PRE" || tag === "CODE" || ownsBackground(el); }
+  // A "surface" starts its own background and keeps its authored text. Highlight
+  // segments are NOT surfaces even though they carry a wash background in light mode —
+  // their text is document prose and must recolor with the page (else it goes
+  // dark-on-dark once the wash turns to an underline under jh-dark).
+  function isSurface(el, tag){ return !el.hasAttribute("data-jh-seg") && (tag === "PRE" || tag === "CODE" || ownsBackground(el)); }
   // PASS 1 — before any whitening, pin each surface's authored text color inline. A
   // surface (code block / anything with its own background) often has no color of its
   // own and relies on inheriting the body's dark text; once we whiten its ancestor
@@ -183,14 +187,17 @@ export const OVERLAY_SCRIPT = String.raw`
     }
   }
   // PASS 2 — recolor text of elements sitting ON the page background; skip surfaces
-  // (and their subtrees), links, media, and painted highlight segments.
+  // (and their subtrees), links, and media. Highlight segments (data-jh-seg) ARE
+  // recolored here — they're prose and must follow the page — with an !important that
+  // beats any authored span color rule; segments inside code sit inside a surface and
+  // are never reached, so highlighted code text keeps its own color.
   function whitenPage(el){
     var kids = el.children;
     for (var i = 0; i < kids.length; i++){
       var c = kids[i], tag = c.tagName;
       if (tag === "SCRIPT" || tag === "STYLE") continue;
       if (isSurface(c, tag)) continue;
-      if (!FG_SKIP[tag] && !c.hasAttribute("data-jh-seg")) c.classList.add("jh-doc-fg");
+      if (!FG_SKIP[tag]) c.classList.add("jh-doc-fg");
       whitenPage(c);
     }
   }
@@ -491,6 +498,10 @@ export const OVERLAY_SCRIPT = String.raw`
 
     applyFocusStyles();
     reportPositions();
+    // Re-apply the forced-theme text coloring: paint just (re)created the highlight
+    // segments, and a re-paint (reload after a comment, resize) carries no themeMode
+    // message, so newly wrapped segments would otherwise miss the recolor.
+    if (forcedScheme) markForcedText();
   }
 
   // ---- segment interaction (doc → rail focus model) ----
