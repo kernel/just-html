@@ -592,6 +592,12 @@ export default function CommentsShell(props: Props) {
           <iframe
             ref={iframeRef}
             title={title}
+            // Ping on load so we reliably learn the overlay is ready. The overlay emits
+            // jh:ready once at init; if the iframe loads before this shell's message
+            // listener mounts (fast/cached loads), that emit is missed and overlayReady
+            // stays false — which silently suppresses jh:themeMode (and anchors), so the
+            // toggle themes the chrome but never the document. jh:ping re-elicits jh:ready.
+            onLoad={() => postToOverlay({ type: "jh:ping" })}
             src={rawSrc}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
