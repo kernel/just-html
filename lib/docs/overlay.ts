@@ -69,16 +69,20 @@ export const OVERLAY_SCRIPT = String.raw`
   function send(msg){ try { parent.postMessage(msg, "*"); } catch(e){} }
   function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
 
-  // ---- adaptive chrome: sample the doc's effective colors (jh:theme) ----
+  // ---- adaptive chrome: sample the doc's AUTHORED colors (jh:theme) ----
   // Only the overlay (inside the sandboxed, opaque-origin iframe) can read the
   // doc's COMPUTED colors; the shell can't reach across the origin. We sample
   // bg/fg/accent via getComputedStyle and post {bg, fg, accent, isDark} so the
   // shell can derive variant-D dark chrome (lib/docs/theme.ts buildChromePalette).
-  // Cheap; re-emitted on ready / load / a short settle to catch late CSS.
-  // isDark uses WCAG relative luminance with a small hysteresis dead-band so a
-  // mid-tone bg doesn't flip-flop across re-emits.
+  // We always report the AUTHORED colors (never a forced override): the shell gates
+  // the chrome by the viewer's mode, so auto follows the doc and forced modes use a
+  // fixed base — no stale forced tint lingers after switching back to auto. Captured
+  // at init; emitted via jh:themeMode and re-emitted on load / a short settle for late
+  // CSS. isDark uses WCAG luminance with a hysteresis dead-band to avoid flip-flop.
   var lastDark = null; // hysteresis memory across re-emits
   var forcedScheme = null; // viewer toggle: null = auto (doc as authored); "dark"|"light" force it
+  var authoredTheme = null; // the doc's OWN colors (sampled only while unforced); reported
+                            // in jh:theme even while forced, so auto chrome stays correct
   function rxParse(s){
     if (!s) return null;
     var m = String(s).match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:[,\s\/]+([\d.%]+))?/i);
@@ -90,54 +94,62 @@ export const OVERLAY_SCRIPT = String.raw`
     var c = rgb.map(function(v){ v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4); });
     return 0.2126*c[0]+0.7152*c[1]+0.0722*c[2];
   }
+  // Read the document's OWN colors. Only meaningful while the doc is unforced — once a
+  // theme is forced, the computed colors are our overrides, not the author's.
+  function sampleAuthored(){
+    var de = document.documentElement, body = document.body;
+    var deCS = de ? getComputedStyle(de) : null;
+    var bodyCS = body ? getComputedStyle(body) : null;
+    // bg: documentElement bg; if transparent, fall back to body; both transparent → white.
+    var bgRgb = deCS && rxParse(deCS.backgroundColor);
+    var gradient = false;
+    if (!bgRgb && bodyCS) bgRgb = rxParse(bodyCS.backgroundColor);
+    // gradient/image: backgroundColor transparent but a backgroundImage exists.
+    var bgImg = (deCS && deCS.backgroundImage) || (bodyCS && bodyCS.backgroundImage) || "none";
+    if (!bgRgb && bgImg && bgImg !== "none") gradient = true;
+    if (!bgRgb) bgRgb = [255,255,255]; // both transparent → treat as white (light)
+    // fg: body color (fall back to documentElement).
+    var fgRgb = (bodyCS && rxParse(bodyCS.color)) || (deCS && rxParse(deCS.color)) || [17,17,17];
+    // accent: first <a>, else first heading.
+    var accStr = null;
+    var aEl = document.querySelector("a[href], a");
+    if (!aEl) aEl = document.querySelector("h1, h2, h3");
+    if (aEl){ var ac = rxParse(getComputedStyle(aEl).color); if (ac) accStr = "rgb("+ac[0]+","+ac[1]+","+ac[2]+")"; }
+    var lum = rxLum(bgRgb);
+    // hysteresis dead-band around 0.4: once dark, stay dark until >0.46; once light,
+    // stay light until <0.34. First sample uses the bare 0.4 threshold.
+    var dark;
+    if (lastDark === true) dark = lum < 0.46;
+    else if (lastDark === false) dark = lum < 0.34;
+    else dark = lum < 0.4;
+    lastDark = dark;
+    return {
+      bg: "rgb("+Math.round(bgRgb[0])+","+Math.round(bgRgb[1])+","+Math.round(bgRgb[2])+")",
+      fg: "rgb("+Math.round(fgRgb[0])+","+Math.round(fgRgb[1])+","+Math.round(fgRgb[2])+")",
+      accent: accStr || undefined,
+      isDark: dark,
+      gradient: gradient
+    };
+  }
+  // Effective darkness of what the viewer actually SEES: a forced theme wins, otherwise
+  // the authored darkness. Drives the in-doc highlight treatment (jh-dark).
+  function effectiveDark(){
+    if (forcedScheme === "dark") return true;
+    if (forcedScheme === "light") return false;
+    return authoredTheme ? !!authoredTheme.isDark : false;
+  }
   function sampleTheme(){
     try {
-      var de = document.documentElement, body = document.body;
-      var deCS = de ? getComputedStyle(de) : null;
-      var bodyCS = body ? getComputedStyle(body) : null;
-      // bg: documentElement bg; if transparent, fall back to body; both transparent → white.
-      var bgRgb = deCS && rxParse(deCS.backgroundColor);
-      var gradient = false;
-      if (!bgRgb && bodyCS) bgRgb = rxParse(bodyCS.backgroundColor);
-      // gradient/image: backgroundColor transparent but a backgroundImage exists.
-      var bgImg = (deCS && deCS.backgroundImage) || (bodyCS && bodyCS.backgroundImage) || "none";
-      if (!bgRgb && bgImg && bgImg !== "none") gradient = true;
-      if (!bgRgb) bgRgb = [255,255,255]; // both transparent → treat as white (light)
-      // fg: body color (fall back to documentElement).
-      var fgRgb = (bodyCS && rxParse(bodyCS.color)) || (deCS && rxParse(deCS.color)) || [17,17,17];
-      // When the viewer FORCES a theme, report the forced bg/fg so the chrome palette
-      // (rail + comment cards, derived from this sample) matches the forced document —
-      // e.g. comment text is white in forced dark, not a gray lifted from the doc's own
-      // authored fg. Auto (no force) keeps sampling the doc so the chrome adapts to it.
-      if (forcedScheme === "dark"){ bgRgb = [13,17,23]; fgRgb = [255,255,255]; }
-      else if (forcedScheme === "light"){ bgRgb = [255,255,255]; fgRgb = [17,17,17]; }
-      // accent: first <a>, else first heading.
-      var accStr = null;
-      var aEl = document.querySelector("a[href], a");
-      if (!aEl) aEl = document.querySelector("h1, h2, h3");
-      if (aEl){ var ac = rxParse(getComputedStyle(aEl).color); if (ac) accStr = "rgb("+ac[0]+","+ac[1]+","+ac[2]+")"; }
-
-      var lum = rxLum(bgRgb);
-      // hysteresis dead-band around 0.4: once dark, stay dark until >0.46; once
-      // light, stay light until <0.34. First sample uses the bare 0.4 threshold.
-      var dark;
-      if (lastDark === true) dark = lum < 0.46;
-      else if (lastDark === false) dark = lum < 0.34;
-      else dark = lum < 0.4;
-      lastDark = dark;
-
-      // toggle the dark-highlight stylesheet branch (needs the style present).
-      // Keyed on the doc's SAMPLED darkness — never the chrome theme — because the
-      // highlight is painted ON the document, so it must contrast with the page's
-      // real background regardless of what the viewer picked for the rail chrome.
-      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", !!dark); } catch(e){}
-
-      send({ type:"jh:theme",
-        bg: "rgb("+Math.round(bgRgb[0])+","+Math.round(bgRgb[1])+","+Math.round(bgRgb[2])+")",
-        fg: "rgb("+Math.round(fgRgb[0])+","+Math.round(fgRgb[1])+","+Math.round(fgRgb[2])+")",
-        accent: accStr || undefined,
-        isDark: dark,
-        gradient: gradient });
+      // Only re-read the doc while it's showing its authored colors; while forced we keep
+      // the last authored sample (captured at init / when last unforced).
+      if (!forcedScheme) authoredTheme = sampleAuthored();
+      // Highlight styling follows the EFFECTIVE darkness (forced or authored) so it
+      // contrasts with what's actually painted on the page.
+      try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", effectiveDark()); } catch(e){}
+      // Report the AUTHORED theme. The shell gates the chrome by the viewer's mode
+      // (auto → this sample; dark/light → forced chrome), so it's correct in every mode
+      // and never left tinted by a stale forced sample after switching back to auto.
+      if (authoredTheme) send({ type:"jh:theme", bg: authoredTheme.bg, fg: authoredTheme.fg, accent: authoredTheme.accent, isDark: authoredTheme.isDark, gradient: authoredTheme.gradient });
     } catch(e){}
   }
 
@@ -795,12 +807,13 @@ export const OVERLAY_SCRIPT = String.raw`
   window.addEventListener("resize", function(){ paint(); });
 
   send({type:"jh:ready"});
-  // Adaptive chrome: do NOT sample immediately — forcedScheme is still unset here, so
-  // an eager sample would report the AUTHORED theme before the shell's jh:themeMode
-  // applies a forced one (a flash for forced viewers). The shell replies to jh:ready
-  // with jh:themeMode right away, and its handler samples with the forced mode known.
-  // These re-emits are the safety net: late-applied CSS (load) and a settle timeout,
-  // plus a fallback for any host that never sends jh:themeMode. Hysteresis guards flip-flop.
+  // Capture the authored theme NOW, while the doc is still unforced, so we can keep
+  // reporting it once a forced theme is painted over the document. Don't emit yet — the
+  // shell's jh:themeMode reply drives the first emit with the viewer's mode known (no
+  // authored flash in the chrome). The load + settle re-emits are the safety net for
+  // late-applied CSS and for any host that never sends jh:themeMode.
+  authoredTheme = sampleAuthored();
+  try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", effectiveDark()); } catch(e){}
   window.addEventListener("load", sampleTheme);
   setTimeout(sampleTheme, 400);
 })();

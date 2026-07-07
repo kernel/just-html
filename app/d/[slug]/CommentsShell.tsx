@@ -260,6 +260,22 @@ export default function CommentsShell(props: Props) {
       postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
   }, [overlayReady, paintReactionGroups, me, avatars, postToOverlay]);
 
+  // Readiness handshake, made robust. The overlay's jh:ready is one-shot and can be
+  // missed if the iframe loads before this shell's message listener mounts (fast/cached
+  // loads) — leaving overlayReady false, which silently suppresses jh:themeMode, anchors
+  // and reactions. So ping until we hear back (the overlay replies to jh:ping with
+  // jh:ready), then stop; capped so it can't spin forever.
+  useEffect(() => {
+    if (overlayReady) return;
+    postToOverlay({ type: "jh:ping" });
+    let tries = 0;
+    const id = setInterval(() => {
+      if (tries++ >= 20) clearInterval(id);
+      else postToOverlay({ type: "jh:ping" });
+    }, 150);
+    return () => clearInterval(id);
+  }, [overlayReady, postToOverlay]);
+
   // Listen to overlay messages. Only accept messages from our iframe's window
   // (the sandboxed iframe posts with origin "null"; we match on source window).
   useEffect(() => {
@@ -488,15 +504,6 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:themeMode", mode });
   }, [mode, overlayReady, postToOverlay]);
 
-  // On a mode change, drop the last sample back to the authored SSR baseline. While
-  // forced, jh:theme reports the FORCED colors; if we kept that after switching to
-  // auto, the chrome would render from the forced sample (e.g. dark on a light doc)
-  // until the overlay's fresh authored sample arrives. Resetting avoids that window;
-  // the overlay re-samples immediately after (via the jh:themeMode above).
-  useEffect(() => {
-    setTheme(props.initialTheme);
-  }, [mode, props.initialTheme]);
-
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]
@@ -601,12 +608,6 @@ export default function CommentsShell(props: Props) {
           <iframe
             ref={iframeRef}
             title={title}
-            // Ping on load so we reliably learn the overlay is ready. The overlay emits
-            // jh:ready once at init; if the iframe loads before this shell's message
-            // listener mounts (fast/cached loads), that emit is missed and overlayReady
-            // stays false — which silently suppresses jh:themeMode (and anchors), so the
-            // toggle themes the chrome but never the document. jh:ping re-elicits jh:ready.
-            onLoad={() => postToOverlay({ type: "jh:ping" })}
             src={rawSrc}
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
