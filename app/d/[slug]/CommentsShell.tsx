@@ -1014,6 +1014,10 @@ const Card = forwardRef<
 ) {
   const [replyText, setReplyText] = useState("");
   const [showEmoji, setShowEmoji] = useState(false);
+  // Pointer-down position, to tell a real click (toggle the thread) from a click
+  // that ended a drag-to-highlight (selecting the comment text to copy) — the
+  // latter must leave the thread open. See onClick below.
+  const downRef = useRef<{ x: number; y: number } | null>(null);
 
   const border = t.orphaned
     ? "1px dashed var(--jh-card-orphan-border, #d99)"
@@ -1028,8 +1032,18 @@ const Card = forwardRef<
       ref={ref}
       onMouseEnter={onHoverIn}
       onMouseLeave={onHoverOut}
+      onMouseDown={(e) => {
+        downRef.current = { x: e.clientX, y: e.clientY };
+      }}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest("[data-no-pin]")) return;
+        // A click that ended a drag-to-highlight (e.g. selecting the comment body
+        // to copy) must not toggle the thread — it stays open until explicitly
+        // closed. A drag moves the pointer between press and release; a plain
+        // click doesn't, so pointer movement is what distinguishes the two.
+        const down = downRef.current;
+        downRef.current = null;
+        if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4) return;
         onPin();
       }}
       style={{
