@@ -295,9 +295,8 @@ export function buildChromePalette(sample: ThemeSample): ChromePalette {
 
 /**
  * Conservatively parse an UNCONDITIONAL html/body background color out of stored
- * doc HTML so the server can theme the bar/stage at SSR (PlainShell has no JS;
- * CommentsShell uses it as the initial theme to avoid a light→dark flash before
- * jh:theme arrives).
+ * doc HTML so the server can theme the bar/stage at SSR — CommentsShell uses it as
+ * the initial theme to avoid a light→dark flash before jh:theme arrives.
  *
  * Conservative by design — the overlay confirms later when JS runs:
  *  - Only inline style="background…" on <html>/<body>, OR a CSS rule for

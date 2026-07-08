@@ -41,7 +41,7 @@ const THEME_MODE_KEY = "jh:theme-mode";
 // Fallback dark base when a viewer FORCES dark on a doc we didn't sample as dark
 // (a light doc, or before the overlay's first jh:theme). Real dark docs keep
 // their own sampled colors so the chrome matches the page.
-const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#c9d1d9", isDark: true };
+const DEFAULT_DARK: ThemeSample = { bg: "#0d1117", fg: "#ffffff", isDark: true };
 
 type Reaction = { emoji: string; count: number; authors: string[] };
 type Anchor = { exact: string; prefix?: string; suffix?: string; start?: number; end?: number } | null;
@@ -142,6 +142,10 @@ export default function CommentsShell(props: Props) {
   // localStorage as a GLOBAL preference (not per-doc). localStorage is
   // client-only, so we start "auto" for SSR and hydrate on mount.
   const [mode, setMode] = useState<ThemeMode>("auto");
+  // Mirror mode into a ref so the jh:ready handler (not in mode's deps) reads the
+  // current value — it must send the forced theme on every ready, including reloads.
+  const modeRef = useRef<ThemeMode>(mode);
+  modeRef.current = mode;
   useEffect(() => {
     try {
       const saved = localStorage.getItem(THEME_MODE_KEY);
@@ -256,6 +260,22 @@ export default function CommentsShell(props: Props) {
       postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
   }, [overlayReady, paintReactionGroups, me, avatars, postToOverlay]);
 
+  // Readiness handshake, made robust. The overlay's jh:ready is one-shot and can be
+  // missed if the iframe loads before this shell's message listener mounts (fast/cached
+  // loads) — leaving overlayReady false, which silently suppresses jh:themeMode, anchors
+  // and reactions. So ping until we hear back (the overlay replies to jh:ping with
+  // jh:ready), then stop; capped so it can't spin forever.
+  useEffect(() => {
+    if (overlayReady) return;
+    postToOverlay({ type: "jh:ping" });
+    let tries = 0;
+    const id = setInterval(() => {
+      if (tries++ >= 20) clearInterval(id);
+      else postToOverlay({ type: "jh:ping" });
+    }, 150);
+    return () => clearInterval(id);
+  }, [overlayReady, postToOverlay]);
+
   // Listen to overlay messages. Only accept messages from our iframe's window
   // (the sandboxed iframe posts with origin "null"; we match on source window).
   useEffect(() => {
@@ -266,6 +286,11 @@ export default function CommentsShell(props: Props) {
       switch (d.type) {
         case "jh:ready":
           setOverlayReady(true);
+          // Send the forced theme FIRST, so the overlay applies it before it paints
+          // (no authored-doc flash), and on EVERY ready — including an iframe reload,
+          // where overlayReady stays true so the mode effect below won't re-fire and
+          // the freshly-loaded overlay would otherwise reset to the authored theme.
+          postToOverlay({ type: "jh:themeMode", mode: modeRef.current });
           postToOverlay({ type: "jh:anchors", anchors: paintAnchors });
           postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
           break;
@@ -469,6 +494,15 @@ export default function CommentsShell(props: Props) {
   useEffect(() => {
     if (overlayReady) postToOverlay({ type: "jh:active", id: activeId });
   }, [activeId, overlayReady, postToOverlay]);
+
+  // Forward the theme toggle into the iframe so the overlay repaints the DOCUMENT
+  // (not just the chrome): "dark"/"light" force the doc's color-scheme + background,
+  // "auto" leaves it as authored. The overlay re-samples after applying, so the
+  // chrome palette and highlight treatment follow the doc through the existing
+  // jh:theme round-trip — no separate wiring needed here.
+  useEffect(() => {
+    if (overlayReady) postToOverlay({ type: "jh:themeMode", mode });
+  }, [mode, overlayReady, postToOverlay]);
 
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
@@ -1322,7 +1356,7 @@ const railCloseStyle: React.CSSProperties = {
 };
 
 // Viewer chrome bar — variant A (LOCKED 2026-06-13): same weights/colors as the
-// page footer. Matches PlainShell's bar so both viewer paths share one chrome.
+// page footer.
 const barStyle: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
