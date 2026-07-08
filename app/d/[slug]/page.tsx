@@ -11,6 +11,7 @@ import {
   allThreads,
 } from "@/lib/docs/comments";
 import { detectServerTheme } from "@/lib/docs/theme";
+import { extractSections } from "@/lib/docs/sections";
 import CommentsShell from "./CommentsShell";
 
 export const dynamic = "force-dynamic";
@@ -96,6 +97,11 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   const anchoredReactions = threadData.anchored_reactions ?? [];
   const title = doc.title || doc.slug;
 
+  // Section deeplinks: the ordered heading list + stable fragment ids, derived
+  // from the stored HTML. The shell forwards it to the overlay, which assigns the
+  // ids to headings in document order and paints the gutter link icon.
+  const sections = extractSections(doc.html);
+
   // Adaptive chrome (variant D): coarsely detect a DARK doc from the stored
   // HTML's unconditional html/body background so the shell renders themed at SSR —
   // CommentsShell uses it as the initial theme to avoid a light→dark flash before the
@@ -121,6 +127,7 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       initialThreads={threadData.threads}
       initialDocReactions={docReactions}
       initialAnchoredReactions={anchoredReactions}
+      initialSections={sections}
       version={doc.version}
       initialTheme={serverTheme}
     />

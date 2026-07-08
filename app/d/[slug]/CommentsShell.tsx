@@ -3,6 +3,8 @@
 import { forwardRef, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildChromePalette, type ThemeSample, type ChromePalette } from "@/lib/docs/theme";
 import CommentMarkdown from "@/lib/docs/comments/CommentMarkdown";
+import type { Section } from "@/lib/docs/sections";
+import { fragmentFor, parseHash } from "@/lib/docs/deeplink";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
 // architecture", "CHOSEN: variant B"). The google-docs-style comment rail. The
@@ -81,6 +83,9 @@ type Props = {
   initialThreads: Thread[];
   initialDocReactions: Reaction[];
   initialAnchoredReactions: AnchoredReactionGroup[];
+  // Ordered heading list + stable fragment ids for section deeplinks (from
+  // lib/docs/sections extractSections). Forwarded to the overlay as jh:sections.
+  initialSections: Section[];
   version: number;
   // Coarse SSR theme (from the stored HTML's unconditional html/body bg). Present
   // only when the server is confident the doc is dark — gives the shell a dark
@@ -109,8 +114,27 @@ function fmtTime(iso: string): string {
   }
 }
 
+// Clipboard fallback for when navigator.clipboard is unavailable or rejects (e.g.
+// a copy triggered via postMessage from the sandboxed iframe lacks transient
+// activation). Returns whether the copy succeeded.
+function legacyCopy(text: string): boolean {
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export default function CommentsShell(props: Props) {
-  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn, me } = props;
+  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn, me, initialSections } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [threads, setThreads] = useState<Thread[]>(props.initialThreads);
@@ -123,6 +147,9 @@ export default function CommentsShell(props: Props) {
   // Latest reactAnchored, refd so the message-listener effect (declared earlier)
   // can call it without depending on its declaration order or re-subscribing.
   const reactAnchoredRef = useRef<(emoji: string, anchor: NonNullable<Anchor>) => void>(() => {});
+  // Latest focusComment, refd so the deeplink hash router (an effect that must not
+  // re-subscribe every time threads change) always calls the current version.
+  const focusCommentRef = useRef<(id: number) => void>(() => {});
   const [showResolved, setShowResolved] = useState(false);
   const [pinnedId, setPinnedId] = useState<number | null>(null);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -133,6 +160,22 @@ export default function CommentsShell(props: Props) {
   const [docScrollY, setDocScrollY] = useState(0);
   const [docHeight, setDocHeight] = useState(0);
   const [overlayReady, setOverlayReady] = useState(false);
+  // Bumped on every jh:ready (incl. iframe reload / bfcache restore, where
+  // overlayReady stays true); the hash router depends on it so a deeplink is
+  // re-applied after a reload, not just on the first ready.
+  const [overlayReadyNonce, setOverlayReadyNonce] = useState(0);
+  const [toast, setToast] = useState<string | null>(null);
+  // Rail scroll mode. null → follow-doc (desktop: scrollTop tracks docScrollY;
+  // mobile: stack from the top). A number → "show this card": the rail scrolls to
+  // it and the follow sync yields — for comment permalinks to doc-level/orphaned
+  // threads (no in-doc highlight to track) and for every permalink on mobile (the
+  // drawer stacks cards, so it can't track a highlight Y). Set on permalink
+  // navigation; cleared back to follow when the user scrolls the doc or navigates
+  // elsewhere, so the sync is never left disabled. cardBaselineRef records the
+  // doc scroll at entry (docScrollYRef mirrors docScrollY) to detect that scroll.
+  const [railCardId, setRailCardId] = useState<number | null>(null);
+  const docScrollYRef = useRef(0);
+  const cardBaselineRef = useRef(0);
 
   // Adaptive chrome (variant D). The server may hand us a coarse dark theme for
   // the initial paint (no flash); the overlay's jh:theme then refines/confirms it.
@@ -217,6 +260,38 @@ export default function CommentsShell(props: Props) {
     iframeRef.current?.contentWindow?.postMessage(msg, "*");
   }, []);
 
+  // Transient "copied" toast for deeplinks. One timer, reset on each show.
+  const toastTimer = useRef<number | null>(null);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 1800);
+  }, []);
+
+  // Copy a deeplink for a comment or section target to the clipboard and confirm
+  // with a toast. The shell is a secure same-origin context,
+  // so the Clipboard API works for a direct click (comment icon); a section-icon
+  // click arrives via postMessage from the sandboxed iframe and may reject for lack
+  // of transient activation, so fall back to a hidden-textarea execCommand copy.
+  const copyLink = useCallback(
+    async (target: { kind: "comment"; id: number } | { kind: "section"; id: string }) => {
+      // Carry the ?viewtoken= through (before the #fragment) so a deeplink copied
+      // from a private doc opened via a capability link still authorizes the
+      // recipient — without it canViewSession denies and they get a 404. fragmentFor
+      // encodes the id so it round-trips through the hash router's parseHash.
+      const url = `${window.location.origin}/d/${encodeURIComponent(slug)}${tokenQuery}#${fragmentFor(target)}`;
+      let ok = false;
+      try {
+        await navigator.clipboard.writeText(url);
+        ok = true;
+      } catch {
+        ok = legacyCopy(url);
+      }
+      showToast(ok ? "Copied link to clipboard" : "Copy failed — press ⌘/Ctrl-C");
+    },
+    [slug, tokenQuery, showToast]
+  );
+
   // Compute gravatar URLs (sha256 of the lowercased email) for every reactor +
   // commenter, so the overlay's chip popover can show avatars. Async (SubtleCrypto)
   // but cheap; the result is cached in state and re-sent with jh:reactions.
@@ -260,6 +335,12 @@ export default function CommentsShell(props: Props) {
       postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
   }, [overlayReady, paintReactionGroups, me, avatars, postToOverlay]);
 
+  // Send sections likewise — on change or when the overlay (re)becomes ready — so
+  // heading ids + gutter icons don't go stale if initialSections changes in place.
+  useEffect(() => {
+    if (overlayReady) postToOverlay({ type: "jh:sections", sections: initialSections });
+  }, [overlayReady, initialSections, postToOverlay]);
+
   // Readiness handshake, made robust. The overlay's jh:ready is one-shot and can be
   // missed if the iframe loads before this shell's message listener mounts (fast/cached
   // loads) — leaving overlayReady false, which silently suppresses jh:themeMode, anchors
@@ -286,6 +367,8 @@ export default function CommentsShell(props: Props) {
       switch (d.type) {
         case "jh:ready":
           setOverlayReady(true);
+          setOverlayReadyNonce((n) => n + 1); // re-fire the hash router on reloads
+
           // Send the forced theme FIRST, so the overlay applies it before it paints
           // (no authored-doc flash), and on EVERY ready — including an iframe reload,
           // where overlayReady stays true so the mode effect below won't re-fire and
@@ -293,10 +376,18 @@ export default function CommentsShell(props: Props) {
           postToOverlay({ type: "jh:themeMode", mode: modeRef.current });
           postToOverlay({ type: "jh:anchors", anchors: paintAnchors });
           postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
+          // Re-send sections on every ready (incl. iframe reload) so the overlay
+          // re-assigns heading ids + gutter icons; the effect below also posts them
+          // when they change while mounted. Sent before any hash-driven scroll so
+          // the target heading has its id by the time we ask the overlay to scroll.
+          postToOverlay({ type: "jh:sections", sections: initialSections });
           break;
         case "jh:positions":
           setPositions(d.positions || {});
-          if (typeof d.scrollY === "number") setDocScrollY(d.scrollY);
+          if (typeof d.scrollY === "number") {
+            docScrollYRef.current = d.scrollY;
+            setDocScrollY(d.scrollY); // "show card" mode is released by the effect below
+          }
           if (typeof d.docHeight === "number") setDocHeight(d.docHeight);
           break;
         case "jh:theme":
@@ -357,11 +448,17 @@ export default function CommentsShell(props: Props) {
           // A chip was clicked inside the iframe → optimistic toggle (add/remove).
           if (canReact && d.anchor && d.anchor.exact) reactAnchoredRef.current(d.emoji, d.anchor);
           break;
+        case "jh:copyLink":
+          // The section link icon (inside the iframe) was clicked. Clipboard is
+          // unreliable from the opaque-origin sandbox, so the copy happens here on
+          // the real origin.
+          if (typeof d.id === "string") void copyLink({ kind: "section", id: d.id });
+          break;
       }
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [paintAnchors, paintReactionGroups, me, avatars, postToOverlay, canComment, canReact]);
+  }, [paintAnchors, paintReactionGroups, me, avatars, postToOverlay, canComment, canReact, initialSections, copyLink]);
 
   const reload = useCallback(async () => {
     const r = await fetch(`${apiBase}/comments${tokenQuery}`, { credentials: "same-origin" });
@@ -504,6 +601,81 @@ export default function CommentsShell(props: Props) {
     if (overlayReady) postToOverlay({ type: "jh:themeMode", mode });
   }, [mode, overlayReady, postToOverlay]);
 
+  // Clear any pinned/focused comment across the rail, the overlay, and the rail
+  // scroll mode — so a section link and a comment pin stay mutually exclusive
+  // selections (navigating to one deselects the other).
+  const clearCommentFocus = useCallback(() => {
+    setPinnedId(null);
+    setActiveId(null);
+    setRailCardId(null);
+    postToOverlay({ type: "jh:focus", key: null });
+  }, [postToOverlay]);
+
+  // Comment permalinks (#comment-<id>): open + pin the thread and bring it into
+  // view. A reply id resolves to its root thread; a resolved thread is revealed.
+  // Anchored threads scroll the doc via the overlay (jh:focus → the highlight) and
+  // the rail follows on desktop; doc-level/orphaned threads — and everything on
+  // mobile, where the drawer stacks cards — enter "show card" mode instead.
+  const focusComment = useCallback(
+    (id: number) => {
+      const target =
+        threads.find((t) => t.id === id) ?? threads.find((t) => t.replies.some((r) => r.id === id));
+      if (!target) {
+        // Unknown / deleted: the URL points at a comment that isn't here, so leave
+        // nothing selected (don't strand the previous pin) and say so.
+        clearCommentFocus();
+        showToast("That comment couldn't be found.");
+        return;
+      }
+      if (target.resolved) setShowResolved(true);
+      setRailOpen(true);
+      setPinnedId(target.id);
+      setActiveId(target.id);
+      if (target.group === "anchored") postToOverlay({ type: "jh:focus", key: `c:${target.id}` });
+      if (isMobileRef.current || target.group !== "anchored") {
+        cardBaselineRef.current = docScrollYRef.current; // exit "show card" when the doc scrolls off this
+        setRailCardId(target.id);
+      } else {
+        setRailCardId(null); // desktop anchored → follow the doc to its highlight
+      }
+    },
+    [threads, postToOverlay, clearCommentFocus, showToast]
+  );
+  focusCommentRef.current = focusComment;
+
+  // Deeplinks: route the URL fragment (via the shared parseHash codec) to a single
+  // exclusive selection. A comment pins + focuses it; a section clears any comment
+  // focus then scrolls to the heading — or soft-fails with a toast if that id isn't
+  // in the doc; an empty hash clears focus, but only on an actual navigation
+  // (hashchange) — a re-apply on load/reload must not wipe a pin the user set by
+  // hand. Client-only, never touches auth (private docs still gate on session/token).
+  useEffect(() => {
+    if (!overlayReady) return;
+    const applyHash = (isNav: boolean) => {
+      const target = parseHash(window.location.hash);
+      if (target.kind === "none") {
+        if (isNav) clearCommentFocus();
+        return;
+      }
+      if (target.kind === "comment") {
+        focusCommentRef.current(target.id); // handles unknown/deleted itself
+        return;
+      }
+      clearCommentFocus();
+      if (initialSections.some((s) => s.id === target.id)) {
+        postToOverlay({ type: "jh:scrollToSection", id: target.id });
+      } else {
+        showToast("Couldn't find that section.");
+      }
+    };
+    applyHash(false);
+    const onHashChange = () => applyHash(true);
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+    // overlayReadyNonce: re-run on every jh:ready (iframe reload) so the fragment
+    // is re-applied after the overlay re-paints, not only on the first ready.
+  }, [overlayReady, overlayReadyNonce, clearCommentFocus, postToOverlay, initialSections, showToast]);
+
   const visibleThreads = useMemo(
     () => threads.filter((t) => showResolved || !t.resolved),
     [threads, showResolved]
@@ -552,13 +724,12 @@ export default function CommentsShell(props: Props) {
   useEffect(() => {
     const el = railRef.current;
     if (!el) return;
-    // Mobile drawer: cards stack from the top (no absolute Y), so clear any leftover
-    // desktop scroll offset — a stale large scrollTop would open the drawer scrolled
-    // past the stacked cards onto empty space.
-    if (isMobile) {
-      el.scrollTop = 0;
-      return;
-    }
+    // "show card" mode (a doc-level/orphaned permalink): the rail is pinned to that
+    // card (RailCards owns the scroll), so the doc-follow sync yields to it.
+    if (railCardId != null) return;
+    // Mobile drawer stacks cards in thread order (no docScrollY tracking) — its
+    // scroll is handled by the reset effect below, not this doc-follow sync.
+    if (isMobile) return;
     // The cards list starts BELOW the sticky header + doc-reaction/sign-in rows, but
     // card Y is measured from the document top. Offset the sync by that chrome height
     // (the list's own offsetTop) so a card lines up with its highlight instead of
@@ -569,7 +740,30 @@ export default function CommentsShell(props: Props) {
     // docHeight is a dep though unused above: when it grows (late layout / resize) the
     // rail's scrollHeight grows with it, so a scrollTop the browser previously clamped
     // too low must be reapplied — otherwise cards stay offset until the next doc scroll.
-  }, [docScrollY, docHeight, isMobile, railOpen]);
+  }, [railCardId, docScrollY, docHeight, isMobile, railOpen]);
+
+  // Leave "show card" mode once the user scrolls the doc off where they entered it,
+  // so the rail returns to following the doc — the sync is never left disabled. A
+  // doc-level card doesn't move the doc on its own, so this fires only on a real
+  // user scroll; navigation (section / another comment / clear) also exits the mode.
+  useEffect(() => {
+    if (railCardId != null && Math.abs(docScrollY - cardBaselineRef.current) > 4) setRailCardId(null);
+  }, [docScrollY, railCardId]);
+
+  // Mobile drawer: reset to the top only when it (re)opens or we switch to mobile —
+  // NOT on docScrollY (the drawer doesn't track the doc), which would fight a
+  // permalink scrolling a card into view. Skip the reset in "show card" mode so the
+  // card scroll (RailCards) survives the open.
+  const prevRailOpenRef = useRef(false);
+  const prevMobileRef = useRef(false);
+  useEffect(() => {
+    const el = railRef.current;
+    const justOpened = railOpen && !prevRailOpenRef.current;
+    const justMobile = isMobile && !prevMobileRef.current;
+    prevRailOpenRef.current = railOpen;
+    prevMobileRef.current = isMobile;
+    if (el && isMobile && (justOpened || justMobile) && railCardId == null) el.scrollTop = 0;
+  }, [isMobile, railOpen, railCardId]);
 
   // When dark, expose the variant-D palette as CSS custom properties on the
   // wrapper. Every themed color below reads `var(--jh-x, <light-literal>)`, so
@@ -723,9 +917,17 @@ export default function CommentsShell(props: Props) {
               if (ok) setDraft(null);
             }}
             onCancelDraft={() => setDraft(null)}
+            onCopyLink={(id) => copyLink({ kind: "comment", id })}
+            railCardId={railCardId}
           />
         </aside>
       </div>
+
+      {toast ? (
+        <div role="status" aria-live="polite" style={toastStyle}>
+          {toast}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -888,6 +1090,8 @@ function RailCards(props: {
   onReact: (emoji: string, commentId: number | null) => void;
   onSubmitDraft: (body: string) => void;
   onCancelDraft: () => void;
+  onCopyLink: (id: number) => void;
+  railCardId: number | null;
 }) {
   const {
     threads,
@@ -906,6 +1110,8 @@ function RailCards(props: {
     onReact,
     onSubmitDraft,
     onCancelDraft,
+    onCopyLink,
+    railCardId,
   } = props;
 
   // Compute no-overlap clamped offsets for anchored cards. We don't know exact
@@ -948,6 +1154,15 @@ function RailCards(props: {
     if (changed) force((n) => n + 1);
   }, [threads, positions, aligned]);
 
+  // "show card" mode: bring the pinned card into view. Re-runs on threads change
+  // (so it lands even if the card wasn't rendered when the mode was set, and stays
+  // centered while the mode holds). The mode is cleared by the shell (user scrolls
+  // the doc / navigates elsewhere), never here.
+  useEffect(() => {
+    if (railCardId == null) return;
+    cardRefs.current.get(railCardId)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [railCardId, threads]);
+
   return (
     <div data-jh-cards="" style={{ position: "relative", padding: "6px 8px 200px", minHeight: aligned && docHeight ? docHeight : undefined }}>
       {threads.map((t) => (
@@ -968,6 +1183,7 @@ function RailCards(props: {
           onResolve={(resolved) => onResolve(t.id, resolved)}
           onDelete={() => onDelete(t.id)}
           onReact={(emoji) => onReact(emoji, t.id)}
+          onCopyLink={() => onCopyLink(t.id)}
         />
       ))}
 
@@ -1007,9 +1223,10 @@ const Card = forwardRef<
     onResolve: (resolved: boolean) => void;
     onDelete: () => void;
     onReact: (emoji: string) => void;
+    onCopyLink: () => void;
   }
 >(function Card(
-  { thread: t, pinned, active, canComment, onPin, onHoverIn, onHoverOut, onReply, onResolve, onDelete, onReact },
+  { thread: t, pinned, active, canComment, onPin, onHoverIn, onHoverOut, onReply, onResolve, onDelete, onReact, onCopyLink },
   ref
 ) {
   const [replyText, setReplyText] = useState("");
@@ -1040,6 +1257,7 @@ const Card = forwardRef<
         fontSize: 12,
         cursor: "pointer",
         overflow: "hidden",
+        position: "relative",
         opacity: t.resolved ? 0.6 : 1,
         boxShadow: pinned
           ? "var(--jh-card-pin-shadow, 0 3px 14px rgba(0,0,0,.18))"
@@ -1049,6 +1267,21 @@ const Card = forwardRef<
         transition: CHROME_TRANSITION,
       }}
     >
+      {active || pinned ? (
+        <button
+          type="button"
+          data-no-pin
+          title="Copy link to comment"
+          aria-label="Copy link to comment"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCopyLink();
+          }}
+          style={cardLinkBtnStyle}
+        >
+          <LinkGlyph />
+        </button>
+      ) : null}
       <div style={{ display: "flex", gap: 7, padding: "8px 9px" }}>
         {t.author_avatar ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -1212,6 +1445,17 @@ function Badge({ kind, children }: { kind: "res" | "orp"; children: React.ReactN
     <span style={{ display: "inline-block", fontSize: 9.5, padding: "0 5px", borderRadius: 8, letterSpacing: ".03em", ...styles }}>
       {children}
     </span>
+  );
+}
+
+// The chain-link glyph for the comment card's "copy link" affordance (mirrors the
+// gutter icon the overlay injects on headings).
+function LinkGlyph() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
   );
 }
 
@@ -1479,3 +1723,39 @@ function composerBtn(disabled: boolean): React.CSSProperties {
     opacity: disabled ? 0.4 : 1,
   };
 }
+
+// Comment card "copy link" icon — top-right, revealed on hover/pin (data-no-pin so
+// the click copies without toggling the thread).
+const cardLinkBtnStyle: React.CSSProperties = {
+  position: "absolute",
+  top: 6,
+  right: 6,
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 22,
+  height: 22,
+  padding: 0,
+  border: "none",
+  background: "transparent",
+  color: "var(--jh-card-muted, #999)",
+  borderRadius: 5,
+  cursor: "pointer",
+  lineHeight: 0,
+};
+
+// Transient "copied" confirmation toast, centered at the bottom of the viewport.
+const toastStyle: React.CSSProperties = {
+  position: "fixed",
+  bottom: 20,
+  left: "50%",
+  transform: "translateX(-50%)",
+  background: "var(--jh-sel-bg, #111)",
+  color: "var(--jh-sel-fg, #fff)",
+  fontFamily: MONO,
+  fontSize: 12,
+  padding: "7px 14px",
+  borderRadius: 7,
+  boxShadow: "0 4px 14px var(--jh-sel-shadow, rgba(0,0,0,.3))",
+  zIndex: 100,
+};
