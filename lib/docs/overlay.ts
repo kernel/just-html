@@ -63,8 +63,12 @@ export const OVERLAY_SCRIPT = String.raw`
   var byKey = {};            // key -> { item, segEls:[], chipEls:[] }
   var activeKey = null;      // hover-highlighted key (transient)
   var focusKey = null;       // focused (pinned) key
+  var pendingFocusScroll = null; // jh:focus scroll owed for a key not painted yet; applied on next paint()
   var lastClickKeys = null;  // covering set of the last focus click (for cycle)
   var lastClickPos = -1;     // doc-text offset of the last focus click (cycle reset on move)
+  var sections = [];         // ordered [{id, level, text}] from jh:sections
+  var secById = {};          // section id -> heading element (for scrollToSection)
+  var pendingSection = null; // a scrollToSection requested before sections were applied
 
   function send(msg){ try { parent.postMessage(msg, "*"); } catch(e){} }
   function esc(s){ return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -263,8 +267,9 @@ export const OVERLAY_SCRIPT = String.raw`
       var n = walker.currentNode;
       var p = n.parentNode;
       if (p && (p.nodeName === "SCRIPT" || p.nodeName === "STYLE")) continue;
-      // skip text inside our own chips so reaction counts never become anchorable text
-      if (p && p.closest && p.closest("[data-jh-chip]")) continue;
+      // skip text inside our own chips / section-anchors so injected UI never
+      // becomes anchorable text
+      if (p && p.closest && p.closest("[data-jh-chip],[data-jh-sec-anchor]")) continue;
       nodes.push({ node: n, start: full.length });
       full += n.nodeValue;
     }
@@ -403,6 +408,83 @@ export const OVERLAY_SCRIPT = String.raw`
     (document.head||document.documentElement).appendChild(st);
   }
 
+  // ---- section deeplinks (heading gutter link icon + scroll-to) ----
+  // The shell sends the server's ordered section list; we assign each id to the
+  // heading at the same document-order index (server + DOM agree on order), set
+  // scroll-margin so a scrolled-to heading isn't flush to the top, and inject a
+  // hover-reveal link icon in the left gutter. Clicking it asks the shell to copy
+  // the permalink — clipboard is unreliable from this opaque-origin sandbox, so
+  // the shell (real origin) does the write. Idempotent: re-running updates in place.
+  var LINK_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.07 0l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.07 0l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+
+  function ensureSectionStyle(){
+    if (document.getElementById("jh-sec-style")) return;
+    var st = document.createElement("style"); st.id = "jh-sec-style";
+    st.textContent =
+      "h1,h2,h3,h4,h5,h6{scroll-margin-top:1.5rem}"
+      // Inline (not absolute) so it rides the heading's first text line and stays
+      // vertically centered regardless of the doc's own top padding/border/margin;
+      // the negative-left + right margins net to zero width so text doesn't shift.
+      + "a.jh-sec-anchor{display:inline-flex;align-items:center;justify-content:center;"
+      + "width:1em;height:1em;margin:0 .35em 0 -1.35em;vertical-align:middle;opacity:0;"
+      + "text-decoration:none;color:currentColor;transition:opacity .12s}"
+      + "h1:hover>a.jh-sec-anchor,h2:hover>a.jh-sec-anchor,h3:hover>a.jh-sec-anchor,"
+      + "h4:hover>a.jh-sec-anchor,h5:hover>a.jh-sec-anchor,h6:hover>a.jh-sec-anchor{opacity:.5}"
+      + "a.jh-sec-anchor:hover,a.jh-sec-anchor:focus{opacity:.9;outline:none}"
+      + "@keyframes jh-sec-flash{0%,100%{background-color:transparent}18%{background-color:rgba(245,197,24,.35)}}"
+      + ".jh-sec-target{animation:jh-sec-flash 1.6s ease;border-radius:3px}";
+    (document.head||document.documentElement).appendChild(st);
+  }
+
+  function addSectionAnchor(h, id){
+    var ex = h.querySelector(":scope > a.jh-sec-anchor");
+    if (ex){ ex.setAttribute("data-jh-sec", id); ex.setAttribute("href", "#"+id); return; }
+    var a = document.createElement("a");
+    a.className = "jh-sec-anchor";
+    a.setAttribute("data-jh-sec-anchor", "1");
+    a.setAttribute("data-jh-sec", id);
+    a.setAttribute("href", "#"+id);
+    a.setAttribute("aria-label", "Copy link to section");
+    a.innerHTML = LINK_SVG;
+    a.addEventListener("click", function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      send({type:"jh:copyLink", id: a.getAttribute("data-jh-sec")});
+    });
+    h.insertBefore(a, h.firstChild);
+  }
+
+  function applySections(){
+    try {
+      ensureSectionStyle();
+      var heads = document.querySelectorAll("h1,h2,h3,h4,h5,h6");
+      secById = {};
+      var n = Math.min(sections.length, heads.length);
+      for (var i=0;i<n;i++){
+        var s = sections[i]; if (!s || !s.id) continue;
+        var h = heads[i];
+        h.id = s.id;
+        secById[s.id] = h;
+        addSectionAnchor(h, s.id);
+      }
+      // Consume a scroll requested before sections existed: resolve it against this
+      // freshly-applied set and clear it either way, so it can't be retried on a
+      // LATER applySections (reload / jh:sections update) and scroll to an abandoned
+      // section after the user has since navigated elsewhere.
+      if (pendingSection != null){
+        var ps = pendingSection; pendingSection = null;
+        if (secById[ps]) scrollToSection(ps);
+      }
+    } catch(e){}
+  }
+
+  function scrollToSection(id){
+    var h = secById[id];
+    if (!h){ pendingSection = id; return; } // sections not applied yet — honor after applySections
+    pendingSection = null;
+    try { h.scrollIntoView({block:"start", behavior:"smooth"}); } catch(e){ try { h.scrollIntoView(); } catch(e2){} }
+    try { h.classList.add("jh-sec-target"); setTimeout(function(){ h.classList.remove("jh-sec-target"); }, 1600); } catch(e){}
+  }
+
   // ---- segment painting (the B14 core) ----
   function paint(){
     ensureStyle();
@@ -514,6 +596,17 @@ export const OVERLAY_SCRIPT = String.raw`
     // segments, and a re-paint (reload after a comment, resize) carries no themeMode
     // message, so newly wrapped segments would otherwise miss the recolor.
     if (forcedScheme) markForcedText();
+  }
+
+  // A focus scroll owed for a key that wasn't painted at focus time (a resolved
+  // thread revealed on a permalink): resolve it against a fresh anchor set. Scroll
+  // if the segment now exists, and clear the request either way — after jh:anchors
+  // an absent key is orphaned, so it must not linger and fire on a later repaint.
+  function consumePendingFocus(){
+    if (pendingFocusScroll == null) return;
+    var rec = byKey[pendingFocusScroll];
+    if (rec && rec.segEls.length) scrollToKey(pendingFocusScroll);
+    pendingFocusScroll = null;
   }
 
   // ---- segment interaction (doc → rail focus model) ----
@@ -766,7 +859,7 @@ export const OVERLAY_SCRIPT = String.raw`
 
   window.addEventListener("message", function(ev){
     var d = ev.data; if (!d || typeof d !== "object") return;
-    if (d.type === "jh:anchors"){ anchors = Array.isArray(d.anchors) ? d.anchors : []; paint(); }
+    if (d.type === "jh:anchors"){ anchors = Array.isArray(d.anchors) ? d.anchors : []; paint(); consumePendingFocus(); }
     else if (d.type === "jh:reactions"){
       rxGroups = Array.isArray(d.groups) ? d.groups : [];
       me = d.me || me;
@@ -780,11 +873,24 @@ export const OVERLAY_SCRIPT = String.raw`
       setHover(key);
     }
     else if (d.type === "jh:focus"){
-      // rail → doc: focus a key (card clicked). null clears.
-      if (d.key == null) clearFocus();
-      else { var ck = byKey[d.key]; setFocus(d.key, ck ? coverKeysOf(d.key) : [d.key]); if (ck) scrollToKey(d.key); }
+      // rail → doc: focus a key (card clicked), or null to clear. Either way this
+      // supersedes a not-yet-resolved section scroll (a comment and a section are
+      // mutually exclusive selections), so cancel pendingSection.
+      pendingSection = null;
+      if (d.key == null) { pendingFocusScroll = null; clearFocus(); }
+      else {
+        var ck = byKey[d.key];
+        setFocus(d.key, ck ? coverKeysOf(d.key) : [d.key]);
+        // If the segment isn't painted yet (e.g. a resolved thread whose anchor
+        // arrives in the jh:anchors that FOLLOWS this focus, once showResolved
+        // flips), defer the scroll to the next paint instead of dropping it.
+        if (ck) { pendingFocusScroll = null; scrollToKey(d.key); }
+        else pendingFocusScroll = d.key;
+      }
     }
     else if (d.type === "jh:scrollTo"){ var sk = (typeof d.id === "number") ? "c:"+d.id : String(d.id); scrollToKey(sk); }
+    else if (d.type === "jh:sections"){ sections = Array.isArray(d.sections) ? d.sections : []; applySections(); }
+    else if (d.type === "jh:scrollToSection"){ scrollToSection(String(d.id)); }
     else if (d.type === "jh:clearSelection"){ var s=window.getSelection(); if(s) s.removeAllRanges(); }
     else if (d.type === "jh:themeMode"){
       forcedScheme = (d.mode === "dark" || d.mode === "light") ? d.mode : null;
