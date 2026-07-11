@@ -2,7 +2,7 @@ import spec from "@/lib/openapi/generated.json";
 
 export const dynamic = "force-static";
 
-const BODY = JSON.stringify(spec);
+const BODY = `${JSON.stringify(spec, null, 2)}\n`;
 
 export function GET(): Response {
   return new Response(BODY, {
