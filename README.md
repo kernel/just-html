@@ -46,7 +46,7 @@ curl -s https://justhtml.sh/api/v1/docs \
 # Share the private link:  <url>?viewtoken=<view_token>
 ```
 
-Full endpoint reference with a curl example for every call: [`/llms.txt`](https://justhtml.sh/llms.txt) · OpenAPI 3.1: [`/api/spec.yaml`](https://justhtml.sh/api/spec.yaml).
+Full endpoint reference with a curl example for every call: [`/llms.txt`](https://justhtml.sh/llms.txt) · OpenAPI 3.1: [`/openapi.json`](https://justhtml.sh/openapi.json) ([YAML](https://justhtml.sh/api/spec.yaml)).
 
 ## How it works
 

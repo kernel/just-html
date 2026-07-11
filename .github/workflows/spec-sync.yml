@@ -1,7 +1,8 @@
 # Keep the committed OpenAPI spec artifacts in sync with the Zod schemas they are
-# generated from. The served spec (lib/openapi/generated-spec.ts, returned by
-# GET /api/spec.yaml) and lib/openapi/generated.yaml are produced by
-# `npm run gen:spec` from the registry in lib/{docs,auth}/{schemas,paths}.ts.
+# generated from. The served specs (lib/openapi/generated-spec.ts, returned by
+# GET /api/spec.yaml, and lib/openapi/generated.json, returned by /openapi.json)
+# plus lib/openapi/generated.yaml are produced by `npm run gen:spec` from the
+# registry in lib/{docs,auth}/{schemas,paths}.ts.
 # This job regenerates them whenever the schemas/paths/generator change and
 # commits the result if it drifted, so the served spec can never lag the schemas.
 # This is a CONTENT-SYNC job, not a deploy — production deploys come from the
@@ -42,13 +43,13 @@ jobs:
         run: npm run gen:spec
       - name: Commit if changed
         run: |
-          if git diff --quiet -- lib/openapi/generated.yaml lib/openapi/generated-spec.ts; then
+          if git diff --quiet -- lib/openapi/generated.yaml lib/openapi/generated.json lib/openapi/generated-spec.ts; then
             echo "Spec artifacts already in sync."
             exit 0
           fi
           git config user.name "justhtml-bot"
           git config user.email "noreply@anthropic.com"
-          git add lib/openapi/generated.yaml lib/openapi/generated-spec.ts
+          git add lib/openapi/generated.yaml lib/openapi/generated.json lib/openapi/generated-spec.ts
           # The push only touches lib/openapi/generated*, which are NOT in this
           # workflow's path filter, so it will not re-trigger the job (no loop).
           git commit -m "spec-sync: regenerate the OpenAPI spec from the Zod schemas"

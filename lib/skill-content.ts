@@ -73,7 +73,8 @@ Scopes: docs.read docs.write (every key carries both).
 
 All requests: Authorization: Bearer jh_live_...
 Errors are JSON: { "error": "...", "message": "..." } with the documented
-status. OpenAPI 3.1: https://justhtml.sh/api/spec.yaml
+status. OpenAPI 3.1: https://justhtml.sh/openapi.json (JSON) or
+https://justhtml.sh/api/spec.yaml (YAML)
 
 Create a doc -> POST /docs   { html, title?, public? }
   curl -s https://justhtml.sh/api/v1/docs -H "Authorization: Bearer $JUSTHTML_API_KEY" \\
@@ -244,3 +245,10 @@ Auth-flow limits (per IP / per email) protect registration, code attempts (max
 5 wrong attempts per code), and email sends (login links + claim codes: 5/h +
 20/day per recipient, 30/h per IP). See /auth.md.
 `;
+
+export const SKILL_MARKDOWN = `---
+name: ${SKILL_NAME}
+description: ${SKILL_DESCRIPTION}
+---
+
+${LLMS_BODY}`;
