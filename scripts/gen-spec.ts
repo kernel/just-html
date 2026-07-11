@@ -2,17 +2,18 @@
 // OpenApiGeneratorV31 over the shared registry (populated by importing each
 // resource's schemas + paths modules) and writes the SERVED spec artifact.
 //
-// Z5 (cutover): the generated spec IS now what GET /api/spec.yaml serves. The
-// hand-written literal is gone. `npm run gen:spec` writes two committed
-// artifacts from the SAME document:
+// Z5 (cutover): the generated spec IS now what GET /api/spec.yaml and
+// GET /openapi.json serve. The hand-written literal is gone. `npm run gen:spec`
+// writes three committed artifacts from the SAME document:
 //   - lib/openapi/generated-spec.ts — `export const SPEC_YAML = ...`, imported
-//     by the route (mirrors how gen-skill commits SKILL.md). This is the bytes
-//     served in production.
+//     by the YAML route (mirrors how gen-skill commits SKILL.md).
 //   - lib/openapi/generated.yaml     — the same YAML as a plain file, for
 //     out-of-band validation (@redocly/cli) and human diffing.
+//   - lib/openapi/generated.json     — the canonical JSON document served from
+//     /openapi.json for standards-based API discovery.
 // scripts/spec-check.ts re-runs this generator and asserts the committed
-// artifacts match it byte-for-byte, so the served spec can never drift from the
-// Zod schemas (the spec-sync GitHub Action regenerates + commits on change).
+// artifacts match it byte-for-byte, so the served specs can never drift from
+// the Zod schemas (the spec-sync GitHub Action regenerates + commits on change).
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -31,6 +32,7 @@ import "../lib/auth/paths";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const YAML_OUT = join(ROOT, "lib/openapi/generated.yaml");
+const JSON_OUT = join(ROOT, "lib/openapi/generated.json");
 const TS_OUT = join(ROOT, "lib/openapi/generated-spec.ts");
 
 // Document-level metadata the generator does not derive from schemas/paths. These
@@ -72,8 +74,13 @@ export function generateSpec(): Record<string, unknown> {
 }
 
 /** The exact YAML bytes served by GET /api/spec.yaml and validated by redocly. */
-export function generateSpecYaml(): string {
-  return yaml.dump(generateSpec(), { lineWidth: 100, noRefs: true });
+export function generateSpecYaml(spec = generateSpec()): string {
+  return yaml.dump(spec, { lineWidth: 100, noRefs: true });
+}
+
+/** The canonical JSON bytes served by GET /openapi.json. */
+export function generateSpecJson(spec = generateSpec()): string {
+  return JSON.stringify(spec, null, 2) + "\n";
 }
 
 /** The committed .ts artifact the route imports (mirrors gen-skill's SKILL.md). */
@@ -94,14 +101,15 @@ export function generatedSpecModule(specYaml: string): string {
 }
 
 function main() {
-  const specYaml = generateSpecYaml();
+  const spec = generateSpec();
+  const specYaml = generateSpecYaml(spec);
+  const specJson = generateSpecJson(spec);
   writeFileSync(YAML_OUT, specYaml);
+  writeFileSync(JSON_OUT, specJson);
   writeFileSync(TS_OUT, generatedSpecModule(specYaml));
-  const paths = Object.keys(
-    (yaml.load(specYaml) as { paths?: Record<string, unknown> }).paths ?? {}
-  );
+  const paths = Object.keys(spec.paths as Record<string, unknown>);
   console.log(
-    `wrote ${YAML_OUT} + ${TS_OUT} (${specYaml.length} bytes, ${paths.length} paths)`
+    `wrote ${YAML_OUT} + ${JSON_OUT} + ${TS_OUT} (${paths.length} paths)`
   );
 }
 

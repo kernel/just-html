@@ -65,7 +65,8 @@ Scopes: docs.read docs.write (every key carries both).
 
 All requests: Authorization: Bearer jh_live_...
 Errors are JSON: { "error": "...", "message": "..." } with the documented
-status. OpenAPI 3.1: https://justhtml.sh/api/spec.yaml
+status. OpenAPI 3.1: https://justhtml.sh/openapi.json (JSON) or
+https://justhtml.sh/api/spec.yaml (YAML)
 
 Create a doc -> POST /docs   { html, title?, public? }
   curl -s https://justhtml.sh/api/v1/docs -H "Authorization: Bearer $JUSTHTML_API_KEY" \

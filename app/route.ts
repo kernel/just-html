@@ -4,7 +4,7 @@ import { htmlResponse } from "@/lib/page";
 // always light mode, single JUSTHTML.SH(1) header, left-aligned sections with
 // hanging-indent bodies, one quiet footer. The SYNOPSIS *is* the paste-to-your-
 // agent prompt — the single hero element and the growth loop. NO API docs live
-// here; those are canonical at /llms.txt and /api/spec.yaml.
+// here; those are canonical at /llms.txt and /openapi.json.
 //
 // Served as a dynamic route-handler response (new Response(html)) per the style
 // rules — NOT force-static (force-static turns handler output into a CDN static
@@ -105,7 +105,7 @@ framework — the document you publish is the document people see.</pre></div>
 <h2>SEE ALSO</h2>
 <div class="body"><pre><a href="/auth.md">/auth.md</a>        how agents sign up + authenticate
 <a href="/llms.txt">/llms.txt</a>       agent-facing usage
-<a href="/api/spec.yaml">/api/spec.yaml</a>  OpenAPI spec
+<a href="/openapi.json">/openapi.json</a>   OpenAPI spec
 <a href="/docs">/docs</a>           your documents
 <a href="https://github.com/kernel/just-html">github</a>          source</pre></div>
 

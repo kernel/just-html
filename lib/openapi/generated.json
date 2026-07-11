@@ -1,0 +1,3449 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "justhtml.sh API",
+    "version": "1.0.0",
+    "description": "An agent-first minimal HTML document host. Agents self-onboard via the\nauth.md service_auth flow (see https://justhtml.sh/auth.md), receive a\nlong-lived API key, and publish HTML documents to stable URLs.\n\nTerse usage with curl examples: https://justhtml.sh/llms.txt\n",
+    "license": {
+      "name": "Proprietary",
+      "url": "https://justhtml.sh/"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://justhtml.sh",
+      "description": "Production"
+    }
+  ],
+  "tags": [
+    {
+      "name": "auth",
+      "description": "auth.md service_auth registration + OAuth token/revoke"
+    },
+    {
+      "name": "discovery",
+      "description": "Machine-readable OAuth discovery metadata"
+    },
+    {
+      "name": "docs",
+      "description": "Document CRUD, patch editing, versions"
+    },
+    {
+      "name": "sharing",
+      "description": "Per-document grants (email or domain)"
+    },
+    {
+      "name": "collaboration",
+      "description": "Comments (W3C text-quote anchors, 1-level threads) and reactions"
+    }
+  ],
+  "security": [
+    {
+      "bearerApiKey": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerApiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "jh_live_...",
+        "description": "Long-lived API key obtained via the auth.md service_auth flow. Carries scopes docs.read docs.write. 401s include a WWW-Authenticate header pointing at the protected-resource metadata."
+      }
+    },
+    "schemas": {
+      "CreateDocBody": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "The document HTML.",
+            "example": "<h1>Hello</h1>"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300,
+            "description": "Optional document title.",
+            "example": "My doc"
+          },
+          "public": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the document is public."
+          }
+        },
+        "required": [
+          "html"
+        ],
+        "description": "Create a document. html is required; title and public are optional."
+      },
+      "UpdateDocBody": {
+        "type": "object",
+        "properties": {
+          "html": {
+            "type": "string",
+            "description": "Replacement HTML (full rewrite, bumps version).",
+            "example": "<h1>Hi</h1>"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 300,
+            "description": "New title, or null to clear it."
+          },
+          "public": {
+            "type": "boolean",
+            "description": "New visibility flag (owner only)."
+          }
+        },
+        "description": "Update html (full rewrite), title, or visibility. At least one field is required. Editors may rewrite html; only the owner may change title or public."
+      },
+      "OwnerDoc": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "fierce-tiger-12345"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://justhtml.sh/d/fierce-tiger-12345"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "view_token": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "html": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "url",
+          "title",
+          "version",
+          "public",
+          "view_token",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "Document as seen by its owner (includes view_token)."
+      },
+      "GranteeDoc": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "fierce-tiger-12345"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://justhtml.sh/d/fierce-tiger-12345"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "commenter",
+              "viewer"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "html": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "url",
+          "title",
+          "version",
+          "public",
+          "role",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "Document as seen by a non-owner grantee (role instead of view_token)."
+      },
+      "DocWithHtml": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "fierce-tiger-12345"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://justhtml.sh/d/fierce-tiger-12345"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "view_token": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "commenter",
+              "viewer"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "html": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "url",
+          "title",
+          "version",
+          "public",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "Owner sees view_token; a grantee sees role (editor/commenter/viewer) instead. html is included on single-doc fetches and after writes."
+      },
+      "DocListItem": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "fierce-tiger-12345"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://justhtml.sh/d/fierce-tiger-12345"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "editor",
+              "commenter",
+              "viewer"
+            ],
+            "description": "The caller's access to this doc. owner for docs you own; otherwise the resolved grant role (an explicit email grant beats a domain grant for the same email)."
+          },
+          "version": {
+            "type": "integer"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "comment_count": {
+            "type": "integer",
+            "description": "Live (non-deleted) comments + replies on the doc. 0 when there are none. The /docs dashboard surfaces the same count."
+          },
+          "view_token": {
+            "type": "string",
+            "description": "Present only when access=owner."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "slug",
+          "url",
+          "title",
+          "access",
+          "version",
+          "public",
+          "comment_count",
+          "created_at",
+          "updated_at"
+        ],
+        "description": "A document as returned by GET /api/v1/docs (any scope). Carries access (owner|editor|commenter|viewer). Owned items (access=owner) additionally carry view_token; shared items omit it."
+      },
+      "DocListResponse": {
+        "type": "object",
+        "properties": {
+          "docs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DocListItem"
+            }
+          }
+        },
+        "required": [
+          "docs"
+        ],
+        "description": "The matched documents."
+      },
+      "DeleteDocResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "deleted"
+        ],
+        "description": "Soft-delete acknowledgement."
+      },
+      "ApiError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "additionalProperties": {},
+        "description": "Structured API error: { error, message, ...extra }."
+      },
+      "GrantBody": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "email",
+            "description": "Grantee email (provide exactly one of email or domain)."
+          },
+          "domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "kernel.sh",
+            "description": "Grantee email-domain (provide exactly one of email or domain)."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "commenter",
+              "viewer"
+            ],
+            "description": "Grant role."
+          },
+          "notify": {
+            "type": "boolean",
+            "default": true,
+            "description": "Email-grants only. Send the grantee a share-notification email (default true). Ignored for domain grants."
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "description": "Share with an email or a domain. Provide exactly one of email or domain. role is editor, commenter, or viewer. notify (email grants only) defaults to true."
+      },
+      "Grant": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "grantee_type": {
+            "type": "string",
+            "enum": [
+              "email",
+              "domain"
+            ]
+          },
+          "grantee": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "commenter",
+              "viewer"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "grantee_type",
+          "grantee",
+          "role",
+          "created_at"
+        ],
+        "description": "A single grant (email or domain) on a document."
+      },
+      "GrantListResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Grant"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer",
+            "example": 50
+          }
+        },
+        "required": [
+          "slug",
+          "grants",
+          "count",
+          "max"
+        ],
+        "description": "Grants on the document (owner only)."
+      },
+      "GrantCreatedResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/Grant"
+          }
+        },
+        "required": [
+          "slug",
+          "grant"
+        ],
+        "description": "Grant created."
+      },
+      "GrantUnchangedResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "grant": {
+            "$ref": "#/components/schemas/Grant"
+          },
+          "unchanged": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "grant",
+          "unchanged"
+        ],
+        "description": "Idempotent re-grant (same target + role)."
+      },
+      "GrantDeletedResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "grant_id": {
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "grant_id",
+          "deleted"
+        ],
+        "description": "Grant revoked."
+      },
+      "VersionMeta": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "edit_kind": {
+            "type": "string",
+            "enum": [
+              "create",
+              "patch",
+              "rewrite"
+            ]
+          },
+          "author_user_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "User who authored this version (null for legacy/system writes)."
+          },
+          "patch": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldText": {
+                  "type": "string"
+                },
+                "newText": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ]
+            },
+            "description": "The edits payload as requested, present only when edit_kind=patch (the list of {oldText,newText} applied). Omitted otherwise."
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "version",
+          "edit_kind",
+          "author_user_id",
+          "bytes",
+          "created_at"
+        ],
+        "description": "Metadata for one retained version (no html)."
+      },
+      "VersionListResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "current_version": {
+            "type": "integer"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionMeta"
+            }
+          }
+        },
+        "required": [
+          "slug",
+          "current_version",
+          "versions"
+        ],
+        "description": "Version metadata (no html), newest first."
+      },
+      "VersionSnapshot": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "edit_kind": {
+            "type": "string",
+            "enum": [
+              "create",
+              "patch",
+              "rewrite"
+            ]
+          },
+          "author_user_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "patch": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldText": {
+                  "type": "string"
+                },
+                "newText": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ]
+            }
+          },
+          "bytes": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "html": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "version",
+          "edit_kind",
+          "author_user_id",
+          "bytes",
+          "created_at",
+          "html"
+        ],
+        "description": "A version's metadata plus its full html snapshot."
+      },
+      "EditsBody": {
+        "type": "object",
+        "properties": {
+          "edits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "oldText": {
+                  "type": "string"
+                },
+                "newText": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "oldText",
+                "newText"
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 200,
+            "description": "The patches to apply, in order. 1–200 edits."
+          },
+          "base_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "The version the edits were derived against; a mismatch returns 409."
+          }
+        },
+        "required": [
+          "edits"
+        ],
+        "description": "Apply deterministic patches. edits is a non-empty list of {oldText,newText}. Always send base_version; a mismatch returns 409."
+      },
+      "TextAnchor": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "text"
+            ]
+          },
+          "exact": {
+            "type": "string",
+            "example": "deterministic compaction"
+          },
+          "prefix": {
+            "type": "string",
+            "example": "record store with "
+          },
+          "suffix": {
+            "type": "string",
+            "example": "."
+          },
+          "start": {
+            "type": "integer"
+          },
+          "end": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "exact"
+        ],
+        "description": "W3C text-quote selector (TextQuoteSelector + position hint). exact is the verbatim quoted passage; prefix/suffix (~32 chars) disambiguate repeated text and survive surrounding shifts; start/end are offsets into the document's text content (a fast-path hint, not authoritative)."
+      },
+      "CreateCommentBody": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Comment text (<= 10 KB).",
+            "example": "is this right?"
+          },
+          "anchor": {
+            "description": "W3C text-quote selector; null/omitted = doc-level."
+          },
+          "parent_id": {
+            "type": "integer",
+            "description": "Root comment id to reply to (1-level threads only)."
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "description": "Comment on a span by QUOTING it (anchor), at the doc level (omit anchor), or reply to a root comment (parent_id)."
+      },
+      "UpdateCommentBody": {
+        "type": "object",
+        "properties": {
+          "body": {
+            "type": "string",
+            "description": "Author only. The new comment text (<= 10 KB)."
+          },
+          "resolved": {
+            "type": "boolean",
+            "description": "Resolve/unresolve. Anyone who can comment."
+          }
+        },
+        "description": "Edit body (author) and/or resolve/unresolve (anyone who can comment). At least one field is required."
+      },
+      "CreateReactionBody": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string",
+            "enum": [
+              "👍",
+              "👎",
+              "🎉",
+              "🤔",
+              "❤️",
+              "🚀",
+              "👀",
+              "😄",
+              "🙏",
+              "🔥",
+              "✅",
+              "💯"
+            ],
+            "description": "One of the curated set: 👍 👎 🎉 🤔 ❤️ 🚀 👀 😄 🙏 🔥 ✅ 💯. Anything else → 400 invalid_request with an \"allowed\" array listing the full set.",
+            "example": "🚀"
+          },
+          "comment_id": {
+            "type": "integer",
+            "description": "Target comment; omit/null = not a comment reaction. Mutually exclusive with anchor."
+          },
+          "anchor": {
+            "description": "Target span (W3C text-quote selector). Mutually exclusive with comment_id; omit/null = react on the doc (or comment)."
+          }
+        },
+        "required": [
+          "emoji"
+        ],
+        "description": "Add an emoji reaction. The target is 3-way and mutually exclusive: comment_id (a comment), anchor (a span), or neither (the whole doc). Supplying both comment_id and anchor → 400."
+      },
+      "ReactionGroup": {
+        "type": "object",
+        "properties": {
+          "emoji": {
+            "type": "string"
+          },
+          "count": {
+            "type": "integer"
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "description": "Author email."
+            }
+          }
+        },
+        "required": [
+          "emoji",
+          "count",
+          "authors"
+        ],
+        "description": "Reactions collapsed by emoji, with the attributed authors."
+      },
+      "AnchoredReactionGroup": {
+        "type": "object",
+        "properties": {
+          "sig": {
+            "type": "string",
+            "description": "Anchor signature (prefix|exact|suffix) — the grouping key."
+          },
+          "anchor": {
+            "$ref": "#/components/schemas/TextAnchor"
+          },
+          "anchored_version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionGroup"
+            }
+          }
+        },
+        "required": [
+          "sig",
+          "anchor",
+          "anchored_version",
+          "reactions"
+        ],
+        "description": "All reactions on one text span, grouped by anchor signature, then collapsed per emoji. The viewer paints one highlight on the span and a chip per emoji at the span's end."
+      },
+      "Comment": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "parent_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Author email."
+          },
+          "author_avatar": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uri",
+            "description": "Gravatar URL."
+          },
+          "body": {
+            "type": "string"
+          },
+          "anchor": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TextAnchor"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "anchored_version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "orphaned": {
+            "type": "boolean",
+            "description": "Anchor no longer resolves; kept, shown unanchored."
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "edited_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionGroup"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "parent_id",
+          "author",
+          "author_avatar",
+          "body",
+          "anchor",
+          "anchored_version",
+          "orphaned",
+          "resolved",
+          "resolved_at",
+          "created_at",
+          "edited_at",
+          "reactions"
+        ],
+        "description": "A single comment (with its aggregated reactions)."
+      },
+      "CommentThread": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "parent_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "author_avatar": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "body": {
+            "type": "string"
+          },
+          "anchor": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TextAnchor"
+              },
+              {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              }
+            ]
+          },
+          "anchored_version": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "orphaned": {
+            "type": "boolean"
+          },
+          "resolved": {
+            "type": "boolean"
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "edited_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionGroup"
+            }
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "anchored",
+              "doc",
+              "orphaned"
+            ],
+            "description": "Which group this thread sorts into in the all-threads view."
+          },
+          "replies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Comment"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "parent_id",
+          "author",
+          "author_avatar",
+          "body",
+          "anchor",
+          "anchored_version",
+          "orphaned",
+          "resolved",
+          "resolved_at",
+          "created_at",
+          "edited_at",
+          "reactions",
+          "group",
+          "replies"
+        ],
+        "description": "A root comment with its group tag and 1-level replies."
+      },
+      "CommentsListResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer",
+            "description": "Live comment + reply count."
+          },
+          "can_comment": {
+            "type": "boolean"
+          },
+          "can_react": {
+            "type": "boolean"
+          },
+          "threads": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommentThread"
+            }
+          },
+          "doc_reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReactionGroup"
+            },
+            "description": "Doc-level reactions (present only when any exist). Includes orphaned anchored reactions degraded to doc-level."
+          },
+          "anchored_reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnchoredReactionGroup"
+            },
+            "description": "Span reactions grouped by anchor signature, in document order, so clients stack/count without re-grouping (present only when any exist)."
+          }
+        },
+        "required": [
+          "slug",
+          "version",
+          "total",
+          "can_comment",
+          "can_react",
+          "threads"
+        ],
+        "description": "The complete all-threads view."
+      },
+      "CommentCreatedResponse": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "$ref": "#/components/schemas/Comment"
+          }
+        },
+        "required": [
+          "comment"
+        ],
+        "description": "Comment created."
+      },
+      "CommentUpdatedResponse": {
+        "type": "object",
+        "properties": {
+          "comment": {
+            "$ref": "#/components/schemas/Comment"
+          }
+        },
+        "required": [
+          "comment"
+        ],
+        "description": "Comment updated."
+      },
+      "CommentDeletedResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "deleted"
+        ],
+        "description": "Comment soft-deleted."
+      },
+      "ReactionCreatedResponse": {
+        "type": "object",
+        "properties": {
+          "reaction": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "integer"
+              },
+              "comment_id": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "anchor": {
+                "allOf": [
+                  {
+                    "$ref": "#/components/schemas/TextAnchor"
+                  },
+                  {
+                    "type": [
+                      "object",
+                      "null"
+                    ]
+                  }
+                ]
+              },
+              "anchored_version": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "orphaned": {
+                "type": "boolean"
+              },
+              "emoji": {
+                "type": "string"
+              },
+              "author": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "created_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "id",
+              "comment_id",
+              "anchor",
+              "anchored_version",
+              "orphaned",
+              "emoji",
+              "author",
+              "created_at"
+            ]
+          }
+        },
+        "required": [
+          "reaction"
+        ],
+        "description": "Reaction added."
+      },
+      "ReactionToggledResponse": {
+        "type": "object",
+        "properties": {
+          "toggled": {
+            "type": "boolean"
+          },
+          "removed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "toggled",
+          "removed"
+        ],
+        "description": "Reaction toggled off (the same reaction already existed)."
+      },
+      "ReactionDeletedResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "deleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "deleted"
+        ],
+        "description": "Reaction removed."
+      },
+      "ClaimBlock": {
+        "type": "object",
+        "properties": {
+          "complete_url": {
+            "type": "string",
+            "format": "uri",
+            "description": "POST {claim_token, user_code} here to complete the claim."
+          },
+          "expires_in": {
+            "type": "integer",
+            "example": 600
+          },
+          "interval": {
+            "type": "integer",
+            "example": 5
+          }
+        },
+        "required": [
+          "complete_url",
+          "expires_in",
+          "interval"
+        ],
+        "description": "The claim block. The user_code is intentionally omitted — it is emailed to the human (the only place it appears). The human reads it back to the agent, which POSTs {claim_token, user_code} to complete_url (/agent/identity/claim/complete)."
+      },
+      "AgentError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "description": "Agent ceremony error: { error, message }."
+      },
+      "OAuthError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "error_description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "description": "OAuth error envelope (RFC 6749): { error, error_description? }."
+      },
+      "StartRegistrationBody": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "service_auth"
+            ],
+            "description": "The registration type."
+          },
+          "login_hint": {
+            "type": "string",
+            "format": "email",
+            "example": "you@example.com",
+            "description": "The human's email address."
+          }
+        },
+        "required": [
+          "type",
+          "login_hint"
+        ],
+        "description": "Start a service_auth registration; the 6-digit code is emailed to login_hint."
+      },
+      "RemintClaimBody": {
+        "type": "object",
+        "properties": {
+          "claim_token": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string",
+            "format": "email",
+            "description": "Corrected email; updates the registration's login_hint."
+          }
+        },
+        "required": [
+          "claim_token",
+          "email"
+        ],
+        "description": "Re-mint an expired code; a fresh code is emailed to the human."
+      },
+      "CompleteClaimBody": {
+        "type": "object",
+        "properties": {
+          "claim_token": {
+            "type": "string"
+          },
+          "user_code": {
+            "type": "string",
+            "pattern": "^[0-9]{6}$",
+            "example": "428117"
+          }
+        },
+        "required": [
+          "claim_token",
+          "user_code"
+        ],
+        "description": "Complete a claim by reading the emailed 6-digit code back to the agent."
+      },
+      "TokenForm": {
+        "type": "object",
+        "properties": {
+          "grant_type": {
+            "type": "string",
+            "enum": [
+              "urn:workos:agent-auth:grant-type:claim"
+            ],
+            "description": "The claim grant type."
+          },
+          "claim_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "grant_type",
+          "claim_token"
+        ],
+        "description": "Claim-grant token request (form-encoded)."
+      },
+      "RevokeForm": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "token_type_hint": {
+            "type": "string",
+            "enum": [
+              "access_token"
+            ]
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "description": "RFC 7009 revocation request (form-encoded)."
+      },
+      "StartRegistrationResponse": {
+        "type": "object",
+        "properties": {
+          "registration_id": {
+            "type": "string"
+          },
+          "registration_type": {
+            "type": "string",
+            "enum": [
+              "service_auth"
+            ]
+          },
+          "claim_url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "claim_token": {
+            "type": "string",
+            "description": "Secret; returned once. Hold in memory only."
+          },
+          "claim_token_expires": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "post_claim_scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "docs.read",
+              "docs.write"
+            ]
+          },
+          "claim": {
+            "$ref": "#/components/schemas/ClaimBlock"
+          }
+        },
+        "required": [
+          "registration_id",
+          "registration_type",
+          "claim_url",
+          "claim_token",
+          "claim_token_expires",
+          "post_claim_scopes",
+          "claim"
+        ],
+        "description": "Pending registration created; code emailed to the human."
+      },
+      "RemintClaimResponse": {
+        "type": "object",
+        "properties": {
+          "registration_id": {
+            "type": "string"
+          },
+          "claim_attempt_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "example": "initiated"
+          },
+          "claim_attempt": {
+            "$ref": "#/components/schemas/ClaimBlock"
+          }
+        },
+        "required": [
+          "registration_id",
+          "claim_attempt_id",
+          "status",
+          "claim_attempt"
+        ],
+        "description": "Fresh code emailed."
+      },
+      "CompleteClaimResponse": {
+        "type": "object",
+        "properties": {
+          "registration_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "example": "claimed"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "registration_id",
+          "status",
+          "message"
+        ],
+        "description": "Claim confirmed; poll /oauth2/token for the key."
+      },
+      "TokenResponse": {
+        "type": "object",
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "example": "jh_live_..."
+          },
+          "token_type": {
+            "type": "string",
+            "enum": [
+              "Bearer"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "example": "docs.read docs.write"
+          },
+          "credential_type": {
+            "type": "string",
+            "enum": [
+              "api_key"
+            ]
+          },
+          "registration_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "token_type",
+          "scope",
+          "credential_type",
+          "registration_id"
+        ],
+        "description": "Credential issued (once)."
+      },
+      "ProtectedResourceMetadata": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {},
+        "description": "RFC 9728 protected-resource metadata."
+      },
+      "AuthServerMetadata": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": {},
+        "description": "RFC 8414 authorization-server metadata (with agent_auth block)."
+      },
+      "Slug": {
+        "type": "string",
+        "example": "fierce-tiger-12345"
+      },
+      "VersionNum": {
+        "type": "integer",
+        "minimum": 1,
+        "example": 3
+      },
+      "GrantId": {
+        "type": "integer",
+        "minimum": 1,
+        "example": 1
+      },
+      "CommentId": {
+        "type": "integer",
+        "minimum": 1,
+        "example": 42
+      },
+      "ReactionId": {
+        "type": "integer",
+        "minimum": 1,
+        "example": 7
+      }
+    },
+    "parameters": {
+      "Slug": {
+        "schema": {
+          "$ref": "#/components/schemas/Slug"
+        },
+        "required": true,
+        "name": "slug",
+        "in": "path"
+      },
+      "VersionNum": {
+        "schema": {
+          "$ref": "#/components/schemas/VersionNum"
+        },
+        "required": true,
+        "name": "n",
+        "in": "path"
+      },
+      "GrantId": {
+        "schema": {
+          "$ref": "#/components/schemas/GrantId"
+        },
+        "required": true,
+        "name": "id",
+        "in": "path"
+      },
+      "CommentId": {
+        "schema": {
+          "$ref": "#/components/schemas/CommentId"
+        },
+        "required": true,
+        "name": "id",
+        "in": "path"
+      },
+      "ReactionId": {
+        "schema": {
+          "$ref": "#/components/schemas/ReactionId"
+        },
+        "required": true,
+        "name": "id",
+        "in": "path"
+      }
+    }
+  },
+  "paths": {
+    "/api/v1/docs": {
+      "post": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Create a document",
+        "operationId": "createDoc",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDocBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerDoc"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A resource quota was exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "HTML exceeds the 2 MB per-document size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "List documents (owned, shared, or both)",
+        "description": "Lists documents by scope. Every item carries an access role (owner|editor|commenter|viewer). For a doc matched by both an email grant and a domain grant, the email grant wins (precedence ladder). Owned items additionally carry view_token; shared items do not (the view token is an owner-only capability). The web equivalent for a signed-in human is https://justhtml.sh/docs.",
+        "operationId": "listDocs",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "owned",
+                "shared",
+                "all"
+              ],
+              "default": "owned",
+              "description": "owned (default): docs the caller owns. shared: docs granted to the caller's email or email-domain, excluding docs the caller owns. all: owned then shared."
+            },
+            "required": false,
+            "description": "owned (default): docs the caller owns. shared: docs granted to the caller's email or email-domain, excluding docs the caller owns. all: owned then shared.",
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The matched documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}": {
+      "get": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Fetch a document (metadata + html)",
+        "operationId": "getDoc",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner sees view_token; a grantee sees role instead of view_token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocWithHtml"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Update html (full rewrite), title, or visibility",
+        "description": "Owner or editor grant may rewrite html. Only the owner may change title or public (visibility).",
+        "operationId": "updateDoc",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDocBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocWithHtml"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Editor tried to change title/visibility",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "HTML exceeds the 2 MB per-document size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Soft-delete a document (owner only)",
+        "operationId": "deleteDoc",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDocResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/edits": {
+      "post": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Apply deterministic patches",
+        "description": "exact-match-then-fuzzy edit application. Owner or editor grant. Always send base_version; a mismatch returns 409. Ambiguous, no-match, or overlapping edits return 422 naming the failing edit index.",
+        "operationId": "editDoc",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EditsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Patched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocWithHtml"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "base_version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "HTML exceeds the 2 MB per-document size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An edit could not be applied deterministically",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/rotate-token": {
+      "post": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Rotate the view token (un-share; owner only)",
+        "operationId": "rotateViewToken",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "New view token issued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OwnerDoc"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/versions": {
+      "get": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "List retained version history (newest first)",
+        "operationId": "listVersions",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version metadata (no html)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/versions/{n}": {
+      "get": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Fetch a specific version's full html",
+        "operationId": "getVersion",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/VersionNum"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Version snapshot with html",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionSnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/grants": {
+      "get": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "List grants (owner only)",
+        "operationId": "listGrants",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grants on the document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Share with an email or a domain (owner only)",
+        "description": "Provide exactly one of email or domain. role is editor, commenter, or viewer. Consumer email providers (gmail.com, ...) are rejected with 422. Re-granting the same target+role is idempotent (200 with unchanged:true). Email grants send the grantee a share-notification email containing ONE single-use, 7-day login link with next=/d/:slug; set notify:false to suppress it. DOMAIN grants NEVER notify (notify is ignored for them).",
+        "operationId": "createGrant",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent re-grant (same target + role)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantUnchangedResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Grant created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A resource quota was exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Consumer email domain rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/grants/{id}": {
+      "delete": {
+        "tags": [
+          "sharing"
+        ],
+        "summary": "Revoke a grant (owner only)",
+        "operationId": "deleteGrant",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/GrantId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grant revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantDeletedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/comments": {
+      "get": {
+        "tags": [
+          "collaboration"
+        ],
+        "summary": "List all comment threads (the complete all-threads view)",
+        "description": "Returns every live thread the caller can see, exactly as the viewer shell shows humans: anchored threads in document order, then doc-level threads, then orphaned threads, each carrying resolved/orphaned flags, 1-level replies, and reactions. Read access required (owner/grant via identity, a valid view token, or a public doc).",
+        "operationId": "listComments",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys."
+            },
+            "required": false,
+            "description": "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys.",
+            "name": "viewtoken",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All threads",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentsListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "collaboration"
+        ],
+        "summary": "Post a comment (anchored to a quote, doc-level, or a reply)",
+        "description": "Comment on a span by QUOTING it (anchor), at the doc level (omit anchor), or reply to a root comment (parent_id). Identity required: API key OR signed-in session — anonymous never writes. Permission to comment: owner, editor or commenter grant, view-token holder with identity, or any identity on a public doc.",
+        "operationId": "createComment",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys."
+            },
+            "required": false,
+            "description": "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys.",
+            "name": "viewtoken",
+            "in": "query"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Can view but not comment (e.g. a viewer-only grant)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Comment body exceeds 10 KB",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/comments/{id}": {
+      "patch": {
+        "tags": [
+          "collaboration"
+        ],
+        "summary": "Edit body (author) and/or resolve/unresolve (anyone who can comment)",
+        "operationId": "updateComment",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/CommentId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCommentBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentUpdatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Editing another author's body, or resolving without comment rights",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "collaboration"
+        ],
+        "summary": "Soft-delete a comment (author own, owner any)",
+        "operationId": "deleteComment",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/CommentId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentDeletedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not the author and not the owner",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/reactions": {
+      "post": {
+        "tags": [
+          "collaboration"
+        ],
+        "summary": "React to a doc, a comment, or a quoted span (attributed; re-post toggles off)",
+        "description": "Add an emoji reaction. The target is 3-way and MUTUALLY EXCLUSIVE: comment_id set → react on that comment; anchor set → react on a text span (W3C text-quote, same shape + validation as a comment anchor; an agent \"highlights\" by quoting); neither set → react on the whole document. Supplying BOTH comment_id and anchor → 400. Attributed-only (identity required); unique per (target, author, emoji) — for span reactions the \"target\" is the anchor signature, so the same emoji on two different spans are two distinct reactions. Re-posting the same reaction removes it (toggle). Anchored reactions re-anchor on every doc edit exactly like comments (move, or orphan + later un-orphan); an orphaned anchored reaction degrades to doc-level display. React permission: anyone who can view, with identity.",
+        "operationId": "addReaction",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReactionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reaction toggled off (the same reaction already existed)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReactionToggledResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Reaction added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReactionCreatedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "comment_id does not reference a live comment on this document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/reactions/{id}": {
+      "delete": {
+        "tags": [
+          "collaboration"
+        ],
+        "summary": "Remove your own reaction",
+        "operationId": "deleteReaction",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/ReactionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReactionDeletedResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/identity": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Start a service_auth registration",
+        "description": "Creates a pending registration (no user account is created yet), emails the human a 6-digit code, and returns a claim_token plus a claim block. There is exactly one flow: justhtml.sh emails the login_hint the code (the code and nothing else — no links). The user_code is NEVER returned in the response (the email is the binding proof). The human reads the code back to the agent, which submits it to POST /agent/identity/claim/complete; the agent then polls /oauth2/token for the key. There is no claim_delivery parameter, no approve link, and no hosted claim form.",
+        "operationId": "startRegistration",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRegistrationBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pending registration created; code emailed to the human",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartRegistrationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad body, bad login_hint, unsupported type, or a now-removed parameter (claim_delivery is rejected with invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "email_send_failed — the code email could not be sent; the registration is voided. Retry registration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/identity/claim": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Re-mint an expired code",
+        "description": "Invalidates the prior code and emails a fresh 6-digit code (the 24h registration window must still be open). A corrected email updates the registration's login_hint. The new code is NOT returned in the response — it goes to the human's inbox.",
+        "operationId": "remintClaim",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemintClaimBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fresh code emailed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemintClaimResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unknown claim_token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Already claimed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Registration window closed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent/identity/claim/complete": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Complete a claim by reading the emailed code back",
+        "description": "The human reads the 6-digit code from the emailed message back to the agent, which submits it here to confirm the claim WITHOUT a browser session (the binding proof is that the code only reached the human via their inbox). Constant-time compare; 5 wrong attempts kill the code (410 code_dead), then re-mint via POST /agent/identity/claim. On success the agent's /oauth2/token poll returns the key.",
+        "operationId": "completeClaim",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteClaimBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Claim confirmed; poll /oauth2/token for the key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompleteClaimResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_claim_token (unknown token) or invalid_user_code (wrong code; message names attempts remaining).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "claimed_or_in_flight (already claimed).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "claim_expired (registration window closed), code_dead (5 wrong attempts), or expired_token (user_code window closed). Re-mint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth2/token": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Poll the claim grant for the API key",
+        "description": "RFC 8628-style polling. While the human has not finished, returns 400 authorization_pending (or slow_down if polled under 5s apart). On confirm, returns the long-lived API key exactly once.",
+        "operationId": "claimGrantToken",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Credential issued (once)",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "no-store"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "OAuth error envelope. error one of: authorization_pending, slow_down, expired_token, invalid_grant, invalid_request, unsupported_grant_type.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth2/revoke": {
+      "post": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Revoke an API key (RFC 7009)",
+        "description": "Idempotent. Returns 200 with an empty body whether or not the token existed.",
+        "operationId": "revokeToken",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeForm"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Revoked (or no-op); empty body"
+          },
+          "400": {
+            "description": "Malformed body",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-protected-resource": {
+      "get": {
+        "tags": [
+          "discovery"
+        ],
+        "summary": "RFC 9728 protected-resource metadata",
+        "operationId": "protectedResourceMetadata",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Resource metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedResourceMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/.well-known/oauth-authorization-server": {
+      "get": {
+        "tags": [
+          "discovery"
+        ],
+        "summary": "RFC 8414 authorization-server metadata (with agent_auth block)",
+        "operationId": "authServerMetadata",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Authorization-server metadata",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthServerMetadata"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

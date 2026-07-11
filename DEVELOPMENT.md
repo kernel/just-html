@@ -63,16 +63,18 @@ Edit the content in `lib/skill-content.ts`, never the generated files.
 
 ## The OpenAPI spec
 
-`/api/spec.yaml` is **code-first**: generated from the Zod schemas + paths
-registered in `lib/{docs,auth}/{schemas,paths}.ts` (the single source of truth
-for request/response validation AND the documented surface), so the spec can
-never drift from the code. Same pattern as the skill above:
+The OpenAPI 3.1 document is **code-first**: generated from the Zod schemas +
+paths registered in `lib/{docs,auth}/{schemas,paths}.ts` (the single source of
+truth for request/response validation AND the documented surface), so the spec
+can never drift from the code. Same pattern as the skill above:
 
 - `npm run gen:spec` (runs `scripts/gen-spec.ts` via `tsx`) runs the
-  `OpenApiGeneratorV31` over the registry and writes two committed artifacts:
-  `lib/openapi/generated-spec.ts` (the `SPEC_YAML` the route serves) and
-  `lib/openapi/generated.yaml` (the same bytes as a file, for `@redocly/cli`).
-- `app/api/spec.yaml/route.ts` serves `SPEC_YAML` verbatim.
+  `OpenApiGeneratorV31` over the registry and writes three committed artifacts:
+  `lib/openapi/generated-spec.ts` (the `SPEC_YAML` the YAML route serves),
+  `lib/openapi/generated.yaml` (the same bytes as a file, for `@redocly/cli`),
+  and `lib/openapi/generated.json` (the canonical discovery document).
+- `app/openapi.json/route.ts` serves the canonical JSON document;
+  `app/api/spec.yaml/route.ts` keeps serving `SPEC_YAML` verbatim.
 - `npm run spec:check` re-runs the generator and asserts the committed artifacts
   match it byte-for-byte (drift guard), then cross-checks that the served spec's
   paths, the on-disk route handlers, and the `/llms.txt` body all agree.
@@ -103,7 +105,11 @@ Agent / discovery (plain text or JSON, zero JS):
 - `GET /` — homepage / man-page docs (NAME … SEE ALSO + a copy-pasteable agent prompt).
 - `GET /auth.md` — prose auth protocol.
 - `GET /llms.txt` — terse agent usage: every endpoint with a curl example + limits.
-- `GET /api/spec.yaml` — OpenAPI 3.1 (validated with `@redocly/cli`).
+- `GET /openapi.json` — canonical OpenAPI 3.1 JSON document.
+- `GET /api/spec.yaml` — alternate OpenAPI 3.1 YAML document (validated with `@redocly/cli`).
+- `GET /.well-known/integrations.json` — integrations.sh v3 surface declaration.
+- `GET /.well-known/agent-skills/index.json` — Agent Skills discovery index.
+- `GET /.well-known/agent-skills/just-html/SKILL.md` — discoverable skill artifact.
 - `GET /.well-known/oauth-protected-resource`, `GET /.well-known/oauth-authorization-server`.
 
 Auth:

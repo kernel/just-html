@@ -10,20 +10,11 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { SKILL_NAME, SKILL_DESCRIPTION, LLMS_BODY } from "../lib/skill-content";
+import { SKILL_MARKDOWN } from "../lib/skill-content";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const outPath = join(here, "..", "skills", "just-html", "SKILL.md");
 
-// YAML frontmatter: keep the description on one folded line (no colons/newlines
-// to escape — it's prose). The body is the verbatim llms.txt content.
-const frontmatter = `---
-name: ${SKILL_NAME}
-description: ${SKILL_DESCRIPTION}
----
-
-`;
-
 mkdirSync(dirname(outPath), { recursive: true });
-writeFileSync(outPath, frontmatter + LLMS_BODY);
-console.log(`wrote ${outPath} (${frontmatter.length + LLMS_BODY.length} bytes)`);
+writeFileSync(outPath, SKILL_MARKDOWN);
+console.log(`wrote ${outPath} (${SKILL_MARKDOWN.length} bytes)`);

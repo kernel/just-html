@@ -4,9 +4,10 @@
 // two jobs:
 //
 //   A. DRIFT GUARD (the committed artifact is in sync). Re-run the generator and
-//      assert the committed artifacts the route + tooling read —
-//      lib/openapi/generated-spec.ts (served by GET /api/spec.yaml) and
-//      lib/openapi/generated.yaml (validated by @redocly/cli) — match it
+//      assert the committed artifacts the routes + tooling read —
+//      lib/openapi/generated-spec.ts (served by GET /api/spec.yaml),
+//      lib/openapi/generated.yaml (validated by @redocly/cli), and
+//      lib/openapi/generated.json (served by GET /openapi.json) — match it
 //      byte-for-byte. This is the same drift guard gen-skill's SKILL.md uses: if
 //      the schemas changed but `npm run gen:spec` wasn't re-run, this fails. The
 //      spec-sync GitHub Action regenerates + commits so it can't stay drifted.
@@ -26,11 +27,17 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
-import { generateSpecYaml, generatedSpecModule } from "./gen-spec";
+import {
+  generateSpec,
+  generateSpecJson,
+  generateSpecYaml,
+  generatedSpecModule,
+} from "./gen-spec";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const APP_DIR = join(ROOT, "app");
 const YAML_ARTIFACT = join(ROOT, "lib/openapi/generated.yaml");
+const JSON_ARTIFACT = join(ROOT, "lib/openapi/generated.json");
 const TS_ARTIFACT = join(ROOT, "lib/openapi/generated-spec.ts");
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
@@ -55,11 +62,11 @@ function fmtSet(s: Iterable<string>): string {
 // --- A. drift guard ------------------------------------------------------
 //
 // Re-generate from the registry and compare to the committed artifacts. The
-// served bytes (generated-spec.ts) and the redocly-validated file (generated.yaml)
-// must both equal a fresh generation, so the served spec can never drift from the
+// served YAML module, redocly-validated YAML file, and served JSON file must
+// equal a fresh generation, so neither spec representation can drift from the
 // Zod schemas without spec:check (and CI) catching it.
 
-function checkArtifactsInSync(freshYaml: string): string[] {
+function checkArtifactsInSync(freshYaml: string, freshJson: string): string[] {
   const problems: string[] = [];
   let committedYaml: string;
   try {
@@ -72,6 +79,21 @@ function checkArtifactsInSync(freshYaml: string): string[] {
   if (committedYaml !== freshYaml) {
     problems.push(
       `${relative(ROOT, YAML_ARTIFACT)} is stale (committed bytes != fresh generation). ` +
+        "Run `npm run gen:spec` and commit the result."
+    );
+  }
+  let committedJson: string;
+  try {
+    committedJson = readFileSync(JSON_ARTIFACT, "utf8");
+  } catch {
+    return [
+      ...problems,
+      `${relative(ROOT, JSON_ARTIFACT)} is missing — run \`npm run gen:spec\`.`,
+    ];
+  }
+  if (committedJson !== freshJson) {
+    problems.push(
+      `${relative(ROOT, JSON_ARTIFACT)} is stale (committed bytes != fresh generation). ` +
         "Run `npm run gen:spec` and commit the result."
     );
   }
@@ -206,14 +228,17 @@ function main() {
 
   // A. The committed artifacts must match a fresh generation from the registry.
   let freshYaml: string;
+  let freshJson: string;
   try {
-    freshYaml = generateSpecYaml();
+    const freshSpec = generateSpec();
+    freshYaml = generateSpecYaml(freshSpec);
+    freshJson = generateSpecJson(freshSpec);
   } catch (e) {
     console.error("spec:check FAILED — could not generate the spec from the registry:\n");
     console.error((e as Error).stack ?? (e as Error).message);
     process.exit(1);
   }
-  problems.push(...checkArtifactsInSync(freshYaml));
+  problems.push(...checkArtifactsInSync(freshYaml, freshJson));
 
   // B. Cross-surface coverage. Drive this off the FRESH spec (the source of
   // truth); if A passed, the committed/served bytes are identical to it anyway.
