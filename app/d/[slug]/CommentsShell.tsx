@@ -803,7 +803,7 @@ export default function CommentsShell(props: Props) {
             ref={iframeRef}
             title={title}
             src={rawSrc}
-            sandbox="allow-scripts"
+            sandbox="allow-scripts allow-downloads"
             referrerPolicy="no-referrer"
             style={{ border: "none", width: "100%", height: "100%", display: "block", background: "var(--jh-stage-bg, #fff)" }}
           />
