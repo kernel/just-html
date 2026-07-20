@@ -596,6 +596,10 @@ export type SharedDocRow = DocRow & {
   comment_count: number;
 };
 
+export type BookmarkDocRow = DocRow & {
+  bookmarked_at: string;
+};
+
 /**
  * List docs shared with `email` (an email grant for that exact address OR a
  * domain grant for its email-domain), EXCLUDING docs the email owns. One query.
@@ -638,6 +642,43 @@ export async function listSharedDocs(
      ORDER BY d.updated_at DESC
      LIMIT $4`,
     [lower, emailDomain, excludeOwnerId, limit]
+  );
+  return rows;
+}
+
+/** True if a bookmark already exists for this email + doc. */
+export async function bookmarkExists(bookmarkerEmail: string, docId: number): Promise<boolean> {
+  const { rows } = await query<{ n: number }>(
+    `SELECT count(*) AS n FROM bookmarks
+     WHERE bookmarker_email = $1 AND doc_id = $2`,
+    [bookmarkerEmail.toLowerCase(), docId]
+  );
+  return (rows[0]?.n ?? 0) > 0;
+}
+
+/** Idempotently save a bookmark for this email + doc. */
+export async function saveBookmark(bookmarkerEmail: string, docId: number): Promise<void> {
+  await query(
+    `INSERT INTO bookmarks (bookmarker_email, doc_id)
+     VALUES ($1, $2)
+     ON CONFLICT (bookmarker_email, doc_id) DO NOTHING`,
+    [bookmarkerEmail.toLowerCase(), docId]
+  );
+}
+
+/** List a user's bookmarks, newest first, with the live document row. */
+export async function listBookmarks(
+  bookmarkerEmail: string,
+  limit: number
+): Promise<BookmarkDocRow[]> {
+  const { rows } = await query<BookmarkDocRow>(
+    `SELECT d.*, b.created_at AS bookmarked_at
+     FROM bookmarks b
+     JOIN documents d ON d.id = b.doc_id
+     WHERE b.bookmarker_email = $1
+     ORDER BY b.created_at DESC, b.id DESC
+     LIMIT $2`,
+    [bookmarkerEmail.toLowerCase(), limit]
   );
   return rows;
 }

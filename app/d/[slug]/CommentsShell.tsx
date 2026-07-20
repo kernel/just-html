@@ -79,6 +79,8 @@ type Props = {
   canComment: boolean;
   canReact: boolean;
   signedIn: boolean;
+  bookmarked: boolean;
+  bookmarkNext: string;
   me: string | null;
   initialThreads: Thread[];
   initialDocReactions: Reaction[];
@@ -134,7 +136,19 @@ function legacyCopy(text: string): boolean {
 }
 
 export default function CommentsShell(props: Props) {
-  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn, me, initialSections } = props;
+  const {
+    slug,
+    title,
+    rawSrc,
+    viewtoken,
+    canComment,
+    canReact,
+    signedIn,
+    bookmarked,
+    bookmarkNext,
+    me,
+    initialSections,
+  } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [threads, setThreads] = useState<Thread[]>(props.initialThreads);
@@ -782,6 +796,21 @@ export default function CommentsShell(props: Props) {
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
           <ThemeToggle mode={mode} onChange={chooseMode} />
+          {signedIn ? (
+            <form method="POST" action="/bookmarks" style={{ display: "inline-flex", margin: 0 }}>
+              <input type="hidden" name="slug" value={slug} />
+              <input type="hidden" name="next" value={bookmarkNext} />
+              {viewtoken ? <input type="hidden" name="viewtoken" value={viewtoken} /> : null}
+              <button
+                type="submit"
+                aria-pressed={bookmarked}
+                title={bookmarked ? "Bookmarked" : "Bookmark this doc"}
+                style={commentBtnStyle(bookmarked)}
+              >
+                {bookmarked ? "bookmarked" : "bookmark"}
+              </button>
+            </form>
+          ) : null}
           <button
             type="button"
             className="jh-commentbtn"

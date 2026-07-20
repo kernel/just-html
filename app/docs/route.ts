@@ -202,7 +202,9 @@ export async function GET(req: Request): Promise<Response> {
   // (birthday.md /docs decision: not needed).
   const sections: string[] = [];
   sections.push(VARIANT_C_STYLE);
-  sections.push(`<div class="body"><pre>Signed in as <code>${esc(email)}</code>.</pre></div>`);
+  sections.push(
+    `<div class="body"><pre>Signed in as <code>${esc(email)}</code>. See <a href="/bookmarks">bookmarks</a>.</pre></div>`
+  );
   if (hasAccount) {
     sections.push(ownedSection(owned));
   } else {
