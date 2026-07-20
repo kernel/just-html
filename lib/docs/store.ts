@@ -598,6 +598,10 @@ export type SharedDocRow = DocRow & {
 
 export type BookmarkDocRow = DocRow & {
   bookmarked_at: string;
+  // The view token the doc was bookmarked through (NULL for owner/grant/public
+  // access). Aliased off `view_token` so it does not clobber the doc's own
+  // current `view_token` from `d.*`; access is re-checked against this.
+  bookmark_token: string | null;
 };
 
 /**
@@ -656,23 +660,43 @@ export async function bookmarkExists(bookmarkerEmail: string, docId: number): Pr
   return (rows[0]?.n ?? 0) > 0;
 }
 
-/** Idempotently save a bookmark for this email + doc. */
-export async function saveBookmark(bookmarkerEmail: string, docId: number): Promise<void> {
+/**
+ * Idempotently save a bookmark for this email + doc, recording the view token
+ * it was reached through (NULL for owner/grant/public access). Re-saving keeps
+ * an existing token when the new save carries none, so a later grant-based save
+ * does not strip a token the bookmark still needs.
+ */
+export async function saveBookmark(
+  bookmarkerEmail: string,
+  docId: number,
+  viewToken: string | null
+): Promise<void> {
   await query(
-    `INSERT INTO bookmarks (bookmarker_email, doc_id)
-     VALUES ($1, $2)
-     ON CONFLICT (bookmarker_email, doc_id) DO NOTHING`,
-    [bookmarkerEmail.toLowerCase(), docId]
+    `INSERT INTO bookmarks (bookmarker_email, doc_id, view_token)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (bookmarker_email, doc_id)
+     DO UPDATE SET view_token = COALESCE(EXCLUDED.view_token, bookmarks.view_token)`,
+    [bookmarkerEmail.toLowerCase(), docId, viewToken]
   );
 }
 
-/** List a user's bookmarks, newest first, with the live document row. */
+/** Remove a bookmark. Keyed by doc id so a revoked/deleted doc can still be
+ *  dropped from the list (its slug is no longer resolvable). */
+export async function removeBookmark(bookmarkerEmail: string, docId: number): Promise<void> {
+  await query(`DELETE FROM bookmarks WHERE bookmarker_email = $1 AND doc_id = $2`, [
+    bookmarkerEmail.toLowerCase(),
+    docId,
+  ]);
+}
+
+/** List a user's bookmarks, newest first, with the live document row and the
+ *  token the doc was bookmarked through. */
 export async function listBookmarks(
   bookmarkerEmail: string,
   limit: number
 ): Promise<BookmarkDocRow[]> {
   const { rows } = await query<BookmarkDocRow>(
-    `SELECT d.*, b.created_at AS bookmarked_at
+    `SELECT d.*, b.created_at AS bookmarked_at, b.view_token AS bookmark_token
      FROM bookmarks b
      JOIN documents d ON d.id = b.doc_id
      WHERE b.bookmarker_email = $1

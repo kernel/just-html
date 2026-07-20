@@ -127,6 +127,7 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       canComment={canComment}
       canReact={canReact}
       signedIn={session !== null}
+      docId={doc.id}
       bookmarked={bookmarked}
       bookmarkNext={bookmarkNext}
       me={principal?.email ?? session?.email ?? null}

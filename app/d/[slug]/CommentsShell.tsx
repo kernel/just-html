@@ -79,6 +79,7 @@ type Props = {
   canComment: boolean;
   canReact: boolean;
   signedIn: boolean;
+  docId: number;
   bookmarked: boolean;
   bookmarkNext: string;
   me: string | null;
@@ -144,6 +145,7 @@ export default function CommentsShell(props: Props) {
     canComment,
     canReact,
     signedIn,
+    docId,
     bookmarked,
     bookmarkNext,
     me,
@@ -798,13 +800,22 @@ export default function CommentsShell(props: Props) {
           <ThemeToggle mode={mode} onChange={chooseMode} />
           {signedIn ? (
             <form method="POST" action="/bookmarks" style={{ display: "inline-flex", margin: 0 }}>
-              <input type="hidden" name="slug" value={slug} />
               <input type="hidden" name="next" value={bookmarkNext} />
-              {viewtoken ? <input type="hidden" name="viewtoken" value={viewtoken} /> : null}
+              {bookmarked ? (
+                <>
+                  <input type="hidden" name="action" value="remove" />
+                  <input type="hidden" name="doc_id" value={String(docId)} />
+                </>
+              ) : (
+                <>
+                  <input type="hidden" name="slug" value={slug} />
+                  {viewtoken ? <input type="hidden" name="viewtoken" value={viewtoken} /> : null}
+                </>
+              )}
               <button
                 type="submit"
                 aria-pressed={bookmarked}
-                title={bookmarked ? "Bookmarked" : "Bookmark this doc"}
+                title={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
                 style={commentBtnStyle(bookmarked)}
               >
                 {bookmarked ? "bookmarked" : "bookmark"}
