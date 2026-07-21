@@ -214,6 +214,7 @@ grantees who signed in (no token needed).
   https://justhtml.sh/d/:slug/raw             zero-chrome HTML (CSP sandbox)
   https://justhtml.sh/d/:slug?viewtoken=...   private docs, via the view token
   https://justhtml.sh/docs                    signed-in listing: owned + shared docs
+  https://justhtml.sh/bookmarks               your bookmarked docs (owner + shared)
 
 A private doc authorizes a viewer in order: owner session, then a session whose
 email matches an email/domain grant, then a matching ?viewtoken=, then public.
