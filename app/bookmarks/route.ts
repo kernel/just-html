@@ -2,6 +2,7 @@ import { getSession } from "@/lib/auth/session";
 import type { Session } from "@/lib/auth/session";
 import { sanitizeNext } from "@/lib/auth/url";
 import { canViewSession } from "@/lib/docs/access";
+import { safeEqualStr } from "@/lib/auth/tokens";
 import { accessRoleLabel, resolveAccess } from "@/lib/docs/grants";
 import { htmlResponse, manPage, esc, redirect } from "@/lib/page";
 import { query } from "@/lib/db";
@@ -189,6 +190,12 @@ export async function POST(req: Request): Promise<Response> {
     return wantsJson ? status(403) : redirect(next);
   }
 
-  await saveBookmark(session.email, doc.id, viewtoken, doc.title);
+  // Persist the token only when it actually matches this doc. Access may have
+  // come from ownership, a grant, or the doc being public, in which case the
+  // submitted token is irrelevant — storing it would gate the later re-check on
+  // a token that was never the basis for access (and could overwrite a good
+  // one on upsert).
+  const tokenToStore = viewtoken && safeEqualStr(viewtoken, doc.view_token) ? viewtoken : null;
+  await saveBookmark(session.email, doc.id, tokenToStore, doc.title);
   return done();
 }
