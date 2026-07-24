@@ -1,4 +1,4 @@
-import { findBySlug } from "@/lib/docs/store";
+import { bookmarkExists, findBySlug } from "@/lib/docs/store";
 import { canViewSession, canView } from "@/lib/docs/access";
 import { mintViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
@@ -96,6 +96,7 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   const docReactions = threadData.doc_reactions ?? [];
   const anchoredReactions = threadData.anchored_reactions ?? [];
   const title = doc.title || doc.slug;
+  const bookmarked = session ? await bookmarkExists(session.email, doc.id) : false;
 
   // Section deeplinks: the ordered heading list + stable fragment ids, derived
   // from the stored HTML. The shell forwards it to the overlay, which assigns the
@@ -123,6 +124,8 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       canComment={canComment}
       canReact={canReact}
       signedIn={session !== null}
+      docId={doc.id}
+      bookmarked={bookmarked}
       me={principal?.email ?? session?.email ?? null}
       initialThreads={threadData.threads}
       initialDocReactions={docReactions}
@@ -133,4 +136,3 @@ export default async function ViewerPage({ params, searchParams }: Props) {
     />
   );
 }
-

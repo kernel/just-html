@@ -79,6 +79,8 @@ type Props = {
   canComment: boolean;
   canReact: boolean;
   signedIn: boolean;
+  docId: number;
+  bookmarked: boolean;
   me: string | null;
   initialThreads: Thread[];
   initialDocReactions: Reaction[];
@@ -134,7 +136,20 @@ function legacyCopy(text: string): boolean {
 }
 
 export default function CommentsShell(props: Props) {
-  const { slug, title, rawSrc, viewtoken, canComment, canReact, signedIn, me, initialSections } = props;
+  const {
+    slug,
+    title,
+    rawSrc,
+    viewtoken,
+    canComment,
+    canReact,
+    signedIn,
+    docId,
+    me,
+    initialSections,
+  } = props;
+  const [bookmarked, setBookmarked] = useState(props.bookmarked);
+  const bookmarkPending = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const [threads, setThreads] = useState<Thread[]>(props.initialThreads);
@@ -522,6 +537,41 @@ export default function CommentsShell(props: Props) {
     [apiBase, tokenQuery, reload]
   );
 
+  // Bookmark toggle. OPTIMISTIC like reactions: flip the icon immediately, POST
+  // to /bookmarks in the background (form-encoded so it reuses the same handler
+  // as the zero-JS forms; Accept: application/json makes it answer 204 instead
+  // of redirecting), and roll back if the request fails. A pending guard drops
+  // clicks while one is in flight so rapid toggling can't desync.
+  const toggleBookmark = useCallback(async () => {
+    if (bookmarkPending.current) return;
+    bookmarkPending.current = true;
+    const next = !bookmarked;
+    setBookmarked(next);
+
+    const body = new URLSearchParams();
+    if (next) {
+      body.set("slug", slug);
+      if (viewtoken) body.set("viewtoken", viewtoken);
+    } else {
+      body.set("action", "remove");
+      body.set("doc_id", String(docId));
+    }
+
+    try {
+      const r = await fetch("/bookmarks", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+        body,
+      });
+      if (!r.ok) setBookmarked(!next);
+    } catch {
+      setBookmarked(!next);
+    } finally {
+      bookmarkPending.current = false;
+    }
+  }, [bookmarked, slug, viewtoken, docId]);
+
   // Anchored reaction (on a SPAN). OPTIMISTIC (birthday.md HARD REQUIREMENT): the
   // local state mutates first so the chip + highlight paint immediately via the
   // jh:reactions postMessage — no reload, no refetch wait. The POST runs in the
@@ -782,6 +832,31 @@ export default function CommentsShell(props: Props) {
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
           <ThemeToggle mode={mode} onChange={chooseMode} />
+          {signedIn ? (
+            <button
+              type="button"
+              onClick={toggleBookmark}
+              aria-pressed={bookmarked}
+              aria-label={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
+              title={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
+              style={{ ...commentBtnStyle(bookmarked), lineHeight: 1 }}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                width="13"
+                height="13"
+                fill={bookmarked ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                style={{ display: "block" }}
+              >
+                <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+              </svg>
+            </button>
+          ) : null}
           <button
             type="button"
             className="jh-commentbtn"

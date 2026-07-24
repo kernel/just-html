@@ -596,6 +596,18 @@ export type SharedDocRow = DocRow & {
   comment_count: number;
 };
 
+export type BookmarkDocRow = DocRow & {
+  bookmarked_at: string;
+  // The view token the doc was bookmarked through (NULL for owner/grant/public
+  // access). Aliased off `view_token` so it does not clobber the doc's own
+  // current `view_token` from `d.*`; access is re-checked against this.
+  bookmark_token: string | null;
+  // The doc's title captured at bookmark time — shown for a revoked doc (the
+  // viewer can no longer see the doc's current `title`). Aliased so it does not
+  // clobber `d.title`.
+  bookmark_title: string | null;
+};
+
 /**
  * List docs shared with `email` (an email grant for that exact address OR a
  * domain grant for its email-domain), EXCLUDING docs the email owns. One query.
@@ -638,6 +650,67 @@ export async function listSharedDocs(
      ORDER BY d.updated_at DESC
      LIMIT $4`,
     [lower, emailDomain, excludeOwnerId, limit]
+  );
+  return rows;
+}
+
+/** True if a bookmark already exists for this email + doc. */
+export async function bookmarkExists(bookmarkerEmail: string, docId: number): Promise<boolean> {
+  const { rows } = await query<{ n: number }>(
+    `SELECT count(*) AS n FROM bookmarks
+     WHERE bookmarker_email = $1 AND doc_id = $2`,
+    [bookmarkerEmail.toLowerCase(), docId]
+  );
+  return (rows[0]?.n ?? 0) > 0;
+}
+
+/**
+ * Idempotently save a bookmark for this email + doc, recording the view token
+ * it was reached through (NULL for owner/grant/public access). Re-saving keeps
+ * an existing token when the new save carries none, so a later grant-based save
+ * does not strip a token the bookmark still needs.
+ */
+export async function saveBookmark(
+  bookmarkerEmail: string,
+  docId: number,
+  viewToken: string | null,
+  title: string | null
+): Promise<void> {
+  await query(
+    `INSERT INTO bookmarks (bookmarker_email, doc_id, view_token, doc_title)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (bookmarker_email, doc_id)
+     DO UPDATE SET
+       view_token = COALESCE(EXCLUDED.view_token, bookmarks.view_token),
+       doc_title = EXCLUDED.doc_title`,
+    [bookmarkerEmail.toLowerCase(), docId, viewToken, title]
+  );
+}
+
+/** Remove a bookmark. Keyed by doc id so a revoked/deleted doc can still be
+ *  dropped from the list (its slug is no longer resolvable). */
+export async function removeBookmark(bookmarkerEmail: string, docId: number): Promise<void> {
+  await query(`DELETE FROM bookmarks WHERE bookmarker_email = $1 AND doc_id = $2`, [
+    bookmarkerEmail.toLowerCase(),
+    docId,
+  ]);
+}
+
+/** List a user's bookmarks, newest first, with the live document row and the
+ *  token the doc was bookmarked through. */
+export async function listBookmarks(
+  bookmarkerEmail: string,
+  limit: number
+): Promise<BookmarkDocRow[]> {
+  const { rows } = await query<BookmarkDocRow>(
+    `SELECT d.*, b.created_at AS bookmarked_at, b.view_token AS bookmark_token,
+            b.doc_title AS bookmark_title
+     FROM bookmarks b
+     JOIN documents d ON d.id = b.doc_id
+     WHERE b.bookmarker_email = $1
+     ORDER BY b.created_at DESC, b.id DESC
+     LIMIT $2`,
+    [bookmarkerEmail.toLowerCase(), limit]
   );
   return rows;
 }
