@@ -23,6 +23,7 @@ const LIST_LIMIT = 500;
 const ROW_STYLE = `
 <style>
   .row { display: flex; align-items: baseline; gap: 0.75rem; padding: 0.1rem 0; }
+  .row pre { min-width: 0; }
   .row a.title { font-weight: 700; }
   .row .tail { color: #888; }
   .row.revoked .tail { color: #b00020; }

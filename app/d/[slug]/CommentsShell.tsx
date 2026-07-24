@@ -815,10 +815,11 @@ export default function CommentsShell(props: Props) {
               <button
                 type="submit"
                 aria-pressed={bookmarked}
+                aria-label={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
                 title={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
-                style={commentBtnStyle(bookmarked)}
+                style={{ ...commentBtnStyle(bookmarked), fontSize: 14, lineHeight: 1 }}
               >
-                {bookmarked ? "bookmarked" : "bookmark"}
+                {bookmarked ? "★" : "☆"}
               </button>
             </form>
           ) : null}
