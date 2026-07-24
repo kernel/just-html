@@ -817,9 +817,22 @@ export default function CommentsShell(props: Props) {
                 aria-pressed={bookmarked}
                 aria-label={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
                 title={bookmarked ? "Remove bookmark" : "Bookmark this doc"}
-                style={{ ...commentBtnStyle(bookmarked), fontSize: 14, lineHeight: 1 }}
+                style={{ ...commentBtnStyle(bookmarked), lineHeight: 1 }}
               >
-                {bookmarked ? "★" : "☆"}
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill={bookmarked ? "currentColor" : "none"}
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  style={{ display: "block" }}
+                >
+                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
+                </svg>
               </button>
             </form>
           ) : null}
