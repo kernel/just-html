@@ -20,13 +20,76 @@ cp .env.example .env   # then fill in the values (see below)
 npm run dev            # http://localhost:3000
 ```
 
+### Local development with local Postgres
+
+You don't need PlanetScale to develop locally — any Postgres 16 works. The app,
+the migration runner, and the seed script all read one connection string
+(`PLANETSCALE_URL`), so pointing that at a local server is the only change.
+
+1. Start a throwaway Postgres in Docker:
+
+```sh
+docker run -d --name jh-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
+```
+
+2. Point `.env` at it (this replaces the PlanetScale value for local dev):
+
+```sh
+PLANETSCALE_URL=postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable
+```
+
+3. Install deps and run the migrations against the local DB:
+
+```sh
+npm install
+npm run migrate          # apply pending migrations (reads .env)
+npm run migrate:status   # show applied / pending
+```
+
+4. Seed a couple of users + docs (edit `scripts/dev-seed.ts` to taste):
+
+```sh
+npx tsx --env-file=.env scripts/dev-seed.ts
+```
+
+The seed script prints session tokens for `alice` and `bob`.
+
+5. Run the server:
+
+```sh
+npm run dev            # http://localhost:3000
+```
+
+6. Log in as a seeded user without the email flow: open http://localhost:3000,
+   then in the browser devtools console set the session cookie to a token the
+   seed script printed:
+
+```js
+document.cookie = "jh_sess=<bob_token>; path=/";
+```
+
+Reload the page and you're signed in as that user. To reset everything, just
+`docker rm -f jh-pg` and start over from step 1.
+
+#### Poking at the local DB directly
+
+The container ships with `psql`, so you can run ad-hoc SQL against the local DB
+without any client installed on your host — handy for tweaking state while
+testing (e.g. rotating a doc's view token to check the share flow):
+
+```sh
+docker exec jh-pg psql -U postgres -c \
+  "UPDATE documents SET view_token = 'rotated999' WHERE slug = '<private-slug>';"
+```
+
+
 ## Environment variables
 
 All live in `.env` (never committed). See `.env.example` for the full list.
 
 | Var                  | Purpose                                                  |
 |----------------------|----------------------------------------------------------|
-| `PLANETSCALE_URL`    | Postgres connection string (psql-compatible wire)        |
+| `PLANETSCALE_URL`    | Postgres connection string (psql-compatible wire). For local dev, point this at a local Postgres, e.g. `postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable` |
 | `RESEND_API_KEY`     | Resend key for login magic-link email (`notify.justhtml.sh`) |
 | `VERCEL_TOKEN` / `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` | Deploy pipeline   |
 
@@ -35,7 +98,9 @@ New env vars must be set in **both** `.env` and Vercel production env.
 ## Migrations
 
 SQL migrations live in `migrations/` (numbered, run in order). They run directly
-against the production PlanetScale database — there is no separate dev DB.
+against whatever `PLANETSCALE_URL` points at — the production PlanetScale
+database, or a local Postgres for development (see [Local development with local
+Postgres](#local-development-with-local-postgres)).
 
 ```sh
 npm run migrate          # apply pending migrations (reads .env)
