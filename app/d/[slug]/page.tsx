@@ -96,9 +96,6 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   const docReactions = threadData.doc_reactions ?? [];
   const anchoredReactions = threadData.anchored_reactions ?? [];
   const title = doc.title || doc.slug;
-  const bookmarkNext = viewtoken
-    ? `/d/${encodeURIComponent(slug)}?viewtoken=${encodeURIComponent(viewtoken)}`
-    : `/d/${encodeURIComponent(slug)}`;
   const bookmarked = session ? await bookmarkExists(session.email, doc.id) : false;
 
   // Section deeplinks: the ordered heading list + stable fragment ids, derived
@@ -129,7 +126,6 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       signedIn={session !== null}
       docId={doc.id}
       bookmarked={bookmarked}
-      bookmarkNext={bookmarkNext}
       me={principal?.email ?? session?.email ?? null}
       initialThreads={threadData.threads}
       initialDocReactions={docReactions}

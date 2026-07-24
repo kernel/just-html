@@ -153,9 +153,16 @@ export async function GET(req: Request): Promise<Response> {
   );
 }
 
+// Content-negotiated: the doc viewer's bookmark button posts via fetch with
+// `Accept: application/json` and gets a bare status back (it updates the icon
+// optimistically, no navigation). The zero-JS forms on the /bookmarks list
+// (per-row remove) omit that header and get the usual 303 back to `next`.
 export async function POST(req: Request): Promise<Response> {
+  const wantsJson = (req.headers.get("accept") ?? "").includes("application/json");
+  const status = (code: number) => new Response(null, { status: code });
+
   const session = await getSession(req);
-  if (!session) return redirect("/login?next=%2Fbookmarks");
+  if (!session) return wantsJson ? status(401) : redirect("/login?next=%2Fbookmarks");
 
   const form = await req.formData();
   const action = String(form.get("action") ?? "add").trim();
@@ -163,6 +170,7 @@ export async function POST(req: Request): Promise<Response> {
   const next = sanitizeNext(
     String(form.get("next") ?? (slug ? `/d/${encodeURIComponent(slug)}` : "/bookmarks"))
   );
+  const done = () => (wantsJson ? status(204) : redirect(next));
 
   // Remove is keyed by doc id so a revoked/deleted doc (whose slug no longer
   // resolves) can still be dropped. No access check: you can only ever remove
@@ -170,17 +178,17 @@ export async function POST(req: Request): Promise<Response> {
   if (action === "remove") {
     const docId = Number(form.get("doc_id"));
     if (Number.isInteger(docId)) await removeBookmark(session.email, docId);
-    return redirect(next);
+    return done();
   }
 
   const viewtoken = String(form.get("viewtoken") ?? "").trim() || null;
-  if (!slug) return redirect("/bookmarks");
+  if (!slug) return wantsJson ? status(400) : redirect("/bookmarks");
 
   const doc = await findBySlug(slug);
   if (!doc || !(await canViewSession(doc, session, viewtoken))) {
-    return redirect(next);
+    return wantsJson ? status(403) : redirect(next);
   }
 
   await saveBookmark(session.email, doc.id, viewtoken, doc.title);
-  return redirect(next);
+  return done();
 }
