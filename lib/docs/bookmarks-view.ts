@@ -51,3 +51,42 @@ export function bookmarkRow(m: RowModel): string {
   const vis = m.isPublic ? "public" : "private";
   return `<div class="row"><pre><a class="title" href="${esc(href)}">${esc(label)}</a>  <span class="tail">${esc(m.access)} ${vis} · ${esc(fmtDate(m.bookmarkedAt))}</span></pre>${removeForm(m.docId)}</div>`;
 }
+
+// Inputs for re-resolving a bookmarked doc's access at read time, reduced to
+// primitives so the mapping is pure (no DB, no session). The API list handler
+// (GET /api/v1/bookmarks) derives these from resolveAccess + the doc row.
+export type BookmarkAccessInput = {
+  // The doc has been (soft-)deleted.
+  deleted: boolean;
+  // The caller owns the doc.
+  isOwner: boolean;
+  // The caller's resolved identity grant role, or null when there is no grant.
+  grantRole: "editor" | "commenter" | "viewer" | null;
+  // The doc is public.
+  isPublic: boolean;
+  // The view token the doc was bookmarked through still matches the doc.
+  tokenValid: boolean;
+};
+
+export type BookmarkAccessView = {
+  // owner | editor | commenter | viewer | public | link | revoked.
+  access: string;
+  revoked: boolean;
+  // The row should link through the stored view token (access === "link").
+  usesToken: boolean;
+};
+
+/**
+ * Re-resolve a bookmarked doc's access, mirroring the web /bookmarks page:
+ * a deleted doc or one the caller can no longer reach is "revoked"; otherwise
+ * the live identity role, or "public"/"link" when reachable only through the
+ * doc being public / the stored view token. Order matches the access ladder.
+ */
+export function resolveBookmarkView(i: BookmarkAccessInput): BookmarkAccessView {
+  if (i.deleted) return { access: "revoked", revoked: true, usesToken: false };
+  if (i.isOwner) return { access: "owner", revoked: false, usesToken: false };
+  if (i.grantRole) return { access: i.grantRole, revoked: false, usesToken: false };
+  if (i.isPublic) return { access: "public", revoked: false, usesToken: false };
+  if (i.tokenValid) return { access: "link", revoked: false, usesToken: true };
+  return { access: "revoked", revoked: true, usesToken: false };
+}
