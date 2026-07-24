@@ -7,6 +7,8 @@
 import { registry, z } from "@/lib/openapi/registry";
 import {
   ApiError,
+  BookmarkListResponse,
+  BookmarkToggledResponse,
   CommentCreatedResponse,
   CommentDeletedResponse,
   CommentUpdatedResponse,
@@ -594,5 +596,91 @@ registry.registerPath({
       description: "No such document (also returned for inaccessible docs; no existence oracle)",
       content: jsonError,
     },
+  },
+});
+
+// GET /api/v1/bookmarks — list the caller's bookmarked docs (owned/shared/all)
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/bookmarks",
+  tags: ["docs"],
+  summary: "List bookmarked documents (owned, shared, or both)",
+  description:
+    "Lists the documents the caller has bookmarked. Access is re-resolved per read, so each item's access is the LIVE authorization (owner|editor|commenter|viewer|public|link|revoked), never what it was when bookmarked. A revoked doc still lists (with the title captured at bookmark time and no url) so it can be dropped with DELETE /api/v1/docs/{slug}/bookmark; delete it to remove it. The web equivalent is https://justhtml.sh/bookmarks.",
+  operationId: "listBookmarks",
+  security,
+  request: {
+    query: z.object({
+      scope: z
+        .enum(["owned", "shared", "all"])
+        .default("all")
+        .openapi({
+          param: { name: "scope", in: "query" },
+          description:
+            "all (default): every bookmark. owned: bookmarks of docs the caller owns. shared: bookmarks of docs owned by someone else.",
+        }),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(100)
+        .openapi({ param: { name: "limit", in: "query" } }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "The caller's bookmarks",
+      content: { "application/json": { schema: BookmarkListResponse } },
+    },
+    400: { description: "Invalid request parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// PUT /api/v1/docs/{slug}/bookmark — bookmark a doc (idempotent)
+registry.registerPath({
+  method: "put",
+  path: "/api/v1/docs/{slug}/bookmark",
+  tags: ["docs"],
+  summary: "Bookmark a document (idempotent)",
+  description:
+    "Saves the doc to the caller's bookmarks (see GET /api/v1/bookmarks and https://justhtml.sh/bookmarks). Idempotent. Requires view access (owner, a grant, public, or a valid ?viewtoken=); an inaccessible doc returns 404 (no existence oracle). A presented ?viewtoken= is stored only when it matches the doc, so the bookmark can stay reachable via the token if a grant is later removed.",
+  operationId: "addBookmark",
+  security,
+  request: { params: z.object({ slug: slugParam }), query: viewtokenQuery },
+  responses: {
+    200: {
+      description: "Bookmarked",
+      content: { "application/json": { schema: BookmarkToggledResponse } },
+    },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// DELETE /api/v1/docs/{slug}/bookmark — remove a bookmark (idempotent)
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/docs/{slug}/bookmark",
+  tags: ["docs"],
+  summary: "Remove a bookmark (idempotent)",
+  description:
+    "Removes the caller's bookmark for this doc. Idempotent, and works even for a revoked/deleted doc (you can always drop your own bookmark). Returns { slug, bookmarked: false }.",
+  operationId: "removeBookmark",
+  security,
+  request: { params: z.object({ slug: slugParam }) },
+  responses: {
+    200: {
+      description: "Bookmark removed (or was already absent)",
+      content: { "application/json": { schema: BookmarkToggledResponse } },
+    },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
   },
 });

@@ -1,9 +1,6 @@
 import { getSession } from "@/lib/auth/session";
-import type { Session } from "@/lib/auth/session";
 import { sanitizeNext } from "@/lib/auth/url";
 import { canViewSession } from "@/lib/docs/access";
-import { safeEqualStr } from "@/lib/auth/tokens";
-import { accessRoleLabel, resolveAccess } from "@/lib/docs/grants";
 import { htmlResponse, manPage, esc, redirect } from "@/lib/page";
 import { query } from "@/lib/db";
 import {
@@ -14,6 +11,7 @@ import {
   findBySlug,
 } from "@/lib/docs/store";
 import { bookmarkRow } from "@/lib/docs/bookmarks-view";
+import { resolveBookmarkAccess, bookmarkTokenToStore } from "@/lib/docs/bookmarks";
 
 export const dynamic = "force-dynamic";
 
@@ -37,34 +35,6 @@ const ROW_STYLE = `
 async function accountOwnerId(email: string): Promise<number | null> {
   const { rows } = await query<{ id: number }>(`SELECT id FROM users WHERE email = $1`, [email]);
   return rows[0]?.id ?? null;
-}
-
-/**
- * Re-resolve a shared bookmark's access using the token it was saved through
- * (owner/grant/public need none). Revoked → not linkable. A private doc still
- * reachable only via that token is labeled "link" and keeps the token so its
- * row links back with it appended.
- */
-async function bookmarkAccess(
-  doc: BookmarkDocRow,
-  session: Session,
-  ownerId: number | null
-): Promise<{ access: string; linkable: boolean; token: string | null }> {
-  if (doc.deleted_at) return { access: "revoked", linkable: false, token: null };
-
-  if (!(await canViewSession(doc, session, doc.bookmark_token))) {
-    return { access: "revoked", linkable: false, token: null };
-  }
-
-  const resolved = await resolveAccess(doc, session.email, ownerId ?? -1);
-  if (resolved.kind === "owner") return { access: "owner", linkable: true, token: null };
-  if (resolved.kind === "none") {
-    // No grant: reachable via public, or only through the stored view token.
-    return doc.is_public
-      ? { access: "public", linkable: true, token: null }
-      : { access: "link", linkable: true, token: doc.bookmark_token };
-  }
-  return { access: accessRoleLabel(resolved), linkable: true, token: null };
 }
 
 function emptySection(heading: string, copy: string): string {
@@ -114,7 +84,7 @@ export async function GET(req: Request): Promise<Response> {
 
   const sharedRows: string[] = [];
   for (const doc of shared) {
-    const a = await bookmarkAccess(doc, session, ownerId);
+    const a = await resolveBookmarkAccess(doc, email, ownerId);
     sharedRows.push(
       bookmarkRow({
         docId: doc.id,
@@ -190,12 +160,6 @@ export async function POST(req: Request): Promise<Response> {
     return wantsJson ? status(403) : redirect(next);
   }
 
-  // Persist the token only when it actually matches this doc. Access may have
-  // come from ownership, a grant, or the doc being public, in which case the
-  // submitted token is irrelevant — storing it would gate the later re-check on
-  // a token that was never the basis for access (and could overwrite a good
-  // one on upsert).
-  const tokenToStore = viewtoken && safeEqualStr(viewtoken, doc.view_token) ? viewtoken : null;
-  await saveBookmark(session.email, doc.id, tokenToStore, doc.title);
+  await saveBookmark(session.email, doc.id, bookmarkTokenToStore(doc, viewtoken), doc.title);
   return done();
 }

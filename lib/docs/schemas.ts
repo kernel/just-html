@@ -234,6 +234,56 @@ export const DeleteDocResponse = registry.register(
     .openapi("DeleteDocResponse", { description: "Soft-delete acknowledgement." })
 );
 
+// GET /api/v1/bookmarks item. Access is re-resolved per read, so a bookmark
+// never grants more than the live authorization; a revoked item stays listed
+// (with its bookmark-time title, no url) so it can be dropped explicitly.
+export const BookmarkListItem = registry.register(
+  "BookmarkListItem",
+  z
+    .object({
+      slug,
+      title: z.string().nullable().openapi({
+        description:
+          "The doc's live title while the caller can access it; the title captured at bookmark time once the doc is revoked.",
+      }),
+      access: z
+        .enum(["owner", "editor", "commenter", "viewer", "public", "link", "revoked"])
+        .openapi({
+          description:
+            "The caller's current access: owner, a grant role (editor|commenter|viewer), public, link (reachable only through the stored view token), or revoked (no access path left).",
+        }),
+      revoked: z.boolean().openapi({
+        description:
+          "True when the caller can no longer view the doc (deleted, grant removed, or the stored token rotated). Revoked items carry no url.",
+      }),
+      url: z.string().nullable().openapi({
+        description: "Viewer URL (with ?viewtoken= appended for link access); null when revoked.",
+      }),
+      bookmarked_at: dateTime,
+    })
+    .openapi("BookmarkListItem", {
+      description: "A bookmarked document with the caller's re-resolved access.",
+    })
+);
+
+// GET /api/v1/bookmarks response envelope: { bookmarks: BookmarkListItem[] }.
+export const BookmarkListResponse = registry.register(
+  "BookmarkListResponse",
+  z
+    .object({ bookmarks: z.array(BookmarkListItem) })
+    .openapi("BookmarkListResponse", { description: "The caller's bookmarked documents." })
+);
+
+// PUT/DELETE /api/v1/docs/{slug}/bookmark response: { slug, bookmarked }.
+export const BookmarkToggledResponse = registry.register(
+  "BookmarkToggledResponse",
+  z
+    .object({ slug: z.string(), bookmarked: z.boolean() })
+    .openapi("BookmarkToggledResponse", {
+      description: "Bookmark add/remove acknowledgement (bookmarked=true after add, false after remove).",
+    })
+);
+
 // Shared error envelope, exactly as apiError emits: { error, message, ...extra }.
 // .passthrough() captures the structured extras (limit_bytes, current_version,
 // edit_index, …) that specific errors add on top of {error, message}.

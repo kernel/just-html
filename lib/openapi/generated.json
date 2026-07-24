@@ -363,6 +363,90 @@
         ],
         "description": "Soft-delete acknowledgement."
       },
+      "BookmarkListItem": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "fierce-tiger-12345"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The doc's live title while the caller can access it; the title captured at bookmark time once the doc is revoked."
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "editor",
+              "commenter",
+              "viewer",
+              "public",
+              "link",
+              "revoked"
+            ],
+            "description": "The caller's current access: owner, a grant role (editor|commenter|viewer), public, link (reachable only through the stored view token), or revoked (no access path left)."
+          },
+          "revoked": {
+            "type": "boolean",
+            "description": "True when the caller can no longer view the doc (deleted, grant removed, or the stored token rotated). Revoked items carry no url."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Viewer URL (with ?viewtoken= appended for link access); null when revoked."
+          },
+          "bookmarked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "slug",
+          "title",
+          "access",
+          "revoked",
+          "url",
+          "bookmarked_at"
+        ],
+        "description": "A bookmarked document with the caller's re-resolved access."
+      },
+      "BookmarkListResponse": {
+        "type": "object",
+        "properties": {
+          "bookmarks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BookmarkListItem"
+            }
+          }
+        },
+        "required": [
+          "bookmarks"
+        ],
+        "description": "The caller's bookmarked documents."
+      },
+      "BookmarkToggledResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "bookmarked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "slug",
+          "bookmarked"
+        ],
+        "description": "Bookmark add/remove acknowledgement (bookmarked=true after add, false after remove)."
+      },
       "ApiError": {
         "type": "object",
         "properties": {
@@ -3053,6 +3137,214 @@
           },
           "404": {
             "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bookmarks": {
+      "get": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "List bookmarked documents (owned, shared, or both)",
+        "description": "Lists the documents the caller has bookmarked. Access is re-resolved per read, so each item's access is the LIVE authorization (owner|editor|commenter|viewer|public|link|revoked), never what it was when bookmarked. A revoked doc still lists (with the title captured at bookmark time and no url) so it can be dropped with DELETE /api/v1/docs/{slug}/bookmark; delete it to remove it. The web equivalent is https://justhtml.sh/bookmarks.",
+        "operationId": "listBookmarks",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "owned",
+                "shared",
+                "all"
+              ],
+              "default": "all",
+              "description": "all (default): every bookmark. owned: bookmarks of docs the caller owns. shared: bookmarks of docs owned by someone else."
+            },
+            "required": false,
+            "description": "all (default): every bookmark. owned: bookmarks of docs the caller owns. shared: bookmarks of docs owned by someone else.",
+            "name": "scope",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 100
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The caller's bookmarks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/bookmark": {
+      "put": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Bookmark a document (idempotent)",
+        "description": "Saves the doc to the caller's bookmarks (see GET /api/v1/bookmarks and https://justhtml.sh/bookmarks). Idempotent. Requires view access (owner, a grant, public, or a valid ?viewtoken=); an inaccessible doc returns 404 (no existence oracle). A presented ?viewtoken= is stored only when it matches the doc, so the bookmark can stay reachable via the token if a grant is later removed.",
+        "operationId": "addBookmark",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys."
+            },
+            "required": false,
+            "description": "Present a doc's view token to comment/read as a token-holder (with identity). Not needed for owner/grantee sessions or API keys.",
+            "name": "viewtoken",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bookmarked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkToggledResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Remove a bookmark (idempotent)",
+        "description": "Removes the caller's bookmark for this doc. Idempotent, and works even for a revoked/deleted doc (you can always drop your own bookmark). Returns { slug, bookmarked: false }.",
+        "operationId": "removeBookmark",
+        "security": [
+          {
+            "bearerApiKey": []
+          }
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bookmark removed (or was already absent)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BookmarkToggledResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
             "content": {
               "application/json": {
                 "schema": {

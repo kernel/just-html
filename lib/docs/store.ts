@@ -696,6 +696,18 @@ export async function removeBookmark(bookmarkerEmail: string, docId: number): Pr
   ]);
 }
 
+/** Remove a bookmark by slug (for the API, which addresses docs by slug). Joins
+ *  through documents WITHOUT the deleted filter so a bookmark on a soft-deleted
+ *  doc can still be dropped. */
+export async function removeBookmarkBySlug(bookmarkerEmail: string, slug: string): Promise<void> {
+  await query(
+    `DELETE FROM bookmarks b
+     USING documents d
+     WHERE b.doc_id = d.id AND b.bookmarker_email = $1 AND d.slug = $2`,
+    [bookmarkerEmail.toLowerCase(), slug]
+  );
+}
+
 /** List a user's bookmarks, newest first, with the live document row and the
  *  token the doc was bookmarked through. */
 export async function listBookmarks(

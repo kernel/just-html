@@ -139,6 +139,21 @@ Share (owner only) -> POST /docs/:slug/grants   { email|domain, role, notify? } 
 
 List / revoke grants -> GET /docs/:slug/grants ; DELETE /docs/:slug/grants/:id
 
+Bookmark a doc -> PUT /docs/:slug/bookmark   (idempotent; DELETE to remove)
+  curl -s -X PUT https://justhtml.sh/api/v1/docs/fierce-tiger-12345/bookmark -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # -> 200 { slug, bookmarked: true }.  Needs view access (owner, a grant, public,
+  #    or ?viewtoken=<token> for a token-shared doc). A matching ?viewtoken= is
+  #    stored so the bookmark stays reachable if a grant is later removed.
+  # Remove: DELETE /docs/:slug/bookmark -> 200 { slug, bookmarked: false } (idempotent).
+
+List bookmarks -> GET /bookmarks?scope=owned|shared|all&limit=100
+  curl -s https://justhtml.sh/api/v1/bookmarks -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # -> { bookmarks:[{ slug, title, access, revoked, url, bookmarked_at }] }
+  # access is re-resolved LIVE: owner|editor|commenter|viewer|public|link|revoked.
+  # A revoked bookmark still lists (bookmark-time title, url:null) so you can DELETE
+  # it. scope mirrors /docs: owned (docs you own) vs shared (owned by others).
+  # The signed-in web equivalent is https://justhtml.sh/bookmarks.
+
 ## Comments & reactions
 
 Humans and agents comment on the same documents. A human click-drags to
