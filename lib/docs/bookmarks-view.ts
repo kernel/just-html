@@ -31,18 +31,20 @@ function removeForm(docId: number): string {
 }
 
 /**
- * One bookmark row. A revoked bookmark shows just `<doc id> — revoked` with no
- * link (never the live title of a doc the viewer can no longer access). A live
- * bookmark shows the current title linking to the doc, carrying the stored view
- * token when the doc is reachable only through it.
+ * One bookmark row. A revoked bookmark shows the title as it was when
+ * bookmarked (the caller passes that snapshot, never the doc's current title —
+ * which the viewer can no longer see), dimmed and unlinked with a "revoked"
+ * tail. A live bookmark shows the current title linking to the doc, carrying
+ * the stored view token when the doc is reachable only through it.
  */
 export function bookmarkRow(m: RowModel): string {
   const revoked = m.access === "revoked" || !m.linkable;
+  const label = m.title && m.title.trim() ? m.title : m.slug;
+
   if (revoked) {
-    return `<div class="row revoked"><pre><span class="title">${m.docId}</span> <span class="tail">— revoked</span></pre>${removeForm(m.docId)}</div>`;
+    return `<div class="row revoked"><pre><span class="title">${esc(label)}</span>  <span class="tail">revoked · ${esc(fmtDate(m.bookmarkedAt))}</span></pre>${removeForm(m.docId)}</div>`;
   }
 
-  const label = m.title && m.title.trim() ? m.title : m.slug;
   const href = m.token
     ? `/d/${encodeURIComponent(m.slug)}?viewtoken=${encodeURIComponent(m.token)}`
     : `/d/${encodeURIComponent(m.slug)}`;

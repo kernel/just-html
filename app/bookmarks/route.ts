@@ -26,6 +26,7 @@ const ROW_STYLE = `
   .row pre { min-width: 0; }
   .row a.title { font-weight: 700; }
   .row .tail { color: #888; }
+  .row.revoked .title { color: #999; }
   .row.revoked .tail { color: #b00020; }
   .row .rm { margin: 0; }
   .row .remove { background: none; border: none; padding: 0; color: #888; text-decoration: underline; cursor: pointer; }
@@ -94,18 +95,21 @@ export async function GET(req: Request): Promise<Response> {
 
   const intro = `<div class="body"><pre>Signed in as <code>${esc(email)}</code>.\n\nBookmarks track current access. If a doc's access is later revoked it stays\nlisted with a revoked label and no link — use remove to drop it.</pre></div>`;
 
-  const ownedRows = owned.map((doc) =>
-    bookmarkRow({
+  // Revoked rows show the title snapshotted at bookmark time (bookmark_title),
+  // never the doc's current title, which the viewer can no longer see.
+  const ownedRows = owned.map((doc) => {
+    const revoked = doc.deleted_at != null;
+    return bookmarkRow({
       docId: doc.id,
       slug: doc.slug,
-      title: doc.title,
-      access: doc.deleted_at ? "revoked" : "owner",
+      title: revoked ? doc.bookmark_title : doc.title,
+      access: revoked ? "revoked" : "owner",
       isPublic: doc.is_public,
       bookmarkedAt: doc.bookmarked_at,
-      linkable: !doc.deleted_at,
+      linkable: !revoked,
       token: null,
-    })
-  );
+    });
+  });
 
   const sharedRows: string[] = [];
   for (const doc of shared) {
@@ -114,7 +118,7 @@ export async function GET(req: Request): Promise<Response> {
       bookmarkRow({
         docId: doc.id,
         slug: doc.slug,
-        title: doc.title,
+        title: a.linkable ? doc.title : doc.bookmark_title,
         access: a.access,
         isPublic: doc.is_public,
         bookmarkedAt: doc.bookmarked_at,
@@ -177,6 +181,6 @@ export async function POST(req: Request): Promise<Response> {
     return redirect(next);
   }
 
-  await saveBookmark(session.email, doc.id, viewtoken);
+  await saveBookmark(session.email, doc.id, viewtoken, doc.title);
   return redirect(next);
 }

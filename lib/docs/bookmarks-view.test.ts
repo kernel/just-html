@@ -27,12 +27,19 @@ describe("bookmarkRow", () => {
     expect(html).toContain("link private");
   });
 
-  it("shows only the doc id and no link for revoked bookmarks", () => {
-    const html = bookmarkRow({ ...base, access: "revoked", linkable: false });
+  it("shows the (snapshot) title unlinked for revoked bookmarks", () => {
+    // The caller passes the title captured at bookmark time as `title`; the row
+    // renders it dimmed with no link (the doc's live title is never passed here).
+    const html = bookmarkRow({ ...base, title: "Old title", access: "revoked", linkable: false });
     expect(html).toContain("row revoked");
-    expect(html).toContain(">42</span>");
-    expect(html).toContain("revoked");
-    expect(html).not.toContain("Launch plan"); // never leak a title once revoked
+    expect(html).toContain(">Old title</span>");
+    expect(html).toContain("revoked · 2026-07-20");
+    expect(html).not.toContain("<a");
+  });
+
+  it("falls back to the slug for a revoked bookmark with no snapshot title", () => {
+    const html = bookmarkRow({ ...base, title: null, access: "revoked", linkable: false });
+    expect(html).toContain(">fierce-tiger-12345</span>");
     expect(html).not.toContain("<a");
   });
 

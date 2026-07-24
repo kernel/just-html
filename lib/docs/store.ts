@@ -602,6 +602,10 @@ export type BookmarkDocRow = DocRow & {
   // access). Aliased off `view_token` so it does not clobber the doc's own
   // current `view_token` from `d.*`; access is re-checked against this.
   bookmark_token: string | null;
+  // The doc's title captured at bookmark time — shown for a revoked doc (the
+  // viewer can no longer see the doc's current `title`). Aliased so it does not
+  // clobber `d.title`.
+  bookmark_title: string | null;
 };
 
 /**
@@ -669,14 +673,17 @@ export async function bookmarkExists(bookmarkerEmail: string, docId: number): Pr
 export async function saveBookmark(
   bookmarkerEmail: string,
   docId: number,
-  viewToken: string | null
+  viewToken: string | null,
+  title: string | null
 ): Promise<void> {
   await query(
-    `INSERT INTO bookmarks (bookmarker_email, doc_id, view_token)
-     VALUES ($1, $2, $3)
+    `INSERT INTO bookmarks (bookmarker_email, doc_id, view_token, doc_title)
+     VALUES ($1, $2, $3, $4)
      ON CONFLICT (bookmarker_email, doc_id)
-     DO UPDATE SET view_token = COALESCE(EXCLUDED.view_token, bookmarks.view_token)`,
-    [bookmarkerEmail.toLowerCase(), docId, viewToken]
+     DO UPDATE SET
+       view_token = COALESCE(EXCLUDED.view_token, bookmarks.view_token),
+       doc_title = EXCLUDED.doc_title`,
+    [bookmarkerEmail.toLowerCase(), docId, viewToken, title]
   );
 }
 
@@ -696,7 +703,8 @@ export async function listBookmarks(
   limit: number
 ): Promise<BookmarkDocRow[]> {
   const { rows } = await query<BookmarkDocRow>(
-    `SELECT d.*, b.created_at AS bookmarked_at, b.view_token AS bookmark_token
+    `SELECT d.*, b.created_at AS bookmarked_at, b.view_token AS bookmark_token,
+            b.doc_title AS bookmark_title
      FROM bookmarks b
      JOIN documents d ON d.id = b.doc_id
      WHERE b.bookmarker_email = $1
