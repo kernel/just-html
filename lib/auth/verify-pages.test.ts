@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { signingInPage, deadLinkPage } from "@/lib/auth/verify-pages";
+import { signingInPage, confirmSignInPage, deadLinkPage } from "@/lib/auth/verify-pages";
 
-// Pure-render unit tests for the /login/verify page shim. These call the render
+// Pure-render unit tests for the /login/verify pages. These call the render
 // helpers directly — no server, no DB, no network — and lock the contract the
-// GET handler depends on: an auto-submitting POST form for the JS path, a
-// <noscript> button fallback, HTML-escaped inputs (no injection), and a distinct
-// 410 dead-link page that never auto-submits.
+// GET handler depends on: an auto-submitting POST form for the cookie-verified
+// browser, a no-JS confirm-button page for everyone else (scanners, share
+// links), HTML-escaped inputs (no injection), and a distinct 410 dead-link page
+// that never auto-submits.
 
 describe("signingInPage (auto-submit shim)", () => {
   const html = signingInPage("tok123", "/d/abc");
@@ -48,6 +49,36 @@ describe("signingInPage (auto-submit shim)", () => {
   it("HTML-escapes the token value too", () => {
     const out = signingInPage('"><b>', "/x");
     expect(out).toContain('name="token" value="&quot;&gt;&lt;b&gt;">');
+  });
+});
+
+describe("confirmSignInPage (no-JS confirm button)", () => {
+  const html = confirmSignInPage("tok123", "/d/abc");
+
+  it("renders the POST <form> targeting /login/verify", () => {
+    expect(html).toMatch(/<form[^>]*method="POST"[^>]*action="\/login\/verify"/);
+  });
+
+  it("includes the hidden token and next inputs", () => {
+    expect(html).toContain('<input type="hidden" name="token" value="tok123">');
+    expect(html).toContain('<input type="hidden" name="next" value="/d/abc">');
+  });
+
+  it("has a visible submit button", () => {
+    expect(html).toMatch(/<button type="submit">/);
+  });
+
+  it("does NOT auto-submit — no script anywhere", () => {
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain(".submit()");
+  });
+
+  it("HTML-escapes the token and next values — no injection", () => {
+    const out = confirmSignInPage('"><b>', '/d/abc"><script>alert(1)</script>');
+    expect(out).toContain('name="token" value="&quot;&gt;&lt;b&gt;">');
+    expect(out).not.toContain('value="/d/abc"><script>alert(1)</script>');
+    expect(out).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(out).not.toContain("<script>");
   });
 });
 

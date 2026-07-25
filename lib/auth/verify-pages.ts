@@ -5,12 +5,14 @@ import { manPage, esc } from "@/lib/page";
 // network call. The route's GET/POST handlers import these; their logic is
 // unchanged — these functions only build HTML strings from their arguments.
 
-// GET render for a link that still has a token to try. This is an INVISIBLE
-// auto-submit shim: the GET itself never consumes the token (scanners/prefetchers
-// fetch GETs and would burn a single-use link). It renders the same POST form the
-// POST handler expects (identical hidden `token` + `next` fields) and a tiny
-// inline <script> that submits it on load, so the human is signed in without a
-// visible button click. The form lives OUTSIDE <noscript> so the script can reach
+// GET render for the INVISIBLE auto-submit path, served only when the request
+// carries the login-intent cookie — i.e. this is the same browser that just
+// requested the link (see app/login/verify/route.ts). A tiny inline <script>
+// submits the POST form on load, so that browser signs in without a visible
+// click. Serving this ONLY to the cookie-bearing browser is what keeps it safe:
+// a mail link scanner opening the emailed URL has no cookie, gets the no-JS
+// confirmSignInPage instead, and so never runs this auto-submit to burn the
+// single-use token. The form lives OUTSIDE <noscript> so the script can reach
 // it; only the visible "sign in" button + instructions sit inside <noscript> for
 // the no-JS fallback. The auto-submit is same-origin (page served from our
 // origin, posts to /login/verify) so the POST Origin/CSRF check still passes.
@@ -37,6 +39,33 @@ export function signingInPage(token: string, next: string): string {
 <div class="body"><pre>This link is single-use. If it's expired or already used you'll
 be asked to <a href="/login">request a new one</a>.</pre></div>
 </noscript>
+`,
+  });
+}
+
+// GET render when we CAN'T tie the click to the browser that requested the link
+// (no login-intent cookie): a mail link scanner opening the emailed URL, a 7-day
+// share/comment link, or a link opened in a different browser than the request.
+// Renders the SAME POST form as signingInPage — identical hidden `token` +
+// `next` — but with NO auto-submit <script>: the human taps the button to
+// consume the single-use token. This is what makes the flow safe against
+// JS-executing mail scanners. They fetch the URL and run its scripts (which is
+// how they were burning the token off the invisible auto-submit shim before the
+// human could tap), but they don't perform a real click, so the token survives.
+export function confirmSignInPage(token: string, next: string): string {
+  return manPage({
+    title: "justhtml.sh — confirm sign-in",
+    bodyHtml: `
+<h2>ALMOST THERE</h2>
+<div class="body"><pre>Tap the button to finish signing in on this device. This link is
+single-use — if it's expired or already used you'll be asked to
+<a href="/login">request a new one</a>.</pre></div>
+
+<form method="POST" action="/login/verify">
+<input type="hidden" name="token" value="${esc(token)}">
+<input type="hidden" name="next" value="${esc(next)}">
+<div class="body"><pre><button type="submit">sign in</button></pre></div>
+</form>
 `,
   });
 }

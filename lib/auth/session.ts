@@ -4,6 +4,8 @@ import {
   SESSION_COOKIE,
   SESSION_TTL_S,
   SESSION_SLIDE_FLOOR_S,
+  LOGIN_INTENT_COOKIE,
+  LOGIN_TOKEN_TTL_S,
 } from "@/lib/auth/config";
 
 // DB-backed sessions (§9.1). Opaque token in an HttpOnly/Secure/SameSite=Lax
@@ -99,4 +101,28 @@ export async function createSession(
 /** Set-Cookie header value for the session cookie. */
 export function sessionCookieHeader(token: string): string {
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_S}`;
+}
+
+/**
+ * Set-Cookie for the login-intent marker — set on the browser that just
+ * requested a magic link. Scoped to /login so it rides the emailed
+ * /login/verify navigation but nothing else, and expires with the link (15
+ * min). GET /login/verify uses its presence to auto-submit for that same
+ * browser; its absence (a scanner, a share/comment link, or a link opened in a
+ * different browser) yields the no-JS confirm page instead.
+ */
+export function loginIntentCookieHeader(): string {
+  return `${LOGIN_INTENT_COOKIE}=1; HttpOnly; Secure; SameSite=Lax; Path=/login; Max-Age=${LOGIN_TOKEN_TTL_S}`;
+}
+
+/** True when the request carries the login-intent cookie. */
+export function hasLoginIntent(req: Request): boolean {
+  const header = req.headers.get("cookie");
+  if (!header) return false;
+  for (const part of header.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    if (part.slice(0, eq).trim() === LOGIN_INTENT_COOKIE) return true;
+  }
+  return false;
 }

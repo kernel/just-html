@@ -1,5 +1,5 @@
 import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
-import { getSession } from "@/lib/auth/session";
+import { getSession, loginIntentCookieHeader } from "@/lib/auth/session";
 import { sanitizeNext, loginLanding, isEmailish } from "@/lib/auth/url";
 import { originOk, clientIp } from "@/lib/auth/request";
 import { enforceRateLimit, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
@@ -188,5 +188,11 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   audit(req, "login_link.requested", { meta: { email: lower, resend_id: resendId } });
-  return htmlResponse(checkEmailPage());
+  // Mark this browser as the one that asked to sign in, so the emailed
+  // /login/verify link auto-submits here but shows a no-JS confirm button to a
+  // mail scanner (which never carries this cookie) — the scanner can't burn the
+  // single-use token before the human taps.
+  return htmlResponse(checkEmailPage(), {
+    headers: { "Set-Cookie": loginIntentCookieHeader() },
+  });
 }
