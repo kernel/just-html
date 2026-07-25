@@ -65,17 +65,20 @@ export async function GET(req: Request): Promise<Response> {
     limit = Math.min(n, MAX_LIST_LIMIT);
   }
 
-  const scope = url.searchParams.get("scope") ?? "all";
+  const scope = (url.searchParams.get("scope") ?? "all") as "owned" | "shared" | "all";
   if (scope !== "owned" && scope !== "shared" && scope !== "all") {
     return apiError(400, "invalid_request", "Query 'scope' must be one of: owned, shared, all.");
   }
 
-  const rows = await listBookmarks(principal.email, limit);
+  // Filter by scope in SQL so `limit` bounds the returned scope, not the full
+  // bookmark set (an owned/shared request must not underfill because out-of-scope
+  // rows consumed the limit first).
+  const rows = await listBookmarks(principal.email, limit, {
+    scope,
+    ownerId: principal.userId,
+  });
   const bookmarks = [];
   for (const doc of rows) {
-    const owned = doc.owner_id === principal.userId;
-    if (scope === "owned" && !owned) continue;
-    if (scope === "shared" && owned) continue;
     bookmarks.push(await itemView(doc, principal.email, principal.userId));
   }
   return json({ bookmarks });

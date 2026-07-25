@@ -713,21 +713,42 @@ export async function removeBookmarkBySlug(bookmarkerEmail: string, slug: string
   );
 }
 
-/** List a user's bookmarks, newest first, with the live document row and the
- *  token the doc was bookmarked through. */
+/**
+ * List a user's bookmarks, newest first, with the live document row and the
+ * token the doc was bookmarked through. `opts.scope` filters in SQL so `limit`
+ * applies AFTER the owned/shared split (owned = docs the caller owns) — a scoped
+ * request never underfills because out-of-scope rows ate the limit. The owner
+ * comparison needs the caller's account id; without one (an account-less
+ * grantee) nothing is owned, so `owned` is empty and `shared` is everything.
+ */
 export async function listBookmarks(
   bookmarkerEmail: string,
-  limit: number
+  limit: number,
+  opts?: { scope?: "owned" | "shared" | "all"; ownerId?: number | null }
 ): Promise<BookmarkDocRow[]> {
+  const scope = opts?.scope ?? "all";
+  const ownerId = opts?.ownerId ?? null;
+  const params: (string | number)[] = [bookmarkerEmail.toLowerCase(), limit];
+
+  let scopeClause = "";
+  if (scope === "owned") {
+    if (ownerId == null) return []; // an account-less caller owns nothing
+    params.push(ownerId);
+    scopeClause = `AND d.owner_id = $${params.length}`;
+  } else if (scope === "shared" && ownerId != null) {
+    params.push(ownerId);
+    scopeClause = `AND d.owner_id <> $${params.length}`;
+  }
+
   const { rows } = await query<BookmarkDocRow>(
     `SELECT d.*, b.created_at AS bookmarked_at, b.view_token AS bookmark_token,
             b.doc_title AS bookmark_title
      FROM bookmarks b
      JOIN documents d ON d.id = b.doc_id
-     WHERE b.bookmarker_email = $1
+     WHERE b.bookmarker_email = $1 ${scopeClause}
      ORDER BY b.created_at DESC, b.id DESC
      LIMIT $2`,
-    [bookmarkerEmail.toLowerCase(), limit]
+    params
   );
   return rows;
 }
