@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bookmarkRow, fmtDate } from "@/lib/docs/bookmarks-view";
+import { bookmarkRow, fmtDate, resolveBookmarkView } from "@/lib/docs/bookmarks-view";
 
 const base = {
   docId: 42,
@@ -67,5 +67,49 @@ describe("fmtDate", () => {
   it("renders YYYY-MM-DD, passing through unparseable input", () => {
     expect(fmtDate("2026-07-20T17:40:37Z")).toBe("2026-07-20");
     expect(fmtDate("not-a-date")).toBe("not-a-date");
+  });
+});
+
+describe("resolveBookmarkView", () => {
+  const live = { deleted: false, isOwner: false, grantRole: null, isPublic: false, tokenValid: false };
+
+  it("a deleted doc is revoked, ahead of any live access", () => {
+    expect(resolveBookmarkView({ ...live, deleted: true, isOwner: true })).toEqual({
+      access: "revoked",
+      revoked: true,
+      usesToken: false,
+    });
+  });
+
+  it("owner beats a grant", () => {
+    expect(resolveBookmarkView({ ...live, isOwner: true, grantRole: "viewer" })).toEqual({
+      access: "owner",
+      revoked: false,
+      usesToken: false,
+    });
+  });
+
+  it("reports the identity grant role", () => {
+    expect(resolveBookmarkView({ ...live, grantRole: "commenter" }).access).toBe("commenter");
+  });
+
+  it("a public doc with no grant reads public", () => {
+    expect(resolveBookmarkView({ ...live, isPublic: true })).toEqual({
+      access: "public",
+      revoked: false,
+      usesToken: false,
+    });
+  });
+
+  it("private + no grant + a valid token reads link and uses the token", () => {
+    expect(resolveBookmarkView({ ...live, tokenValid: true })).toEqual({
+      access: "link",
+      revoked: false,
+      usesToken: true,
+    });
+  });
+
+  it("private + no grant + no valid token is revoked (access withdrawn)", () => {
+    expect(resolveBookmarkView(live)).toEqual({ access: "revoked", revoked: true, usesToken: false });
   });
 });

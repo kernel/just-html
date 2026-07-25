@@ -245,6 +245,76 @@ export const ApiError = registry.register(
 );
 
 // =========================================================================
+// Bookmarks — PUT/DELETE /api/v1/docs/{slug}/bookmark, GET /api/v1/bookmarks.
+// A personal saved-doc list keyed by the caller's email (unifies with the
+// signed-in web /bookmarks).
+// =========================================================================
+
+// PUT /api/v1/docs/{slug}/bookmark 200 — { bookmarked }.
+export const BookmarkSavedResponse = registry.register(
+  "BookmarkSavedResponse",
+  z
+    .object({ bookmarked: z.boolean() })
+    .openapi("BookmarkSavedResponse", { description: "The doc is bookmarked (idempotent)." })
+);
+
+// DELETE /api/v1/docs/{slug}/bookmark 200 — { removed }.
+export const BookmarkRemovedResponse = registry.register(
+  "BookmarkRemovedResponse",
+  z
+    .object({ removed: z.boolean() })
+    .openapi("BookmarkRemovedResponse", {
+      description: "The bookmark is removed (idempotent; also succeeds when none existed).",
+    })
+);
+
+// One item of GET /api/v1/bookmarks. access is re-resolved at read time, so a
+// doc whose access was withdrawn (grant removed, token rotated, or doc deleted)
+// reads as revoked with a null url and the bookmark-time title snapshot.
+export const BookmarkListItem = registry.register(
+  "BookmarkListItem",
+  z
+    .object({
+      slug,
+      url: url
+        .nullable()
+        .openapi({
+          description:
+            "Link to the doc (carries ?viewtoken= when reachable only through the stored token). null when access is revoked.",
+        }),
+      title: z
+        .string()
+        .nullable()
+        .openapi({
+          description:
+            "Live title while the doc is reachable; the title captured at bookmark time once revoked.",
+        }),
+      access: z
+        .enum(["owner", "editor", "commenter", "viewer", "public", "link", "revoked"])
+        .openapi({
+          description:
+            "Re-resolved per read: owner|editor|commenter|viewer for identity access, public for a public doc, link when reachable only via the stored view token, revoked when the doc was deleted or access was withdrawn.",
+        }),
+      revoked: z
+        .boolean()
+        .openapi({ description: "True when the doc was deleted or the caller can no longer access it." }),
+      public: z.boolean(),
+      bookmarked_at: dateTime,
+    })
+    .openapi("BookmarkListItem", {
+      description: "A bookmarked document, with the caller's access re-resolved at read time.",
+    })
+);
+
+// GET /api/v1/bookmarks response envelope: { bookmarks: BookmarkListItem[] }.
+export const BookmarkListResponse = registry.register(
+  "BookmarkListResponse",
+  z
+    .object({ bookmarks: z.array(BookmarkListItem) })
+    .openapi("BookmarkListResponse", { description: "The caller's bookmarked documents, newest first." })
+);
+
+// =========================================================================
 // Z2 — docs sub-resources: grants, versions, rotate-token, edits.
 // Same contract as Z1: every 400 maps to the SAME apiError(400,
 // "invalid_request", <message>) the old hand-rolled checks emitted (messages

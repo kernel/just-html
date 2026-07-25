@@ -7,6 +7,9 @@
 import { registry, z } from "@/lib/openapi/registry";
 import {
   ApiError,
+  BookmarkListResponse,
+  BookmarkRemovedResponse,
+  BookmarkSavedResponse,
   CommentCreatedResponse,
   CommentDeletedResponse,
   CommentUpdatedResponse,
@@ -594,5 +597,97 @@ registry.registerPath({
       description: "No such document (also returned for inaccessible docs; no existence oracle)",
       content: jsonError,
     },
+  },
+});
+
+// =========================================================================
+// Bookmarks. A personal saved-doc list keyed by the caller's email (unifies
+// with the signed-in web /bookmarks). Save/remove need only view access to the
+// doc; the list re-resolves access per item so a withdrawn doc reads revoked.
+// =========================================================================
+
+// PUT /api/v1/docs/{slug}/bookmark — idempotently bookmark a viewable doc
+registry.registerPath({
+  method: "put",
+  path: "/api/v1/docs/{slug}/bookmark",
+  tags: ["bookmarks"],
+  summary: "Bookmark a document (idempotent)",
+  description:
+    "Saves the doc to the caller's bookmarks. Requires view access (owner, a grant, a public doc, or a matching ?viewtoken=); an inaccessible doc returns 404 (no existence oracle). Keyed by the key's email, so it unifies with the account's signed-in web bookmarks.",
+  operationId: "addBookmark",
+  security,
+  request: { params: z.object({ slug: slugParam }), query: viewtokenQuery },
+  responses: {
+    200: {
+      description: "Bookmarked",
+      content: { "application/json": { schema: BookmarkSavedResponse } },
+    },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// DELETE /api/v1/docs/{slug}/bookmark — idempotently remove the caller's bookmark
+registry.registerPath({
+  method: "delete",
+  path: "/api/v1/docs/{slug}/bookmark",
+  tags: ["bookmarks"],
+  summary: "Remove a bookmark (idempotent)",
+  description:
+    "Removes the caller's bookmark for this doc. Idempotent (succeeds when none existed) and works on a revoked or deleted doc.",
+  operationId: "removeBookmark",
+  security,
+  request: { params: z.object({ slug: slugParam }) },
+  responses: {
+    200: {
+      description: "Removed",
+      content: { "application/json": { schema: BookmarkRemovedResponse } },
+    },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// GET /api/v1/bookmarks — list the caller's bookmarks (owned, shared, or both)
+registry.registerPath({
+  method: "get",
+  path: "/api/v1/bookmarks",
+  tags: ["bookmarks"],
+  summary: "List bookmarked documents (owned, shared, or both)",
+  description:
+    "The caller's bookmarks, newest first, each with access re-resolved at read time (owner|editor|commenter|viewer|public|link|revoked). The signed-in web equivalent is https://justhtml.sh/bookmarks.",
+  operationId: "listBookmarks",
+  security,
+  request: {
+    query: z.object({
+      scope: z
+        .enum(["owned", "shared", "all"])
+        .default("all")
+        .openapi({
+          param: { name: "scope", in: "query" },
+          description:
+            "owned: bookmarked docs the caller owns. shared: bookmarked docs shared with the caller. all (default): both.",
+        }),
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(500)
+        .default(100)
+        .openapi({ param: { name: "limit", in: "query" } }),
+    }),
+  },
+  responses: {
+    200: {
+      description: "The caller's bookmarks",
+      content: { "application/json": { schema: BookmarkListResponse } },
+    },
+    400: { description: "Invalid request body or parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
   },
 });

@@ -200,6 +200,35 @@ WITH identity, or any identity on a public doc. Who can react: anyone who can
 view, with identity. Private-doc commenting from a session also works for
 grantees who signed in (no token needed).
 
+## Bookmarks
+
+Save docs to a personal list — the same list the signed-in web /bookmarks page
+shows, keyed by your account email. Saving needs only view access to the doc.
+The list re-resolves access per item, so a doc whose access is later withdrawn
+(grant removed, token rotated, or doc deleted) stays listed as "revoked" with no
+link and the title it had when you bookmarked it.
+
+Bookmark a doc (idempotent) -> PUT /docs/:slug/bookmark
+  curl -s -X PUT https://justhtml.sh/api/v1/docs/fierce-tiger-12345/bookmark -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # -> 200 { bookmarked: true }. Requires view access (owner / grant / public /
+  #    ?viewtoken=<token>); an inaccessible doc 404s. For a private doc you reach
+  #    only through its view token, pass ?viewtoken=<token> so the bookmark keeps
+  #    it (a later grant/public path drops the now-needless token).
+
+Remove a bookmark (idempotent) -> DELETE /docs/:slug/bookmark
+  curl -s -X DELETE https://justhtml.sh/api/v1/docs/fierce-tiger-12345/bookmark -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # -> 200 { removed: true }. Succeeds even if it wasn't bookmarked, or the doc
+  #    has since been deleted / had access revoked.
+
+List bookmarks -> GET /bookmarks?scope=owned|shared|all
+  curl -s 'https://justhtml.sh/api/v1/bookmarks?scope=all' -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # -> { bookmarks:[ { slug, url, title, access, revoked, public, bookmarked_at } ] }
+  #    newest first. access is re-resolved per read: owner|editor|commenter|viewer,
+  #    public (a public doc), link (reachable only via the stored view token — url
+  #    carries ?viewtoken=), or revoked (deleted / access withdrawn — url null,
+  #    title is the bookmark-time snapshot). scope=all (default) is owned+shared.
+  # The signed-in web equivalent is https://justhtml.sh/bookmarks
+
 ## Viewing
 
   https://justhtml.sh/d/:slug                 viewer shell (chrome + sandboxed iframe)
