@@ -20,6 +20,21 @@ import { apiError } from "@/lib/docs/api";
 import { GRANT_ROLES, MAX_GRANTS_PER_DOC, type GrantRole } from "@/lib/docs/grants";
 import { MAX_COMMENT_BODY_BYTES } from "@/lib/docs/comments";
 import { ALLOWED_EMOJI } from "@/lib/docs/reactions";
+import {
+  MARKS,
+  MAX_ALT_LEN,
+  MAX_BLOCKS_PER_INSERT,
+  MAX_CODE_LEN,
+  MAX_HREF_LEN,
+  MAX_LIST_ITEMS,
+  MAX_RUN_TEXT,
+  MAX_RUNS_PER_BLOCK,
+  MAX_TABLE_COLS,
+  MAX_TABLE_ROWS,
+  RETAG_TAGS,
+  TEXT_BLOCKS,
+} from "@/lib/docs/block-render";
+import { MAX_OPS_PER_REQUEST, WRAP_TAGS } from "@/lib/docs/doc-ops";
 
 // --- error helpers -------------------------------------------------------
 
@@ -465,11 +480,16 @@ export const VersionMeta = registry.register(
         description: "User who authored this version (null for legacy/system writes).",
       }),
       patch: z
-        .array(z.object({ oldText: z.string(), newText: z.string() }))
+        .array(
+          z.union([
+            z.object({ oldText: z.string(), newText: z.string() }),
+            z.object({ op: z.string() }).catchall(z.unknown()),
+          ])
+        )
         .optional()
         .openapi({
           description:
-            "The edits payload as requested, present only when edit_kind=patch (the list of {oldText,newText} applied). Omitted otherwise.",
+            "The write payload as requested, present only when edit_kind=patch: the {oldText,newText} edits from /edits, or the {op,…} operations from /ops. Consecutive writes by one author inside a short window are coalesced into a single retained version, so this may list the payloads of several requests.",
         }),
       bytes: z.number().int(),
       created_at: dateTime,
@@ -603,6 +623,139 @@ export function editsBadRequest(error: z.ZodError): Response {
   const bv = issues.find((i) => i.path[0] === "base_version");
   return apiError(400, "invalid_request", (bv ?? issues[0]).message);
 }
+
+// --- ops ------------------------------------------------------------------
+
+// POST /api/v1/docs/{slug}/ops body: structural operations from the viewer's
+// inline editor (lib/docs/doc-ops.ts). Unlike /edits — which predates this and
+// whose 400s are byte-compatible with a hand-rolled implementation — this route
+// is new, so validation is plain Zod and opsBadRequest reports the first issue
+// with its field path.
+//
+// Ops describe INTENT: which element, and what it should become. No markup
+// crosses the wire, which is why there is nothing to sanitize here — every tag
+// in the result is a literal in lib/docs/block-render.ts.
+
+const RunSchema = z.union([
+  z.object({
+    kind: z.literal("text"),
+    text: z.string().max(MAX_RUN_TEXT),
+    marks: z.array(z.enum(MARKS)).max(MARKS.length).optional(),
+    href: z.string().max(MAX_HREF_LEN).optional(),
+  }),
+  z.object({ kind: z.literal("br") }),
+  z.object({
+    kind: z.literal("img"),
+    src: z.string().max(MAX_HREF_LEN),
+    alt: z.string().max(MAX_ALT_LEN).optional(),
+  }),
+]);
+
+const RunsSchema = z.array(RunSchema).max(MAX_RUNS_PER_BLOCK);
+
+const BlockIntentSchema = z.union([
+  z.object({ tag: z.enum(TEXT_BLOCKS), runs: RunsSchema }),
+  z.object({ tag: z.enum(["ul", "ol"]), items: z.array(RunsSchema).max(MAX_LIST_ITEMS) }),
+  z.object({ tag: z.literal("pre"), code: z.string().max(MAX_CODE_LEN) }),
+  z.object({ tag: z.literal("hr") }),
+  z.object({
+    tag: z.literal("table"),
+    rows: z.number().int().min(1).max(MAX_TABLE_ROWS),
+    cols: z.number().int().min(1).max(MAX_TABLE_COLS),
+  }),
+]);
+
+const elementId = z.number().int().min(0);
+
+export const OpSchema = z.discriminatedUnion("op", [
+  z.object({
+    op: z.literal("setRuns"),
+    src: elementId,
+    child: z.number().int().min(0),
+    before: z.string(),
+    runs: RunsSchema,
+  }),
+  z.object({ op: z.literal("setInline"), src: elementId, runs: RunsSchema }),
+  z.object({ op: z.literal("setText"), src: elementId, text: z.string().max(MAX_CODE_LEN) }),
+  z.object({ op: z.literal("unwrap"), src: elementId }),
+  z.object({ op: z.literal("retag"), src: elementId, tag: z.enum(RETAG_TAGS) }),
+  z.object({
+    op: z.literal("replaceWith"),
+    src: elementId,
+    blocks: z.array(BlockIntentSchema).min(1).max(MAX_BLOCKS_PER_INSERT),
+  }),
+  z.object({ op: z.literal("wrap"), src: elementId, tags: z.array(z.enum(WRAP_TAGS)).min(1).max(2) }),
+  z.object({
+    op: z.literal("insert"),
+    src: elementId,
+    where: z.enum(["before", "after", "append"]),
+    blocks: z.array(BlockIntentSchema).min(1).max(MAX_BLOCKS_PER_INSERT),
+  }),
+  z.object({ op: z.literal("delete"), src: elementId }),
+  z.object({ op: z.literal("move"), src: elementId, parent: elementId, after: elementId.nullable() }),
+  z.object({ op: z.literal("indent"), src: elementId }),
+  z.object({ op: z.literal("outdent"), src: elementId }),
+  z.object({ op: z.literal("insertRow"), src: elementId }),
+]);
+
+export const OpsBody = registry.register(
+  "OpsBody",
+  z
+    .object({
+      ops: z
+        .array(OpSchema)
+        .min(1, { error: "Field 'ops' must contain at least one operation." })
+        .max(MAX_OPS_PER_REQUEST, {
+          error: `Field 'ops' must contain at most ${MAX_OPS_PER_REQUEST} operations.`,
+        })
+        .openapi({ description: "The operations to apply, in one transaction. 1–50 ops." }),
+      base_version: z
+        .number({ error: "Field 'base_version' must be a positive integer." })
+        .int({ error: "Field 'base_version' must be a positive integer." })
+        .min(1, { error: "Field 'base_version' must be a positive integer." })
+        .nullish()
+        .transform((v) => v ?? undefined)
+        .openapi({
+          description:
+            "The version the element ids were derived against. REQUIRED in practice: ids only mean anything against the exact bytes they were served with, and a mismatch returns 409.",
+        }),
+    })
+    .openapi("OpsBody", {
+      description:
+        "Structural edits from the inline editor: formatting, block type, insert/delete/move, list nesting. Ops name elements by the data-jh-src id served in the overlay copy of the document.",
+    })
+);
+
+/** First failing field, reported as the same 400 shape every other route uses. */
+export function opsBadRequest(error: z.ZodError): Response {
+  const issue = error.issues[0];
+  const path = issue.path.length ? issue.path.join(".") : "body";
+  return apiError(400, "invalid_request", `${path}: ${issue.message}`);
+}
+
+// POST /api/v1/docs/{slug}/versions/{n}/restore 200 — the doc after restoring,
+// plus the version its content came from.
+export const RestoreVersionResponse = registry.register(
+  "RestoreVersionResponse",
+  z
+    .object({
+      slug,
+      url,
+      title: z.string().nullable(),
+      version: z.number().int(),
+      public: z.boolean(),
+      view_token: z.string().optional(),
+      role: z.enum(["editor", "commenter", "viewer"]).optional(),
+      created_at: dateTime,
+      updated_at: dateTime,
+      html: z.string(),
+      restored_from: z.number().int(),
+    })
+    .openapi("RestoreVersionResponse", {
+      description:
+        "The document after restoring, plus the version its content came from. Restoring never destroys history: it writes the old content forward as a new version.",
+    })
+);
 
 // =========================================================================
 // Z3 — comments + reactions. Same contract as Z1/Z2: every 400 maps to the

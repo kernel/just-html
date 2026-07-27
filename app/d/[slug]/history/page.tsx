@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { cookies } from "next/headers";
 import { findBySlug, listVersionsWithHtml } from "@/lib/docs/store";
 import { canViewSession } from "@/lib/docs/access";
+import { canEdit, resolveAccess } from "@/lib/docs/grants";
+import { resolveCommentPrincipal } from "@/lib/docs/comments";
 import { getSessionFromToken } from "@/lib/auth/session";
 import { SESSION_COOKIE } from "@/lib/auth/config";
 import { unifiedPatch } from "@/lib/docs/diff";
@@ -40,6 +42,14 @@ export default async function HistoryPage({ params, searchParams }: Props) {
     notFound();
   }
 
+  // Restoring is a write, so it needs edit access, not just read access — the
+  // same owner-or-editor rule /ops and /edits enforce. Resolved through the same
+  // principal the doc page uses, so a session with no user row can't slip past.
+  const principal = await resolveCommentPrincipal(null, session);
+  const canRestore = principal
+    ? canEdit(await resolveAccess(doc, principal.email, principal.userId))
+    : false;
+
   const snapshots = await listVersionsWithHtml(doc.id); // oldest → newest
 
   // Compute the unified patch from each version to the one before it. The oldest
@@ -76,6 +86,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         title={title}
         currentVersion={doc.version}
         versions={metas}
+        canRestore={canRestore}
       />
     </main>
   );

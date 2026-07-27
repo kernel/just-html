@@ -191,9 +191,11 @@ Auth:
 - API 401s carry `WWW-Authenticate: Bearer resource_metadata="…"`.
 
 Documents (`/api/v1`, `Authorization: Bearer jh_live_…`): `docs` CRUD,
-`/edits` (deterministic patches), `/rotate-token`, `/versions`, `/grants`.
-`/edits` additionally accepts a signed-in session — it backs the viewer's inline
-edit mode (see below); every other document endpoint stays API-key-only.
+`/edits` (deterministic text patches), `/ops` (structural edits),
+`/rotate-token`, `/versions`, `/versions/:n/restore`, `/grants`. `/edits`,
+`/ops` and `/versions/:n/restore` additionally accept a signed-in session — they
+back the viewer's inline edit mode and the history page's restore button (see
+below); every other document endpoint stays API-key-only.
 `GET /api/v1/docs` items carry `access` and `comment_count`. Creating an
 **email** grant sends the grantee a share-notification email — one single-use,
 7-day login link (`kind='share'` on `login_tokens`) with `next=/d/:slug` that
@@ -221,19 +223,55 @@ owner / editor or commenter grant / view-token holder with identity / any identi
 on a public doc. React: anyone who can view, with identity. Anonymous never writes.
 
 Inline editing (`/d/:slug`, owner or editor grant): the bar's pencil enters edit
-mode; clicking a block makes THAT BLOCK contentEditable, and blur / ⌘-Enter saves.
-The overlay never serializes the DOM back to HTML — a round-trip would rewrite the
-whole document (attribute order, entity forms, script-rendered subtrees) and
-byte-exact `/raw` is the product. Instead it diffs the block's TEXT NODES and
-reports `{before, after}` pairs; `lib/docs/inline-edit.ts` turns those into the
-same `{oldText,newText}` patch an agent posts to `/edits`, so versioning,
-re-anchoring, quotas and the 409/422 outcomes are all the existing paths. A text
-node's content is verbatim in the stored HTML, except where the author used
-entities — hence two payloads (literal, then entity-escaped on a `not_found`), and
-`newText` is always escaped so typing `<b>` lands as text. Structural edits are
-not expressible as text patches: Enter is suppressed, paste is flattened, and a
-node split/merge/removal restores the block and reports "structure changed" rather
-than guessing. Those go through the agent API.
+mode; clicking a block makes THAT BLOCK contentEditable. There are two write
+paths, chosen by what changed.
+
+**Typing** diffs the block's TEXT NODES on blur / ⌘-Enter and posts
+`{oldText,newText}` to `/edits` — the overlay never serializes the DOM back to
+HTML, because a round-trip would rewrite the whole document (attribute order,
+entity forms, script-rendered subtrees) and byte-exact `/raw` is the product.
+Nothing reloads and comment anchors ride the patch's offset map. A text node is
+verbatim in the stored HTML except where the author used entities, hence two
+payloads (literal, then entity-escaped on `not_found`); `newText` is always
+escaped so typing `<b>` lands as text. If the text still can't be placed — or
+appears more than once — the shell retries POSITIONALLY as a `setRuns` op, which
+names the exact text node instead of searching for its content.
+
+**Formatting and structure** posts to `/ops`. Each op names an element by the
+`data-jh-src` id written into the start tags of the overlay copy only
+(`lib/docs/html-source.ts`; direct `/raw` stays byte-pristine) and describes what
+it should become; `lib/docs/doc-ops.ts` turns that into ONE SPLICE of that
+element's byte range, so everything outside it is untouched down to the byte,
+exactly as with a text patch. Ops carry INTENT, never markup — every tag comes
+from a literal in `lib/docs/block-render.ts` and author text is always escaped —
+so there is no html to sanitize. Ids are indexes into the bytes they were served
+with, so `base_version` is effectively mandatory; a mismatch is a 409 and the
+shell replays once (safe because text ops carry the text they expect to replace).
+
+After an ops write the iframe RELOADS against the stored bytes and the caret and
+scroll are restored, rather than the overlay re-rendering the change locally: a
+second markup renderer in the sandbox would have to agree with the server's
+forever, and the moment it drifted the rendered document would stop being the
+stored one. Typing does not reload.
+
+Markdown is an INPUT METHOD, not a storage format (`lib/docs/markdown-input.ts`,
+injected into the overlay): `**bold**`, `` `code` ``, `[t](u)`, bare URLs, `## `
+/ `- ` / `> ` / ``` ``` ``` / `---` at a block start, and a multi-line paste all
+parse to runs/blocks that the server renders. Nothing round-trips back to
+asterisks. Keys: ⌘B / ⌘I / ⌘E / ⌘⇧X / ⌘K, ⌘⌥1-3 headings, ⌘⇧7 / ⌘⇧8 lists,
+⌘⇧. quote, Tab / ⇧Tab list indent and table-cell movement, Enter splits a block,
+Backspace on an empty block deletes it, `/` opens the block menu, Esc cancels.
+Blocks drag to reorder by the gutter grip. A block holding markup the run model
+can't describe (an unknown inline element) is REFUSED rather than reformatted.
+
+Because inline editing writes on every blur and every formatting command,
+consecutive patches by one author inside `VERSION_COALESCE_MS` replace the
+previous snapshot instead of adding one — the document's version still increments
+on every write so stale-write detection is unaffected, but a session of writing yields
+roughly one restorable point per five minutes instead of exhausting
+`MAX_VERSIONS_PER_DOC`. `POST /versions/:n/restore` (and the button on
+`/d/:slug/history`) writes an old version's content forward as a new one, so a
+bad edit no longer needs database surgery to undo.
 
 Viewing: `/d/:slug` (shell + sandboxed iframe; the google-docs-style comment
 rail appears once a doc has comments/reactions or the viewer can interact —

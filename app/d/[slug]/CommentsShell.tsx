@@ -83,6 +83,9 @@ type Props = {
   // server-side by canEdit). Everyone else — including view-token holders who may
   // comment — never sees the affordance, and the API would refuse them anyway.
   canEdit: boolean;
+  // Title and visibility are owner-only on the API, so only an owner is offered
+  // the inline title field. An editor grantee edits the body, not the metadata.
+  canRename: boolean;
   signedIn: boolean;
   docId: number;
   bookmarked: boolean;
@@ -154,6 +157,38 @@ function editErrorMessage(status: number, body: { reason?: string; message?: str
   return body?.message || "save failed";
 }
 
+/**
+ * Turn an /ops failure into something a person can act on. These reasons are
+ * about MARKUP, not text: an element the request named is gone, the document
+ * moved underneath, or the target isn't something inline editing rewrites.
+ */
+function opsErrorMessage(status: number, body: { reason?: string; message?: string } | null): string {
+  if (status === 409) return "edited elsewhere — reloading";
+  if (status === 429) return "too many edits — wait a moment";
+  if (status === 401 || status === 403 || status === 404) return "no edit access";
+  if (status === 413) return "document is at its 2 MB limit";
+  if (status === 422 && body?.reason === "anchor_mismatch") return "the document moved — reloading";
+  if (status === 422 && body?.reason === "not_editable") return "that part of the document isn't editable here";
+  if (status === 422 && body?.reason === "no_change") return "nothing changed";
+  return body?.message || "save failed";
+}
+
+/**
+ * One text node's change, as the overlay reports it: the text before and after
+ * (what /edits matches on) plus the element id and child index that name the same
+ * node positionally (what /ops falls back to when the text isn't unique).
+ */
+type InlineChange = TextChange & { src: number | null; child: number };
+
+/** What the overlay reports about the caret's surroundings, for the toolbar. */
+type EditSel = {
+  marks: string[];
+  href: string | null;
+  tag: string;
+  code: boolean;
+  rect: { top: number; left: number; right: number; viewTop: number } | null;
+};
+
 export default function CommentsShell(props: Props) {
   const {
     slug,
@@ -163,6 +198,7 @@ export default function CommentsShell(props: Props) {
     canComment,
     canReact,
     canEdit,
+    canRename,
     signedIn,
     docId,
     me,
@@ -261,12 +297,33 @@ export default function CommentsShell(props: Props) {
   const [editing, setEditing] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
   const versionRef = useRef(props.version);
-  const saveInlineEditRef = useRef<(changes: TextChange[]) => void>(() => {});
+  const saveInlineEditRef = useRef<(changes: InlineChange[]) => void>(() => {});
   const statusTimer = useRef<number | null>(null);
   const showEditStatus = useCallback((msg: string | null, clearAfterMs?: number) => {
     setEditStatus(msg);
     if (statusTimer.current) window.clearTimeout(statusTimer.current);
     if (msg && clearAfterMs) statusTimer.current = window.setTimeout(() => setEditStatus(null), clearAfterMs);
+  }, []);
+
+  // Formatting state. editSel drives the floating format toolbar; dirty is an
+  // open block with unsaved keystrokes (also the beforeunload guard); words is
+  // the live count the bar shows while editing.
+  const [editSel, setEditSel] = useState<EditSel | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [words, setWords] = useState<number | null>(null);
+  const [linkDraft, setLinkDraft] = useState<{ href: string } | null>(null);
+  // A structural write reloads the iframe against the bytes that were actually
+  // stored rather than replaying the change locally, so the rendered document can
+  // never drift from the document. The nonce busts the iframe's cache; the
+  // pending focus is replayed to the overlay on the next jh:ready.
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const pendingFocus = useRef<{ src: number | null; offset: number; scrollY: number } | null>(null);
+  const applyOpsRef = useRef<(ops: unknown[], focus: { src?: number; offset?: number } | null, scrollY: number) => void>(
+    () => {}
+  );
+  const reloadDoc = useCallback(() => {
+    setOverlayReady(false);
+    setReloadNonce((n) => n + 1);
   }, []);
 
   // Selection state (from the overlay) → the floating toolbar + a pending draft.
@@ -388,8 +445,8 @@ export default function CommentsShell(props: Props) {
   // overlayReady so an iframe reload re-enters edit mode rather than silently
   // dropping it (the fresh overlay starts with editing off).
   useEffect(() => {
-    if (overlayReady) postToOverlay({ type: "jh:editMode", on: editing });
-  }, [overlayReady, overlayReadyNonce, editing, postToOverlay]);
+    if (overlayReady) postToOverlay({ type: "jh:editMode", on: editing, allowed: canEdit });
+  }, [overlayReady, overlayReadyNonce, editing, canEdit, postToOverlay]);
 
   // Send sections likewise — on change or when the overlay (re)becomes ready — so
   // heading ids + gutter icons don't go stale if initialSections changes in place.
@@ -437,6 +494,14 @@ export default function CommentsShell(props: Props) {
           // when they change while mounted. Sent before any hash-driven scroll so
           // the target heading has its id by the time we ask the overlay to scroll.
           postToOverlay({ type: "jh:sections", sections: initialSections });
+          // A structural write reloaded the iframe out from under the viewer.
+          // Edit mode is re-sent by its own effect (keyed on the ready nonce);
+          // this puts the scroll and the caret back where they were.
+          if (pendingFocus.current) {
+            const f = pendingFocus.current;
+            pendingFocus.current = null;
+            postToOverlay({ type: "jh:focusBlock", src: f.src, offset: f.offset, scrollY: f.scrollY });
+          }
           break;
         case "jh:positions":
           setPositions(d.positions || {});
@@ -509,8 +574,37 @@ export default function CommentsShell(props: Props) {
           // server-side on every patch; this is only the UI gate.
           if (canEdit && Array.isArray(d.changes)) saveInlineEditRef.current(d.changes);
           break;
+        case "jh:ops":
+          // Formatting or structure. canEdit is re-checked server-side on every
+          // write; this is only the UI gate.
+          if (canEdit && Array.isArray(d.ops)) applyOpsRef.current(d.ops, d.focus, d.scrollY ?? 0);
+          break;
         case "jh:editRejected":
-          showEditStatus("structure changed — use your agent for that", 6000);
+          showEditStatus(
+            d.reason === "markup"
+              ? "this block has markup the editor can't rewrite — use your agent"
+              : d.reason === "list"
+                ? "take the item out of the list first"
+                : "structure changed — use your agent for that",
+            6000
+          );
+          break;
+        case "jh:editSel":
+          setEditSel(
+            d.active ? { marks: d.marks || [], href: d.href ?? null, tag: d.tag, code: !!d.code, rect: d.rect ?? null } : null
+          );
+          break;
+        case "jh:dirty":
+          setDirty(!!d.on);
+          break;
+        case "jh:words":
+          setWords(typeof d.words === "number" ? d.words : null);
+          break;
+        case "jh:linkPrompt":
+          setLinkDraft({ href: typeof d.href === "string" ? d.href : "" });
+          break;
+        case "jh:requestEditMode":
+          if (canEdit) setEditing(true);
           break;
         case "jh:copyLink":
           // The section link icon (inside the iframe) was clicked. Clipboard is
@@ -691,7 +785,7 @@ export default function CommentsShell(props: Props) {
   // {oldText,newText} patch an agent posts, so the stored bytes change only where
   // the text actually changed and everything around it stays byte-for-byte.
   const saveInlineEdit = useCallback(
-    async (changes: TextChange[]) => {
+    async (changes: InlineChange[]) => {
       const payloads = buildInlineEdits(changes);
       if (!payloads) return;
       showEditStatus("saving…");
@@ -706,12 +800,42 @@ export default function CommentsShell(props: Props) {
 
       let r = await post(payloads.edits);
       let body = await r.json().catch(() => null);
+      // Someone else wrote while this block was open. Replaying against the new
+      // version is safe rather than hopeful: the engine still has to find this
+      // exact text, unambiguously, so a real collision comes back as a 422.
+      if (r.status === 409 && typeof body?.current_version === "number") {
+        versionRef.current = body.current_version;
+        r = await post(payloads.edits);
+        body = await r.json().catch(() => null);
+      }
       // A miss here usually means the source spells the text with entities
       // (`&amp;`, `&nbsp;`), so the DOM text isn't a substring of it. Retry once
       // with the escaped form before telling the viewer we can't place it.
       if (r.status === 422 && body?.reason === "not_found") {
         r = await post(payloads.escaped);
         body = await r.json().catch(() => null);
+      }
+      // Still unplaceable, or placeable in more than one spot — "the" appears in
+      // a document a hundred times. Retry POSITIONALLY: the overlay also told us
+      // which text node it edited, so /ops can rewrite exactly that one without
+      // searching for its content. This is why editing a repeated phrase no
+      // longer has to be handed to an agent.
+      if (r.status === 422 && (body?.reason === "not_found" || body?.reason === "multiple_matches")) {
+        const positional = changes.filter((c) => typeof c.src === "number" && c.child >= 0);
+        if (positional.length === changes.length) {
+          applyOpsRef.current(
+            positional.map((c) => ({
+              op: "setRuns",
+              src: c.src,
+              child: c.child,
+              before: c.before,
+              runs: [{ kind: "text", text: c.after }],
+            })),
+            null,
+            0
+          );
+          return;
+        }
       }
 
       // Tell the overlay first: on a rejection it puts the author's text back, so
@@ -729,6 +853,75 @@ export default function CommentsShell(props: Props) {
     [apiBase, tokenQuery, postToOverlay, reload, showEditStatus]
   );
   saveInlineEditRef.current = (changes) => void saveInlineEdit(changes);
+
+  // Apply structural edits (lib/docs/doc-ops.ts) and re-read the document.
+  //
+  // Unlike a text patch, this always reloads the iframe. Element ids are indexes
+  // into the stored bytes, so every id the viewer is holding shifts the moment the
+  // document's length changes — and re-rendering the change locally instead would
+  // mean a second markup renderer here that has to agree with the server's. The
+  // reload costs a fetch; drift would cost correctness.
+  const applyOps = useCallback(
+    async (ops: unknown[], focus: { src?: number; offset?: number } | null, scrollY: number) => {
+      showEditStatus("saving…");
+      const post = (base: number) =>
+        fetch(`${apiBase}/ops${tokenQuery}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ ops, base_version: base }),
+        });
+
+      let r = await post(versionRef.current);
+      let body = await r.json().catch(() => null);
+      // Someone else wrote while this edit was being composed. Replaying is safe
+      // rather than hopeful: a text op carries the text it expects to replace and
+      // the server refuses on a mismatch, so a genuine collision 422s instead of
+      // silently landing on the wrong content.
+      if (r.status === 409 && typeof body?.current_version === "number") {
+        versionRef.current = body.current_version;
+        r = await post(versionRef.current);
+        body = await r.json().catch(() => null);
+      }
+      if (r.ok && typeof body?.version === "number") versionRef.current = body.version;
+
+      pendingFocus.current = {
+        src: r.ok && typeof body?.focus === "number" ? body.focus : (focus?.src ?? null),
+        offset: focus?.offset ?? 0,
+        scrollY,
+      };
+      showEditStatus(r.ok ? "saved" : opsErrorMessage(r.status, body), r.ok ? 2000 : 6000);
+      reloadDoc();
+      // The write re-anchored comments in the same transaction; pull the result.
+      await reload();
+    },
+    [apiBase, tokenQuery, reload, reloadDoc, showEditStatus]
+  );
+  applyOpsRef.current = (ops, focus, scrollY) => void applyOps(ops, focus, scrollY);
+
+  // Rename the document. Owner-only on the API, and metadata rather than
+  // content, so it is a PATCH and not part of the edit/ops machinery.
+  const saveTitle = useCallback(
+    async (next: string) => {
+      const r = await fetch(`${apiBase}${tokenQuery}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ title: next.trim() || null }),
+      });
+      showEditStatus(r.ok ? "saved" : "couldn't rename", r.ok ? 2000 : 6000);
+    },
+    [apiBase, tokenQuery, showEditStatus]
+  );
+
+  // Warn before leaving with keystrokes that never reached the server. The block
+  // commits on blur, so this only fires on a hard close mid-sentence.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   // Sync the active highlight to the overlay.
   useEffect(() => {
@@ -920,9 +1113,13 @@ export default function CommentsShell(props: Props) {
       <style>{RAIL_CSS}</style>
       <style>{JH_MD_CSS}</style>
       <div style={barStyle}>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
-          {title}
-        </span>
+        {canRename && editing ? (
+          <DocTitleField initial={title} onSave={saveTitle} />
+        ) : (
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
+            {title}
+          </span>
+        )}
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
           <ThemeToggle mode={mode} onChange={chooseMode} />
           {signedIn ? (
@@ -952,6 +1149,14 @@ export default function CommentsShell(props: Props) {
           ) : null}
           {canEdit ? (
             <>
+              {editing && words !== null ? (
+                <span style={{ fontSize: "0.75rem", opacity: 0.6 }}>{words} words</span>
+              ) : null}
+              {dirty ? (
+                <span title="unsaved changes" aria-label="unsaved changes" style={{ fontSize: "0.75rem", opacity: 0.85 }}>
+                  •
+                </span>
+              ) : null}
               {editStatus ? (
                 <span aria-live="polite" style={{ fontSize: "0.75rem", opacity: 0.85 }}>
                   {editStatus}
@@ -1006,7 +1211,7 @@ export default function CommentsShell(props: Props) {
           <iframe
             ref={iframeRef}
             title={title}
-            src={rawSrc}
+            src={reloadNonce ? `${rawSrc}&r=${reloadNonce}` : rawSrc}
             sandbox="allow-scripts allow-downloads"
             referrerPolicy="no-referrer"
             style={{ border: "none", width: "100%", height: "100%", display: "block", background: "var(--jh-stage-bg, #fff)" }}
@@ -1036,6 +1241,21 @@ export default function CommentsShell(props: Props) {
                 reactAnchored(emoji, selection.anchor);
                 setSelection(null);
                 postToOverlay({ type: "jh:clearSelection" });
+              }}
+            />
+          ) : null}
+          {editing && editSel && editSel.rect ? (
+            <FormatToolbar
+              sel={editSel}
+              onCommand={(name, arg) => postToOverlay({ type: "jh:cmd", name, arg })}
+            />
+          ) : null}
+          {linkDraft ? (
+            <LinkField
+              initial={linkDraft.href}
+              onDone={(href) => {
+                setLinkDraft(null);
+                postToOverlay({ type: "jh:applyLink", href });
               }}
             />
           ) : null}
@@ -1224,6 +1444,138 @@ function ThemeToggle({ mode, onChange }: { mode: ThemeMode; onChange: (m: ThemeM
         </button>
       ))}
     </span>
+  );
+}
+
+const BLOCK_CHOICES: { key: string; label: string }[] = [
+  { key: "p", label: "Text" },
+  { key: "h1", label: "Heading 1" },
+  { key: "h2", label: "Heading 2" },
+  { key: "h3", label: "Heading 3" },
+  { key: "blockquote", label: "Quote" },
+  { key: "ul", label: "Bulleted list" },
+  { key: "ol", label: "Numbered list" },
+  { key: "pre", label: "Code" },
+];
+
+const MARK_BUTTONS: { mark: string; label: string; title: string; style?: React.CSSProperties }[] = [
+  { mark: "strong", label: "B", title: "Bold (⌘B)", style: { fontWeight: 800 } },
+  { mark: "em", label: "I", title: "Italic (⌘I)", style: { fontStyle: "italic" } },
+  { mark: "code", label: "‹›", title: "Code (⌘E)" },
+  { mark: "del", label: "S", title: "Strikethrough (⌘⇧X)", style: { textDecoration: "line-through" } },
+];
+
+/**
+ * Formatting controls for the open block. Every button suppresses the default
+ * mousedown so the click never moves focus out of the iframe — losing focus would
+ * blur the block, commit it, and leave the command with nothing to act on.
+ */
+function FormatToolbar({
+  sel,
+  onCommand,
+}: {
+  sel: EditSel;
+  onCommand: (name: string, arg?: string) => void;
+}) {
+  const top = `max(8px, min(${Math.max(8, Math.round((sel.rect?.viewTop ?? 8) - 44))}px, calc(100% - 52px)))`;
+  const keep = (e: React.MouseEvent) => e.preventDefault();
+  const listTag = sel.tag === "li" ? "" : sel.tag;
+  return (
+    <div style={{ ...fmttoolStyle, top }} onMouseDown={keep}>
+      <select
+        aria-label="block type"
+        value={BLOCK_CHOICES.some((c) => c.key === listTag) ? listTag : ""}
+        onMouseDown={keep}
+        onChange={(e) => onCommand("block", e.target.value)}
+        style={fmttoolSelect}
+      >
+        {!BLOCK_CHOICES.some((c) => c.key === listTag) ? <option value="">—</option> : null}
+        {BLOCK_CHOICES.map((c) => (
+          <option key={c.key} value={c.key}>
+            {c.label}
+          </option>
+        ))}
+      </select>
+      {sel.code
+        ? null
+        : MARK_BUTTONS.map((b) => (
+            <button
+              key={b.mark}
+              type="button"
+              title={b.title}
+              aria-pressed={sel.marks.includes(b.mark)}
+              onMouseDown={keep}
+              onClick={() => onCommand("mark", b.mark)}
+              style={{ ...fmttoolBtn, ...b.style, opacity: sel.marks.includes(b.mark) ? 1 : 0.72 }}
+            >
+              {b.label}
+            </button>
+          ))}
+      {sel.code ? null : (
+        <button
+          type="button"
+          title="Link (⌘K)"
+          aria-pressed={!!sel.href}
+          onMouseDown={keep}
+          onClick={() => onCommand("linkPrompt")}
+          style={{ ...fmttoolBtn, opacity: sel.href ? 1 : 0.72 }}
+        >
+          🔗
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** URL entry for ⌘K. Empty and Enter removes the link. */
+function LinkField({ initial, onDone }: { initial: string; onDone: (href: string) => void }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <div style={{ ...fmttoolStyle, top: 8, flexDirection: "row" }}>
+      <input
+        autoFocus
+        value={value}
+        placeholder="https://…  (empty removes)"
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onDone(value.trim());
+          if (e.key === "Escape") onDone(initial);
+        }}
+        style={{ ...fmttoolInput, width: 260 }}
+      />
+      <button type="button" style={fmttoolBtn} onClick={() => onDone(value.trim())}>
+        ✓
+      </button>
+    </div>
+  );
+}
+
+/** The document title, editable in place while the owner is in edit mode. */
+function DocTitleField({ initial, onSave }: { initial: string; onSave: (v: string) => void }) {
+  const [value, setValue] = useState(initial);
+  return (
+    <input
+      aria-label="document title"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={() => {
+        if (value !== initial) onSave(value);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      style={{
+        font: "inherit",
+        fontWeight: 700,
+        color: "inherit",
+        background: "transparent",
+        border: "1px dashed var(--jh-bar-muted, #bbb)",
+        borderRadius: 4,
+        padding: "1px 4px",
+        minWidth: 0,
+        flex: "0 1 auto",
+      }}
+    />
   );
 }
 
@@ -1902,6 +2254,51 @@ const seltoolStyle: React.CSSProperties = {
   padding: 4,
   boxShadow: "0 4px 14px var(--jh-sel-shadow, rgba(0,0,0,.3))",
   zIndex: 30,
+};
+
+const fmttoolStyle: React.CSSProperties = {
+  position: "absolute",
+  left: 8,
+  display: "flex",
+  alignItems: "center",
+  gap: 2,
+  background: "var(--jh-sel-bg, #111)",
+  border: "1px solid var(--jh-sel-border, #111)",
+  borderRadius: 7,
+  padding: 4,
+  boxShadow: "0 4px 14px var(--jh-sel-shadow, rgba(0,0,0,.3))",
+  zIndex: 31,
+};
+
+const fmttoolBtn: React.CSSProperties = {
+  minWidth: 28,
+  height: 26,
+  border: "none",
+  background: "transparent",
+  color: "var(--jh-sel-fg, #fff)",
+  fontSize: 13,
+  cursor: "pointer",
+  borderRadius: 5,
+};
+
+const fmttoolSelect: React.CSSProperties = {
+  height: 26,
+  border: "none",
+  borderRadius: 5,
+  background: "transparent",
+  color: "var(--jh-sel-fg, #fff)",
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const fmttoolInput: React.CSSProperties = {
+  height: 24,
+  border: "1px solid var(--jh-input-border, #444)",
+  borderRadius: 4,
+  background: "var(--jh-sel-bg, #111)",
+  color: "var(--jh-sel-fg, #fff)",
+  fontSize: 12,
+  padding: "0 6px",
 };
 
 const seltoolBtn: React.CSSProperties = {

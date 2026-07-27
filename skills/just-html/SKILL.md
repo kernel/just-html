@@ -103,9 +103,34 @@ Patch (deterministic edits) -> POST /docs/:slug/edits   { edits:[{oldText,newTex
   # no-match / overlapping edits -> 422 naming the failing edit (retry with more
   # context).
   # This endpoint also accepts a signed-in session, which is how the viewer's
-  # inline edit mode saves: an owner or editor grantee opens /d/:slug, clicks the
-  # pencil, and types on the page. It patches TEXT only (typos, rewording) and
-  # posts the same edits you would; structural changes stay an agent job.
+  # inline edit mode saves typing: an owner or editor grantee opens /d/:slug,
+  # clicks the pencil, and types on the page.
+
+Structural edits -> POST /docs/:slug/ops   { ops:[{op, src, ...}], base_version }
+  # The markup sibling of /edits. /edits changes TEXT by matching it; /ops changes
+  # MARKUP by naming an element: setRuns, setInline, setText, unwrap, retag,
+  # replaceWith, wrap, insert, delete, move, indent, outdent, insertRow.
+  #
+  # Ops describe INTENT, not html — a block is {tag, runs:[{kind:"text", text,
+  # marks:["strong"|"em"|"code"|"del"], href?}]} — and the server renders it, so
+  # the tag set is fixed and author text is always escaped.
+  #
+  # src is the element's data-jh-src id, which is present ONLY in the overlay copy
+  # of a document (/d/:slug/raw?overlay=1) and is an index into the exact bytes it
+  # was served with. base_version is therefore effectively required: a mismatch is
+  # a 409, and dereferencing a stale id would otherwise be a silent mis-edit.
+  #
+  # This is what the viewer's edit mode uses for bold/italic/links, block types,
+  # new blocks, deletes, drag-reorder, list nesting and tables. AS AN AGENT YOU
+  # RARELY WANT IT: you have the whole document, so /edits (text) or PATCH (full
+  # rewrite) is simpler and needs no element ids.
+
+Restore an old version -> POST /docs/:slug/versions/:n/restore
+  curl -s -X POST https://justhtml.sh/api/v1/docs/fierce-tiger-12345/versions/3/restore \
+    -H "Authorization: Bearer $JUSTHTML_API_KEY"
+  # Writes v3's html forward as a NEW version, so nothing is lost and the restore
+  # is itself undoable. Owner or editor grant. 422 if that content is already
+  # current. The web equivalent is the restore button on /d/:slug/history.
 
 Delete (soft) -> DELETE /docs/:slug
   curl -s -X DELETE https://justhtml.sh/api/v1/docs/fierce-tiger-12345 -H "Authorization: Bearer $JUSTHTML_API_KEY"
@@ -262,7 +287,7 @@ Resource quotas (per user):
 
 API rate limits (per API key) -> 429 with Retry-After + { error: "rate_limited" }:
   Doc creates                 60 / hour
-  Writes (PATCH,/edits,grants,rotate)  60 / min
+  Writes (PATCH,/edits,/ops,grants,rotate)  60 / min
   Reads (GET)                 300 / min
 
 Unauthenticated viewer routes (per IP):  300 / min

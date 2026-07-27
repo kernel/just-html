@@ -663,21 +663,37 @@
           "patch": {
             "type": "array",
             "items": {
-              "type": "object",
-              "properties": {
-                "oldText": {
-                  "type": "string"
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "oldText": {
+                      "type": "string"
+                    },
+                    "newText": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "oldText",
+                    "newText"
+                  ]
                 },
-                "newText": {
-                  "type": "string"
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "op"
+                  ],
+                  "additionalProperties": {}
                 }
-              },
-              "required": [
-                "oldText",
-                "newText"
               ]
             },
-            "description": "The edits payload as requested, present only when edit_kind=patch (the list of {oldText,newText} applied). Omitted otherwise."
+            "description": "The write payload as requested, present only when edit_kind=patch: the {oldText,newText} edits from /edits, or the {op,…} operations from /ops. Consecutive writes by one author inside a short window are coalesced into a single retained version, so this may list the payloads of several requests."
           },
           "bytes": {
             "type": "integer"
@@ -819,6 +835,1143 @@
           "edits"
         ],
         "description": "Apply deterministic patches. edits is a non-empty list of {oldText,newText}. Always send base_version; a mismatch returns 409."
+      },
+      "OpsBody": {
+        "type": "object",
+        "properties": {
+          "ops": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "setRuns"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "child": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "before": {
+                      "type": "string"
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "text"
+                                ]
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "marks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "strong",
+                                    "em",
+                                    "del",
+                                    "code"
+                                  ]
+                                },
+                                "maxItems": 4
+                              },
+                              "href": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "br"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "img"
+                                ]
+                              },
+                              "src": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "alt": {
+                                "type": "string",
+                                "maxLength": 500
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "src"
+                            ]
+                          }
+                        ]
+                      },
+                      "maxItems": 400
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "child",
+                    "before",
+                    "runs"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "setInline"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "runs": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "text"
+                                ]
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "marks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "strong",
+                                    "em",
+                                    "del",
+                                    "code"
+                                  ]
+                                },
+                                "maxItems": 4
+                              },
+                              "href": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "br"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "img"
+                                ]
+                              },
+                              "src": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "alt": {
+                                "type": "string",
+                                "maxLength": 500
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "src"
+                            ]
+                          }
+                        ]
+                      },
+                      "maxItems": 400
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "runs"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "setText"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 100000
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "text"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "unwrap"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "retag"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tag": {
+                      "type": "string",
+                      "enum": [
+                        "p",
+                        "h1",
+                        "h2",
+                        "h3",
+                        "h4",
+                        "h5",
+                        "h6",
+                        "blockquote",
+                        "li",
+                        "dt",
+                        "dd",
+                        "figcaption",
+                        "td",
+                        "th",
+                        "caption",
+                        "summary",
+                        "ul",
+                        "ol"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "tag"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "replaceWith"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "p",
+                                  "h1",
+                                  "h2",
+                                  "h3",
+                                  "h4",
+                                  "h5",
+                                  "h6",
+                                  "blockquote",
+                                  "li",
+                                  "dt",
+                                  "dd",
+                                  "figcaption",
+                                  "td",
+                                  "th",
+                                  "caption",
+                                  "summary"
+                                ]
+                              },
+                              "runs": {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "text"
+                                          ]
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "maxLength": 20000
+                                        },
+                                        "marks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "strong",
+                                              "em",
+                                              "del",
+                                              "code"
+                                            ]
+                                          },
+                                          "maxItems": 4
+                                        },
+                                        "href": {
+                                          "type": "string",
+                                          "maxLength": 2048
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "text"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "br"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "kind"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "img"
+                                          ]
+                                        },
+                                        "src": {
+                                          "type": "string",
+                                          "maxLength": 2048
+                                        },
+                                        "alt": {
+                                          "type": "string",
+                                          "maxLength": 500
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "src"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "maxItems": 400
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "runs"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "ul",
+                                  "ol"
+                                ]
+                              },
+                              "items": {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "text"
+                                            ]
+                                          },
+                                          "text": {
+                                            "type": "string",
+                                            "maxLength": 20000
+                                          },
+                                          "marks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "enum": [
+                                                "strong",
+                                                "em",
+                                                "del",
+                                                "code"
+                                              ]
+                                            },
+                                            "maxItems": 4
+                                          },
+                                          "href": {
+                                            "type": "string",
+                                            "maxLength": 2048
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "text"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "br"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "img"
+                                            ]
+                                          },
+                                          "src": {
+                                            "type": "string",
+                                            "maxLength": 2048
+                                          },
+                                          "alt": {
+                                            "type": "string",
+                                            "maxLength": 500
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "src"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "maxItems": 400
+                                },
+                                "maxItems": 200
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "items"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "pre"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "maxLength": 100000
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "code"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "hr"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "tag"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "table"
+                                ]
+                              },
+                              "rows": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
+                              },
+                              "cols": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 12
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "rows",
+                              "cols"
+                            ]
+                          }
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 100
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "blocks"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "wrap"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "tags": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "ul",
+                          "ol",
+                          "blockquote"
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 2
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "tags"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "insert"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "where": {
+                      "type": "string",
+                      "enum": [
+                        "before",
+                        "after",
+                        "append"
+                      ]
+                    },
+                    "blocks": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "p",
+                                  "h1",
+                                  "h2",
+                                  "h3",
+                                  "h4",
+                                  "h5",
+                                  "h6",
+                                  "blockquote",
+                                  "li",
+                                  "dt",
+                                  "dd",
+                                  "figcaption",
+                                  "td",
+                                  "th",
+                                  "caption",
+                                  "summary"
+                                ]
+                              },
+                              "runs": {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "text"
+                                          ]
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "maxLength": 20000
+                                        },
+                                        "marks": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "enum": [
+                                              "strong",
+                                              "em",
+                                              "del",
+                                              "code"
+                                            ]
+                                          },
+                                          "maxItems": 4
+                                        },
+                                        "href": {
+                                          "type": "string",
+                                          "maxLength": 2048
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "text"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "br"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "kind"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": [
+                                            "img"
+                                          ]
+                                        },
+                                        "src": {
+                                          "type": "string",
+                                          "maxLength": 2048
+                                        },
+                                        "alt": {
+                                          "type": "string",
+                                          "maxLength": 500
+                                        }
+                                      },
+                                      "required": [
+                                        "kind",
+                                        "src"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                "maxItems": 400
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "runs"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "ul",
+                                  "ol"
+                                ]
+                              },
+                              "items": {
+                                "type": "array",
+                                "items": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "text"
+                                            ]
+                                          },
+                                          "text": {
+                                            "type": "string",
+                                            "maxLength": 20000
+                                          },
+                                          "marks": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "enum": [
+                                                "strong",
+                                                "em",
+                                                "del",
+                                                "code"
+                                              ]
+                                            },
+                                            "maxItems": 4
+                                          },
+                                          "href": {
+                                            "type": "string",
+                                            "maxLength": 2048
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "text"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "br"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "kind"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "img"
+                                            ]
+                                          },
+                                          "src": {
+                                            "type": "string",
+                                            "maxLength": 2048
+                                          },
+                                          "alt": {
+                                            "type": "string",
+                                            "maxLength": 500
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "src"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "maxItems": 400
+                                },
+                                "maxItems": 200
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "items"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "pre"
+                                ]
+                              },
+                              "code": {
+                                "type": "string",
+                                "maxLength": 100000
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "code"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "hr"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "tag"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "tag": {
+                                "type": "string",
+                                "enum": [
+                                  "table"
+                                ]
+                              },
+                              "rows": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
+                              },
+                              "cols": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 12
+                              }
+                            },
+                            "required": [
+                              "tag",
+                              "rows",
+                              "cols"
+                            ]
+                          }
+                        ]
+                      },
+                      "minItems": 1,
+                      "maxItems": 100
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "where",
+                    "blocks"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "delete"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "move"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "parent": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "after": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "parent",
+                    "after"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "indent"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "outdent"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "insertRow"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src"
+                  ]
+                }
+              ]
+            },
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "The operations to apply, in one transaction. 1–50 ops."
+          },
+          "base_version": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1,
+            "description": "The version the element ids were derived against. REQUIRED in practice: ids only mean anything against the exact bytes they were served with, and a mismatch returns 409."
+          }
+        },
+        "required": [
+          "ops"
+        ],
+        "description": "Structural edits from the inline editor: formatting, block type, insert/delete/move, list nesting. Ops name elements by the data-jh-src id served in the overlay copy of the document."
+      },
+      "RestoreVersionResponse": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "example": "fierce-tiger-12345"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "example": "https://justhtml.sh/d/fierce-tiger-12345"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "type": "integer"
+          },
+          "public": {
+            "type": "boolean"
+          },
+          "view_token": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "editor",
+              "commenter",
+              "viewer"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "html": {
+            "type": "string"
+          },
+          "restored_from": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "slug",
+          "url",
+          "title",
+          "version",
+          "public",
+          "created_at",
+          "updated_at",
+          "html",
+          "restored_from"
+        ],
+        "description": "The document after restoring, plus the version its content came from. Restoring never destroys history: it writes the old content forward as a new version."
       },
       "TextAnchor": {
         "type": "object",
@@ -2242,6 +3395,119 @@
         }
       }
     },
+    "/api/v1/docs/{slug}/ops": {
+      "post": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Apply structural edits (formatting, block type, insert/move/delete)",
+        "description": "The markup sibling of /edits: /edits changes text by matching it, this changes markup by naming an element. Ops reference elements by the data-jh-src id carried in the overlay copy of the document, which is only meaningful against the bytes it was served with — always send base_version; a mismatch returns 409. An op that cannot be applied (unknown element, text that has moved, an element inline editing does not modify, two ops on the same bytes) returns 422 naming the failing op index. Owner or editor grant. Identity: API key OR signed-in session.",
+        "operationId": "applyDocOps",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Applied. `focus` is present when the request created content.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocWithHtml"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "base_version conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "HTML exceeds the 2 MB per-document size limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An operation could not be applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/docs/{slug}/rotate-token": {
       "post": {
         "tags": [
@@ -2417,6 +3683,102 @@
           },
           "404": {
             "description": "No such document (also returned for inaccessible docs; no existence oracle)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/docs/{slug}/versions/{n}/restore": {
+      "post": {
+        "tags": [
+          "docs"
+        ],
+        "summary": "Restore an earlier version's content",
+        "description": "Writes version n's html forward as a new version (edit_kind 'rewrite'). Nothing is deleted, so a restore is itself undoable. Owner or editor grant. Identity: API key OR signed-in session. Returns 422 when that version's content is already current.",
+        "operationId": "restoreVersion",
+        "security": [
+          {
+            "bearerApiKey": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Slug"
+          },
+          {
+            "$ref": "#/components/parameters/VersionNum"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestoreVersionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body or parameters",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing/invalid credential",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such document or version (also returned for inaccessible docs)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "That version's content is already current",
             "content": {
               "application/json": {
                 "schema": {

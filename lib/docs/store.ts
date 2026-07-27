@@ -1,6 +1,7 @@
 import { getPool, query } from "@/lib/db";
 import { generateSlug, generateViewToken } from "@/lib/docs/slug";
 import { applyEdits, type Edit } from "@/lib/docs/edit-diff";
+import { applyOps, type Op } from "@/lib/docs/doc-ops";
 import { reanchorComments } from "@/lib/docs/reanchor";
 import {
   MAX_DOCS_PER_USER,
@@ -8,6 +9,7 @@ import {
   MAX_STORAGE_BYTES_PER_USER,
   MAX_VERSIONS_PER_DOC,
   ORIGIN,
+  VERSION_COALESCE_MS,
 } from "@/lib/docs/config";
 
 // Document persistence (birthday.md "Document API", "Editing", "Limits").
@@ -37,6 +39,9 @@ export type DocRow = {
 };
 
 export type EditKind = "create" | "patch" | "rewrite";
+
+/** The subset of a pg client the helpers below need (pool or transaction). */
+type DbClient = { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }> };
 
 export function docUrl(slug: string): string {
   return `${ORIGIN}/d/${slug}`;
@@ -325,6 +330,64 @@ export async function rewriteDoc(opts: {
 }
 
 /**
+ * Record a patch snapshot, folding it into the previous one when it continues
+ * the same author's editing session (VERSION_COALESCE_MS).
+ *
+ * Inline editing writes far more often than an agent does — every blur, every
+ * ⌘B — and one snapshot per keystroke burst would push a doc past
+ * MAX_VERSIONS_PER_DOC in an afternoon and prune the history that makes those
+ * writes recoverable. Coalescing keeps roughly one restorable point per five
+ * minutes of continuous work.
+ *
+ * The document's version still increments on every write, so a concurrent writer
+ * with a stale base_version is still detected. `created_at` is deliberately NOT
+ * refreshed: the window is anchored to the start of the run, so a long session
+ * yields a snapshot every five minutes rather than one at the very end.
+ */
+async function writePatchVersion(
+  client: DbClient,
+  docId: number,
+  version: number,
+  html: string,
+  authorUserId: number,
+  payload: unknown[]
+): Promise<void> {
+  const { rows } = await client.query(
+    `SELECT id, version, edit_kind, author_user_id,
+            (created_at > now() - ($2::bigint * interval '1 millisecond')) AS fresh
+       FROM doc_versions WHERE doc_id = $1 ORDER BY version DESC LIMIT 1`,
+    [docId, VERSION_COALESCE_MS]
+  );
+  const prev = rows[0] as
+    | { id: number; version: number; edit_kind: EditKind; author_user_id: number | null; fresh: boolean }
+    | undefined;
+
+  const continues =
+    prev &&
+    prev.fresh &&
+    prev.edit_kind === "patch" &&
+    prev.author_user_id === authorUserId &&
+    prev.version === version - 1;
+
+  if (continues) {
+    // The retained payload stays the full list of edits since the snapshot
+    // before it, so `patch` still describes how this version was reached.
+    await client.query(
+      `UPDATE doc_versions
+          SET version = $2, html = $3, patch = coalesce(patch, '[]'::jsonb) || $4::jsonb
+        WHERE id = $1`,
+      [prev.id, version, html, JSON.stringify(payload)]
+    );
+    return;
+  }
+  await client.query(
+    `INSERT INTO doc_versions (doc_id, version, html, author_user_id, edit_kind, patch)
+     VALUES ($1, $2, $3, $4, 'patch', $5)`,
+    [docId, version, html, authorUserId, JSON.stringify(payload)]
+  );
+}
+
+/**
  * Apply a patch (a list of {oldText,newText} edits) — birthday.md "Editing".
  *
  * Concurrency (two layers, both Postgres):
@@ -349,13 +412,80 @@ export async function applyPatch(opts: {
   edits: Edit[];
   baseVersion?: number;
   authorUserId: number;
-}):
-  | Promise<
-      | { doc: DocRow }
-      | { quota: QuotaError }
-      | { stale: { currentVersion: number } }
-      | { tooLarge: { gotBytes: number } }
-    > {
+}): Promise<WriteResult> {
+  return writeUnderLock({
+    doc: opts.doc,
+    baseVersion: opts.baseVersion,
+    authorUserId: opts.authorUserId,
+    // Apply the edits deterministically. EditApplyError propagates → 422.
+    transform: (html) => ({ html: applyEdits(html, opts.edits) }),
+    payload: opts.edits,
+    // Patch write → tier 1 (offset map through these edits) then tier 2.
+    reanchorEdits: opts.edits,
+  });
+}
+
+/**
+ * Apply structural operations (lib/docs/doc-ops.ts) — the write path behind the
+ * viewer's formatting, block and list commands.
+ *
+ * Identical concurrency and quota handling to applyPatch. It differs in two
+ * ways: OpApplyError propagates instead of EditApplyError, and the result
+ * carries `focus`, the id newly created content ended up with, which the viewer
+ * needs because every element id shifts when the document's length changes.
+ *
+ * Re-anchoring runs without an offset map: ops rewrite markup, so the tier-1
+ * mapping (which walks {oldText,newText} through the TEXT projection) does not
+ * describe them. Comments fall through to tier-2 quote re-finding, the same as
+ * for a full rewrite.
+ */
+export async function applyDocOps(opts: {
+  doc: DocRow;
+  ops: Op[];
+  baseVersion?: number;
+  authorUserId: number;
+}): Promise<WriteResult> {
+  return writeUnderLock({
+    doc: opts.doc,
+    baseVersion: opts.baseVersion,
+    authorUserId: opts.authorUserId,
+    transform: (html) => applyOps(html, opts.ops),
+    payload: opts.ops,
+  });
+}
+
+export type WriteResult =
+  | { doc: DocRow; focus?: number }
+  | { quota: QuotaError }
+  | { stale: { currentVersion: number } }
+  | { tooLarge: { gotBytes: number } };
+
+/**
+ * The shared body of a versioned document write.
+ *
+ * Concurrency (two layers, both Postgres):
+ *  1. Serialization — SELECT ... FOR UPDATE on the documents row inside the
+ *     transaction. Concurrent writers queue; the txn is short.
+ *  2. Staleness — if base_version is supplied and ≠ the locked current version,
+ *     we abort with a `stale` result carrying the current version (→ 409). This
+ *     is checked AFTER acquiring the lock so it reflects the truly-current row,
+ *     not a value read before a competing writer committed.
+ *
+ * `transform` runs against the locked html and may throw a structured apply
+ * error, which propagates to the HTTP layer for a 422 (it is NOT a quota/stale
+ * outcome). On success: version bump + a 'patch' doc_versions snapshot whose
+ * `patch` jsonb is the REQUESTED payload (snapshot html is the RESULT), then
+ * prune. Storage quota and the 2 MB per-doc cap are re-checked under the lock
+ * against the produced html, which a write can grow past the cap.
+ */
+async function writeUnderLock(opts: {
+  doc: DocRow;
+  baseVersion?: number;
+  authorUserId: number;
+  transform: (html: string) => { html: string; focus?: number };
+  payload: unknown[];
+  reanchorEdits?: Edit[];
+}): Promise<WriteResult> {
   const client = await getPool().connect();
   try {
     await client.query("BEGIN");
@@ -375,14 +505,14 @@ export async function applyPatch(opts: {
       return { stale: { currentVersion: current.version } };
     }
 
-    // Apply the edits deterministically. EditApplyError propagates → 422.
-    let newHtml: string;
+    let produced: { html: string; focus?: number };
     try {
-      newHtml = applyEdits(current.html, opts.edits);
+      produced = opts.transform(current.html);
     } catch (e) {
       await client.query("ROLLBACK");
       throw e;
     }
+    const newHtml = produced.html;
 
     // 2 MB per-doc cap on the produced html.
     const newHtmlBytes = byteLen(newHtml);
@@ -406,21 +536,23 @@ export async function applyPatch(opts: {
        WHERE id = $1 RETURNING *`,
       [current.id, newHtml, nextVersion]
     );
-    await client.query(
-      `INSERT INTO doc_versions (doc_id, version, html, author_user_id, edit_kind, patch)
-       VALUES ($1, $2, $3, $4, 'patch', $5)`,
-      [current.id, nextVersion, newHtml, opts.authorUserId, JSON.stringify(opts.edits)]
-    );
+    await writePatchVersion(client, current.id, nextVersion, newHtml, opts.authorUserId, opts.payload);
     await pruneVersions(client, current.id);
-    // Re-anchor comments in the SAME transaction. Patch write → tier 1 (offset
-    // map through these edits) then tier 2 fallthrough. Best-effort.
+    // Re-anchor comments in the SAME transaction. Best-effort.
     try {
-      await reanchorComments(client, current.id, current.html, newHtml, nextVersion, opts.edits);
+      await reanchorComments(
+        client,
+        current.id,
+        current.html,
+        newHtml,
+        nextVersion,
+        opts.reanchorEdits
+      );
     } catch {
       /* re-anchoring is best-effort; never block a doc write on it */
     }
     await client.query("COMMIT");
-    return { doc: updRows[0] as DocRow };
+    return { doc: updRows[0] as DocRow, focus: produced.focus };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
     throw e;
@@ -494,10 +626,7 @@ export async function listVersionsWithHtml(docId: number): Promise<VersionRow[]>
  * Prune retained version snapshots beyond MAX_VERSIONS_PER_DOC, oldest first.
  * Runs inside the caller's transaction. Keeps the newest N versions.
  */
-async function pruneVersions(
-  client: { query: (text: string, params?: unknown[]) => Promise<{ rows: unknown[] }> },
-  docId: number
-): Promise<void> {
+async function pruneVersions(client: DbClient, docId: number): Promise<void> {
   await client.query(
     `DELETE FROM doc_versions
      WHERE doc_id = $1

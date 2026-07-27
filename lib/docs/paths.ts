@@ -21,6 +21,8 @@ import {
   DocListResponse,
   DocWithHtml,
   EditsBody,
+  OpsBody,
+  RestoreVersionResponse,
   GrantBody,
   GrantCreatedResponse,
   GrantDeletedResponse,
@@ -251,6 +253,38 @@ registry.registerPath({
   },
 });
 
+// POST /api/v1/docs/{slug}/ops — apply structural edits (the inline editor)
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/docs/{slug}/ops",
+  tags: ["docs"],
+  summary: "Apply structural edits (formatting, block type, insert/move/delete)",
+  description:
+    "The markup sibling of /edits: /edits changes text by matching it, this changes markup by naming an element. Ops reference elements by the data-jh-src id carried in the overlay copy of the document, which is only meaningful against the bytes it was served with — always send base_version; a mismatch returns 409. An op that cannot be applied (unknown element, text that has moved, an element inline editing does not modify, two ops on the same bytes) returns 422 naming the failing op index. Owner or editor grant. Identity: API key OR signed-in session.",
+  operationId: "applyDocOps",
+  security: keyOrSessionSecurity,
+  request: {
+    params: z.object({ slug: slugParam }),
+    body: { required: true, content: { "application/json": { schema: OpsBody } } },
+  },
+  responses: {
+    200: {
+      description: "Applied. `focus` is present when the request created content.",
+      content: { "application/json": { schema: DocWithHtml } },
+    },
+    400: { description: "Invalid request body or parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    404: {
+      description: "No such document (also returned for inaccessible docs; no existence oracle)",
+      content: jsonError,
+    },
+    409: { description: "base_version conflict", content: jsonError },
+    413: { description: "HTML exceeds the 2 MB per-document size limit", content: jsonError },
+    422: { description: "An operation could not be applied", content: jsonError },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
 // POST /api/v1/docs/{slug}/rotate-token — rotate the view token (owner only)
 registry.registerPath({
   method: "post",
@@ -317,6 +351,34 @@ registry.registerPath({
       description: "No such document (also returned for inaccessible docs; no existence oracle)",
       content: jsonError,
     },
+    429: { description: "Rate limit exceeded", content: jsonError },
+  },
+});
+
+// POST /api/v1/docs/{slug}/versions/{n}/restore — put an old version back
+registry.registerPath({
+  method: "post",
+  path: "/api/v1/docs/{slug}/versions/{n}/restore",
+  tags: ["docs"],
+  summary: "Restore an earlier version's content",
+  description:
+    "Writes version n's html forward as a new version (edit_kind 'rewrite'). Nothing is deleted, so a restore is itself undoable. Owner or editor grant. Identity: API key OR signed-in session. Returns 422 when that version's content is already current.",
+  operationId: "restoreVersion",
+  security: keyOrSessionSecurity,
+  request: { params: z.object({ slug: slugParam, n: versionNumParam }) },
+  responses: {
+    200: {
+      description: "Restored",
+      content: { "application/json": { schema: RestoreVersionResponse } },
+    },
+    400: { description: "Invalid request body or parameters", content: jsonError },
+    401: { description: "Missing/invalid credential", content: jsonError },
+    403: { description: "Storage quota exceeded", content: jsonError },
+    404: {
+      description: "No such document or version (also returned for inaccessible docs)",
+      content: jsonError,
+    },
+    422: { description: "That version's content is already current", content: jsonError },
     429: { description: "Rate limit exceeded", content: jsonError },
   },
 });

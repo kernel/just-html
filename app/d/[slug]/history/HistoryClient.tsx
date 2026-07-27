@@ -26,6 +26,9 @@ type Props = {
   title: string;
   currentVersion: number;
   versions: VersionMeta[]; // newest first
+  // Owner or editor grant. Everyone else reads history without a restore control;
+  // the endpoint refuses them regardless.
+  canRestore: boolean;
 };
 
 const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`;
@@ -44,7 +47,7 @@ function fmtDate(iso: string): string {
   }
 }
 
-export default function HistoryClient({ slug, title, currentVersion, versions }: Props) {
+export default function HistoryClient({ slug, title, currentVersion, versions, canRestore }: Props) {
   // Default selection: the newest version that has a diff (i.e. not the lone
   // oldest snapshot). Falls back to the newest version regardless.
   const firstWithPatch = versions.find((v) => v.patch !== undefined);
@@ -52,8 +55,29 @@ export default function HistoryClient({ slug, title, currentVersion, versions }:
     firstWithPatch?.version ?? versions[0]?.version ?? currentVersion
   );
   const [split, setSplit] = useState<boolean>(false);
+  const [restoring, setRestoring] = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const sel = versions.find((v) => v.version === selected);
+
+  // Restore writes the old content FORWARD as a new version — nothing is deleted
+  // and the restore is itself undoable — so this needs no confirmation beyond the
+  // click, and the page simply reloads onto the new head.
+  async function restore(version: number) {
+    setRestoring(true);
+    setRestoreError(null);
+    const r = await fetch(
+      `/api/v1/docs/${encodeURIComponent(slug)}/versions/${version}/restore${tokenSuffix()}`,
+      { method: "POST", credentials: "same-origin" }
+    );
+    if (r.ok) {
+      window.location.reload();
+      return;
+    }
+    const body = await r.json().catch(() => null);
+    setRestoring(false);
+    setRestoreError(body?.message || `restore failed (${r.status})`);
+  }
 
   return (
     <div style={{ fontFamily: MONO, fontSize: 13, lineHeight: 1.55 }}>
@@ -139,7 +163,23 @@ export default function HistoryClient({ slug, title, currentVersion, versions }:
             <button type="button" onClick={() => setSplit(true)} style={toggleStyle(split)}>
               split
             </button>
+            {canRestore && sel && sel.version !== currentVersion ? (
+              <button
+                type="button"
+                disabled={restoring}
+                onClick={() => restore(sel.version)}
+                style={{ ...toggleStyle(false), marginLeft: "auto" }}
+                title={`Put v${sel.version}'s content back as a new version`}
+              >
+                {restoring ? "restoring…" : `restore v${sel.version}`}
+              </button>
+            ) : null}
           </div>
+          {restoreError ? (
+            <p role="alert" style={{ color: "#b00", marginTop: 0 }}>
+              {restoreError}
+            </p>
+          ) : null}
 
           {sel && sel.patch !== undefined ? (
             <PatchDiff

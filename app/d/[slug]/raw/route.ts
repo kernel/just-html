@@ -6,6 +6,7 @@ import { clientIp } from "@/lib/auth/request";
 import { checkLimits } from "@/lib/auth/ratelimit";
 import { RL_VIEWER_PER_MIN } from "@/lib/docs/config";
 import { OVERLAY_SCRIPT } from "@/lib/docs/overlay";
+import { annotateSource } from "@/lib/docs/html-source";
 
 export const dynamic = "force-dynamic";
 
@@ -87,8 +88,15 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   // Inject the comment overlay only for the shell-embedded variant. We append the
   // script before </body> (or at the end if there's no body tag), leaving the
   // user's HTML otherwise untouched. The CSP sandbox already permits scripts.
+  //
+  // The same variant also gets each element's source id written into its start
+  // tag, which is how inline editing names the element it is changing
+  // (lib/docs/html-source.ts). Annotation runs BEFORE the script is appended, so
+  // the overlay's own <script> is not itself annotated and the ids the browser
+  // sees are exactly the ones a fresh parse of the STORED html produces.
   let html = doc.html;
   if (wantOverlay) {
+    html = annotateSource(html);
     const tag = `<script data-jh-overlay="1">${OVERLAY_SCRIPT}</script>`;
     const idx = html.toLowerCase().lastIndexOf("</body>");
     html = idx === -1 ? html + tag : html.slice(0, idx) + tag + html.slice(idx);

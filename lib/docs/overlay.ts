@@ -1,3 +1,5 @@
+import { MARKDOWN_INPUT_SOURCE } from "@/lib/docs/markdown-input";
+
 // Overlay script injected into the SANDBOXED iframe (/d/:slug/raw?overlay=1),
 // and ONLY when the shell embeds it (the shell appends overlay=1; direct /raw
 // fetches stay byte-pristine — birthday.md "Production architecture").
@@ -13,8 +15,10 @@
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
 //                     { type:"jh:themeMode", mode }        ("dark"|"light" force doc theme; else auto)
-//                     { type:"jh:editMode", on }           (enter/leave inline edit mode)
+//                     { type:"jh:editMode", on, allowed }  (enter/leave inline edit mode; allowed = viewer may edit)
 //                     { type:"jh:editResult", ok }         (server verdict on the last jh:edit)
+//                     { type:"jh:focusBlock", src, offset, scrollY }  (after an ops write + reload)
+//                     { type:"jh:applyLink", href }        (URL collected for the pending Cmd-K)
 //   overlay → shell:  { type:"jh:ready" }
 //                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight, scrollY }
 //                          (comment highlight y in doc space; doc scroll for rail sync)
@@ -23,8 +27,14 @@
 //                     { type:"jh:focus", key, keys }      (a segment was clicked: focused key + full covering set)
 //                     { type:"jh:hlHover", id } / { type:"jh:hlHoverOut" }
 //                     { type:"jh:reactionToggle", anchor:{exact,prefix,suffix}, emoji } (chip click)
-//                     { type:"jh:edit", changes:[{before, after}] }  (a block was edited)
-//                     { type:"jh:editRejected", reason }   (edit changed structure; not sent)
+//                     { type:"jh:edit", changes:[{before, after, src, child}] }  (a block's text changed)
+//                     { type:"jh:ops", ops, focus, scrollY }  (formatting/structure; shell posts to /ops)
+//                     { type:"jh:editRejected", reason }   (edit not expressible; not sent)
+//                     { type:"jh:editSel", active, marks, href, tag, rect }  (format toolbar state)
+//                     { type:"jh:dirty", on }              (open block has unsaved changes)
+//                     { type:"jh:words", words, chars }
+//                     { type:"jh:linkPrompt", href }       (Cmd-K: shell should ask for a URL)
+//                     { type:"jh:requestEditMode" }        (long-press on touch)
 //
 // B14 (birthday.md "Overlap semantics", founder-approved 2026-06-12): the one
 // structural decision is **paint segments, not nested wrappers**. Partially-
@@ -53,6 +63,10 @@ export const OVERLAY_SCRIPT = String.raw`
 (function(){
   "use strict";
   if (window.__jhOverlay) return; window.__jhOverlay = true;
+
+  // Markdown-as-input parsers, injected from lib/docs/markdown-input.ts so the
+  // rules the viewer types against are the ones the tests cover.
+${MARKDOWN_INPUT_SOURCE}
 
   // Unified anchor model. Each entry: { key, kind:"comment"|"reaction", id (comment)
   // or sig (reaction), exact, prefix, suffix, reactions? }. key is "c:<id>" or "r:<sig>".
@@ -793,27 +807,100 @@ export const OVERLAY_SCRIPT = String.raw`
 
   // ---- inline edit mode (owners + editor grantees) ----
   //
-  // Edit mode NEVER re-serializes the document. Clicking a block makes THAT BLOCK
-  // contentEditable and snapshots its text nodes; on commit we diff the snapshot
-  // and report {before, after} pairs, which the shell turns into the same
-  // deterministic {oldText,newText} patch an agent posts to /edits (the reasoning
-  // is in lib/docs/inline-edit.ts). Structural changes can't be expressed that
-  // way, so Enter is suppressed, paste is flattened to text, and a node
-  // split/merge/removal aborts the save instead of guessing.
-  var editing = false;  // edit mode on: blocks are click-to-edit
-  var editEl = null;    // the block currently contentEditable
-  var editSnap = null;  // { nodes:[{node,text}], html } baseline for editEl
-  var editSent = null;  // snapshot to revert from, awaiting the shell's jh:editResult
-  var EDIT_BLOCKS = "p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,dd,dt,td,th,caption,summary";
+  // TWO WRITE PATHS, chosen by what actually changed.
+  //
+  // TYPING is a text patch. A block's text nodes are snapshotted when it opens
+  // and diffed when it commits; the shell posts {oldText,newText} to /edits.
+  // Nothing reloads, the caret never moves, and comment anchors ride the patch's
+  // offset map. This is the path this file already had.
+  //
+  // FORMATTING AND STRUCTURE is an op. Bold, links, block type, new blocks,
+  // deletes, reordering, list nesting, tables: each names an element by the
+  // data-jh-src id it was served with and says what it should become, and the
+  // shell posts that to /ops (lib/docs/doc-ops.ts renders it). The overlay does
+  // NOT apply these to the DOM itself. The iframe reloads against the bytes that
+  // were actually written and the caret is put back, because the alternative is a
+  // second markup renderer living here that has to agree with the server's
+  // forever — and the moment it drifts, the document you see stops being the
+  // document that is stored.
+  //
+  // MARKDOWN IS AN INPUT METHOD, never a storage format: mdInline/mdBlocks parse
+  // what was typed into runs and blocks, the server renders those to html, and
+  // nothing round-trips back to asterisks.
+  var editing = false;      // edit mode on: blocks are click-to-edit
+  var editAllowed = false;  // viewer may edit at all (drives long-press on touch)
+  var editEl = null;        // the block currently contentEditable
+  var editSnap = null;      // { nodes:[{node,text}], html } baseline for editEl
+  var editSent = null;      // snapshot to revert from, awaiting the shell's jh:editResult
+  var editDirty = false;    // editEl has changes the server has not accepted yet
+  var TEXT_BLOCKS = "p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,dd,dt,td,th,caption,summary";
+  var EDIT_BLOCKS = TEXT_BLOCKS + ",pre";
+  var MARK_OF = { STRONG:"strong", B:"strong", EM:"em", I:"em", CODE:"code", DEL:"del", S:"del", STRIKE:"del" };
+  var SLASH_ITEMS = [
+    { key:"p", label:"Text" },
+    { key:"h1", label:"Heading 1" },
+    { key:"h2", label:"Heading 2" },
+    { key:"h3", label:"Heading 3" },
+    { key:"ul", label:"Bulleted list" },
+    { key:"ol", label:"Numbered list" },
+    { key:"blockquote", label:"Quote" },
+    { key:"pre", label:"Code" },
+    { key:"hr", label:"Divider" },
+    { key:"table", label:"Table" }
+  ];
+
+  function srcOf(el){
+    if (!el || !el.getAttribute) return null;
+    var v = el.getAttribute("data-jh-src");
+    return v == null ? null : Number(v);
+  }
+  function elBySrc(src){
+    return src == null ? null : document.querySelector('[data-jh-src="' + src + '"]');
+  }
+  // Nodes this overlay injected. They exist in the DOM and not in the stored
+  // bytes, so every index we compute against the source has to step over them.
+  function isOurs(n){
+    return !!(n && n.nodeType === 1 && n.hasAttribute &&
+      (n.hasAttribute("data-jh-chip") || n.hasAttribute("data-jh-sec-anchor") ||
+       n.hasAttribute("data-jh-ui") || n.hasAttribute("data-jh-overlay")));
+  }
+  function childIndexOf(parent, node){
+    var i = 0;
+    for (var k = 0; k < parent.childNodes.length; k++){
+      var c = parent.childNodes[k];
+      if (isOurs(c)) continue;
+      if (c === node) return i;
+      i++;
+    }
+    return -1;
+  }
+  function isCodeBlock(el){ return !!el && el.nodeName === "PRE"; }
 
   function ensureEditStyle(){
     if (document.getElementById("jh-edit-style")) return;
     var st = document.createElement("style"); st.id = "jh-edit-style";
     var hover = EDIT_BLOCKS.split(",").map(function(s){ return "html.jh-editmode " + s + ":hover"; }).join(",");
+    // An empty block collapses to nothing, which would make a paragraph you just
+    // added impossible to click back into.
+    var empties = EDIT_BLOCKS.split(",").map(function(s){ return "html.jh-editmode " + s + ":empty"; }).join(",");
     st.textContent =
       hover + "{outline:1px dashed rgba(245,197,24,.8);outline-offset:2px;cursor:text}"
+      + empties + "{min-height:1em}"
       + "html.jh-editmode [data-jh-edit],html.jh-editmode [data-jh-edit]:hover"
-      + "{outline:2px solid #f5c518;outline-offset:2px;background:rgba(245,197,24,.08)}";
+      + "{outline:2px solid #f5c518;outline-offset:2px;background:rgba(245,197,24,.08)}"
+      + "html.jh-editmode [data-jh-edit]:empty::before"
+      + "{content:'Type / for blocks';opacity:.45;pointer-events:none}"
+      + "[data-jh-ui]{font:13px/1.4 ui-sans-serif,system-ui,sans-serif;color:#111}"
+      + "#jh-slash{position:absolute;z-index:2147483646;background:#fff;border:1px solid #d8d8d8;"
+      + "border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.16);padding:4px;min-width:180px}"
+      + "#jh-slash div{padding:5px 10px;border-radius:5px;cursor:pointer}"
+      + "#jh-slash div.sel{background:#f5c518}"
+      + "#jh-grip{position:absolute;z-index:2147483645;width:18px;text-align:center;cursor:grab;"
+      + "opacity:.35;user-select:none}"
+      + "#jh-grip:hover{opacity:.9}"
+      + "#jh-drop{position:absolute;z-index:2147483645;height:2px;background:#f5c518;pointer-events:none}"
+      + "#jh-append{margin:24px 0 60px;padding:10px 0;opacity:.4;cursor:text}"
+      + "html:not(.jh-editmode) #jh-append,html:not(.jh-editmode) #jh-grip{display:none}";
     (document.head||document.documentElement).appendChild(st);
   }
 
@@ -824,10 +911,73 @@ export const OVERLAY_SCRIPT = String.raw`
     while (w.nextNode()){
       var n = w.currentNode, p = n.parentNode;
       if (p && (p.nodeName === "SCRIPT" || p.nodeName === "STYLE")) continue;
-      if (p && p.closest && p.closest("[data-jh-chip],[data-jh-sec-anchor]")) continue;
+      if (p && p.closest && p.closest("[data-jh-chip],[data-jh-sec-anchor],[data-jh-ui]")) continue;
       out.push(n);
     }
     return out;
+  }
+
+  // The block's inline content as runs, or null when it holds markup this editor
+  // cannot describe. Refusing is the point: re-emitting a block we only half
+  // understand would silently drop the part we didn't.
+  function runsOf(el){
+    var out = [], bad = false;
+    (function walk(node, marks, href){
+      for (var i = 0; i < node.childNodes.length; i++){
+        var c = node.childNodes[i];
+        if (isOurs(c)) continue;
+        if (c.nodeType === 3){
+          if (c.nodeValue !== "") out.push({ kind:"text", text:c.nodeValue, marks:marks.slice(), href:href || undefined });
+          continue;
+        }
+        if (c.nodeType === 8) continue;
+        if (c.nodeType !== 1){ bad = true; continue; }
+        if (c.nodeName === "BR"){ out.push({ kind:"br" }); continue; }
+        if (c.nodeName === "IMG"){
+          out.push({ kind:"img", src:c.getAttribute("src") || "", alt:c.getAttribute("alt") || undefined });
+          continue;
+        }
+        var m = MARK_OF[c.nodeName];
+        if (m){ walk(c, marks.indexOf(m) === -1 ? marks.concat([m]) : marks, href); continue; }
+        if (c.nodeName === "A"){ walk(c, marks, c.getAttribute("href") || href); continue; }
+        bad = true;
+      }
+    })(el, [], null);
+    return bad ? null : out;
+  }
+
+  function textOffsetIn(el, node, off){
+    var nodes = editTextNodes(el), n = 0;
+    for (var i = 0; i < nodes.length; i++){
+      if (nodes[i] === node) return n + off;
+      n += nodes[i].nodeValue.length;
+    }
+    return n;
+  }
+  function caretOffset(){
+    if (!editEl) return 0;
+    var s = window.getSelection();
+    if (!s || !s.focusNode) return 0;
+    return textOffsetIn(editEl, s.focusNode, s.focusOffset);
+  }
+  function setRange(node, off){
+    try {
+      var r = document.createRange(); r.setStart(node, off); r.collapse(true);
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    } catch(e){}
+  }
+  function placeCaret(el, offset){
+    var nodes = editTextNodes(el), n = 0;
+    for (var i = 0; i < nodes.length; i++){
+      var len = nodes[i].nodeValue.length;
+      if (n + len >= offset){ setRange(nodes[i], Math.max(0, offset - n)); return; }
+      n += len;
+    }
+    if (nodes.length) setRange(nodes[nodes.length-1], nodes[nodes.length-1].nodeValue.length);
+    else setRange(el, 0);
+  }
+  function blockText(el){
+    return editTextNodes(el).map(function(n){ return n.nodeValue; }).join("");
   }
 
   function beginEdit(el){
@@ -842,17 +992,21 @@ export const OVERLAY_SCRIPT = String.raw`
       nodes: editTextNodes(el).map(function(n){ return { node:n, text:n.nodeValue }; }),
       html: el.innerHTML
     };
+    editDirty = false;
     el.setAttribute("data-jh-edit","1");
     el.setAttribute("contenteditable","true");
+    el.setAttribute("spellcheck","true");
     try { el.focus(); } catch(e){}
+    reportEditSel();
   }
 
   function leaveEdit(el){
     el.removeAttribute("contenteditable");
     el.removeAttribute("data-jh-edit");
+    el.removeAttribute("spellcheck");
   }
 
-  /** Restore the edited text nodes' original values (server rejected the patch). */
+  // Restore the edited text nodes' original values (server rejected the patch).
   function revertSnap(snap){
     for (var i=0;i<snap.nodes.length;i++){
       var e = snap.nodes[i];
@@ -860,10 +1014,18 @@ export const OVERLAY_SCRIPT = String.raw`
     }
   }
 
+  function setDirty(on){
+    on = !!on;
+    if (on === editDirty) return;
+    editDirty = on;
+    send({type:"jh:dirty", on: on});
+  }
+
   function commitEdit(){
     if (!editEl) return;
     var el = editEl, snap = editSnap;
     editEl = null; editSnap = null;
+    setDirty(false);
     leaveEdit(el);
 
     // A text patch can only express "this run of text became that one". If the
@@ -875,7 +1037,17 @@ export const OVERLAY_SCRIPT = String.raw`
     for (var i=0;i<snap.nodes.length && !structural;i++){
       if (live[i] !== snap.nodes[i].node){ structural = true; break; }
       var now = snap.nodes[i].node.nodeValue;
-      if (now !== snap.nodes[i].text) changes.push({ before: snap.nodes[i].text, after: now });
+      if (now !== snap.nodes[i].text){
+        // src/child name the same text node positionally, which is what the
+        // shell's fallback needs when the text turns out not to be unique.
+        var parent = snap.nodes[i].node.parentNode;
+        changes.push({
+          before: snap.nodes[i].text,
+          after: now,
+          src: srcOf(parent),
+          child: parent ? childIndexOf(parent, snap.nodes[i].node) : -1
+        });
+      }
     }
     if (structural){
       try { el.innerHTML = snap.html; } catch(e){}
@@ -891,11 +1063,415 @@ export const OVERLAY_SCRIPT = String.raw`
     if (!editEl) return;
     var el = editEl, snap = editSnap;
     editEl = null; editSnap = null;
+    setDirty(false);
     leaveEdit(el);
     // Discard everything, including a structural change the node-value revert
     // can't undo. View-local only — the stored bytes were never touched.
     try { el.innerHTML = snap.html; } catch(e){}
   }
+
+  // Hand a set of ops to the shell. The block is closed first and no local DOM
+  // change is made: the shell writes, then reloads the iframe against the result
+  // and sends jh:focusBlock to put the caret back.
+  function sendOps(ops, focus){
+    if (!ops || !ops.length) return;
+    if (editEl) leaveEdit(editEl);
+    editEl = null; editSnap = null; editSent = null;
+    setDirty(false);
+    hideSlash();
+    send({ type:"jh:ops", ops: ops, focus: focus || null, scrollY: window.scrollY });
+  }
+
+  function refuse(reason){ send({type:"jh:editRejected", reason: reason}); }
+
+  // --- marks ---------------------------------------------------------------
+
+  function markAncestor(node, mark){
+    for (var n = node; n && n !== document.body; n = n.parentNode){
+      if (n.nodeType !== 1) continue;
+      if (mark === "link" ? n.nodeName === "A" : MARK_OF[n.nodeName] === mark) return n;
+    }
+    return null;
+  }
+
+  function splitRun(run, text){
+    return { kind:"text", text:text, marks:(run.marks || []).slice(), href:run.href };
+  }
+
+  // Apply (or clear) a mark across a character range of a block's runs. The range
+  // is measured in the block's text, which is what a DOM selection gives us.
+  // Toggling is by coverage: an already-fully-marked range clears.
+  function markRuns(runs, a, b, mark, href){
+    var out = [], pos = 0, covered = [];
+    for (var i = 0; i < runs.length; i++){
+      var r = runs[i];
+      if (r.kind !== "text"){ out.push(r); continue; }
+      var start = pos, end = pos + r.text.length; pos = end;
+      if (end <= a || start >= b || a === b){ out.push(r); continue; }
+      var cutA = Math.max(a, start) - start, cutB = Math.min(b, end) - start;
+      if (cutA > 0) out.push(splitRun(r, r.text.slice(0, cutA)));
+      var mid = splitRun(r, r.text.slice(cutA, cutB));
+      out.push(mid); covered.push(mid);
+      if (cutB < r.text.length) out.push(splitRun(r, r.text.slice(cutB)));
+    }
+    if (mark === "link"){
+      covered.forEach(function(r){ if (href) r.href = href; else delete r.href; });
+    } else {
+      var all = covered.length > 0 && covered.every(function(r){ return (r.marks||[]).indexOf(mark) !== -1; });
+      covered.forEach(function(r){
+        var m = (r.marks || []).filter(function(x){ return x !== mark; });
+        if (!all) m.push(mark);
+        r.marks = m;
+      });
+    }
+    return out.filter(function(r){ return r.kind !== "text" || r.text !== ""; });
+  }
+
+  function toggleMark(mark, href){
+    if (!editEl || isCodeBlock(editEl)) return;
+    var sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    var range = sel.getRangeAt(0);
+    if (range.collapsed) return;
+    var src = srcOf(editEl);
+    if (src == null){ refuse("markup"); return; }
+
+    // The cheap, byte-precise case: adding a mark inside one text node of a block
+    // with nothing else pending. Everything the author didn't touch — including
+    // their entity spellings — stays exactly as written.
+    var inMark = markAncestor(range.startContainer, mark);
+    if (!editDirty && !inMark && mark !== "link" &&
+        range.startContainer === range.endContainer && range.startContainer.nodeType === 3){
+      var t = range.startContainer, parent = t.parentNode;
+      var ci = childIndexOf(parent, t), psrc = srcOf(parent);
+      if (psrc != null && ci >= 0){
+        var v = t.nodeValue, s = range.startOffset, e = range.endOffset;
+        var runs = [];
+        if (s > 0) runs.push({ kind:"text", text:v.slice(0, s) });
+        runs.push({ kind:"text", text:v.slice(s, e), marks:[mark] });
+        if (e < v.length) runs.push({ kind:"text", text:v.slice(e) });
+        sendOps([{ op:"setRuns", src:psrc, child:ci, before:v, runs:runs }],
+                { src:src, offset: textOffsetIn(editEl, t, e) });
+        return;
+      }
+    }
+
+    // Clearing a mark, crossing element boundaries, or saving typed text at the
+    // same time: re-emit the block's inline content, which carries all three.
+    var whole = runsOf(editEl);
+    if (!whole){ refuse("markup"); return; }
+    var a = textOffsetIn(editEl, range.startContainer, range.startOffset);
+    var b = textOffsetIn(editEl, range.endContainer, range.endOffset);
+    var lo = Math.min(a, b), hi = Math.max(a, b);
+    sendOps([{ op:"setInline", src:src, runs: markRuns(whole, lo, hi, mark, href) }],
+            { src:src, offset: hi });
+  }
+
+  // --- block shape ---------------------------------------------------------
+
+  // Ops that turn el into a block of kind key. rest is the text it should end up
+  // with, or null to keep whatever it already holds.
+  function blockOps(el, key, rest){
+    var src = srcOf(el);
+    if (src == null) return null;
+    var parent = el.parentNode;
+    var parentSrc = srcOf(parent);
+    var inList = el.nodeName === "LI" && parent && (parent.nodeName === "UL" || parent.nodeName === "OL");
+    var soleItem = inList && parent.querySelectorAll(":scope > li").length === 1;
+    var runs = rest === null ? null : mdInline(rest);
+
+    if (key === "hr") return { ops:[{ op:"replaceWith", src:src, blocks:[{ tag:"hr" }] }], focus:null };
+    if (key === "pre"){
+      return { ops:[{ op:"replaceWith", src:src, blocks:[{ tag:"pre", code: rest === null ? blockText(el) : rest }] }], focus:null };
+    }
+    if (key === "table"){
+      return { ops:[{ op:"replaceWith", src:src, blocks:[{ tag:"table", rows:3, cols:3 }] }], focus:null };
+    }
+    if (key === "ul" || key === "ol"){
+      if (inList){
+        // Already a list item: switch the list's type rather than nesting another.
+        if (parentSrc == null) return null;
+        var swap = [{ op:"retag", src:parentSrc, tag:key }];
+        if (runs) swap.push({ op:"setInline", src:src, runs:runs });
+        return { ops:swap, focus:{ src:src, offset: runs ? rest.length : caretOffset() } };
+      }
+      var mk = [{ op:"retag", src:src, tag:"li" }, { op:"wrap", src:src, tags:[key] }];
+      if (runs) mk.push({ op:"setInline", src:src, runs:runs });
+      return { ops:mk, focus:{ src:src, offset: runs ? rest.length : caretOffset() } };
+    }
+    // A plain text block (paragraph, heading, quote).
+    var out = [];
+    if (inList){
+      if (!soleItem){ refuse("list"); return null; }
+      if (parentSrc == null) return null;
+      out.push({ op:"unwrap", src:parentSrc });
+    }
+    out.push({ op:"retag", src:src, tag:key });
+    if (runs) out.push({ op:"setInline", src:src, runs:runs });
+    return { ops:out, focus:{ src:src, offset: rest === null ? caretOffset() : rest.length } };
+  }
+
+  function setBlockKind(key){
+    if (!editEl) return;
+    var plan = blockOps(editEl, key, null);
+    if (plan) sendOps(plan.ops, plan.focus);
+  }
+
+  function sliceRuns(runs, a, b){
+    var out = [], pos = 0;
+    for (var i = 0; i < runs.length; i++){
+      var r = runs[i];
+      if (r.kind !== "text"){ if (pos >= a && pos <= b) out.push(r); continue; }
+      var start = pos, end = pos + r.text.length; pos = end;
+      if (end <= a || start >= b) continue;
+      out.push(splitRun(r, r.text.slice(Math.max(a, start) - start, Math.min(b, end) - start)));
+    }
+    return out.filter(function(r){ return r.kind !== "text" || r.text !== ""; });
+  }
+
+  // Enter: split the block at the caret, or add an empty one next to it.
+  function splitBlock(){
+    if (!editEl) return;
+    var src = srcOf(editEl);
+    if (src == null){ refuse("markup"); return; }
+    var tag = editEl.nodeName.toLowerCase();
+    // A heading is a title, not a body: continuing one gives a paragraph.
+    var nextTag = tag === "li" ? "li" : "p";
+    var at = caretOffset();
+    var whole = runsOf(editEl);
+    var total = blockText(editEl).length;
+
+    if (!whole || at >= total){
+      sendOps([{ op:"insert", src:src, where:"after", blocks:[{ tag:nextTag, runs:[] }] }], null);
+      return;
+    }
+    if (at <= 0){
+      sendOps([{ op:"insert", src:src, where:"before", blocks:[{ tag:nextTag, runs:[] }] }], { src:src, offset:0 });
+      return;
+    }
+    sendOps([
+      { op:"setInline", src:src, runs: sliceRuns(whole, 0, at) },
+      { op:"insert", src:src, where:"after", blocks:[{ tag:nextTag, runs: sliceRuns(whole, at, total) }] }
+    ], null);
+  }
+
+  function deleteBlock(el){
+    var src = srcOf(el);
+    if (src == null){ refuse("markup"); return; }
+    var prev = el.previousElementSibling;
+    var focus = prev && srcOf(prev) != null ? { src: srcOf(prev), offset: blockText(prev).length } : null;
+    sendOps([{ op:"delete", src:src }], focus);
+  }
+
+  // --- markdown while typing ----------------------------------------------
+
+  // A completed block prefix ("## ", "- ", "> ") converts the block and is eaten.
+  function tryBlockShortcut(){
+    if (!editEl || isCodeBlock(editEl)) return false;
+    var hit = mdBlockShortcut(blockText(editEl));
+    if (!hit) return false;
+    var key = hit.kind === "heading" ? ("h" + Math.min(6, hit.level))
+      : hit.kind === "quote" ? "blockquote" : hit.kind;
+    var plan = blockOps(editEl, key, hit.rest);
+    if (!plan) return false;
+    sendOps(plan.ops, plan.focus);
+    return true;
+  }
+
+  // Inline markdown resolves when the block commits, not per keystroke.
+  function tryInlineMarkdown(){
+    if (!editEl || isCodeBlock(editEl)) return false;
+    var text = blockText(editEl);
+    if (!/[*\x60~[]|https?:\/\//.test(text)) return false;
+    var runs = mdInline(text);
+    var marked = runs.some(function(r){ return (r.marks && r.marks.length) || r.href; });
+    if (!marked) return false;
+    var src = srcOf(editEl);
+    if (src == null) return false;
+    // Only safe on a block that is plain text: mdInline reads the block's TEXT,
+    // so running it over a block that already has markup would flatten that markup.
+    var whole = runsOf(editEl);
+    if (!whole) return false;
+    for (var i = 0; i < whole.length; i++){
+      var r = whole[i];
+      if (r.kind !== "text" || r.href || (r.marks && r.marks.length)) return false;
+    }
+    sendOps([{ op:"setInline", src:src, runs: runs }], { src:src, offset: text.length });
+    return true;
+  }
+
+  // --- slash menu ----------------------------------------------------------
+
+  var slashEl = null, slashSel = 0, slashFilter = "";
+  var pendingLink = null;   // the range ⌘K was pressed over, applied when the shell replies
+
+  function hideSlash(){
+    if (slashEl && slashEl.parentNode) slashEl.parentNode.removeChild(slashEl);
+    slashEl = null; slashFilter = "";
+  }
+  function slashMatches(){
+    var f = slashFilter.toLowerCase();
+    return SLASH_ITEMS.filter(function(it){
+      return !f || it.label.toLowerCase().indexOf(f) === 0 || it.key.indexOf(f) === 0;
+    });
+  }
+  function drawSlash(){
+    var items = slashMatches();
+    if (!items.length || !editEl){ hideSlash(); return; }
+    if (!slashEl){
+      slashEl = document.createElement("div");
+      slashEl.id = "jh-slash";
+      slashEl.setAttribute("data-jh-ui","1");
+      document.body.appendChild(slashEl);
+    }
+    if (slashSel >= items.length) slashSel = items.length - 1;
+    slashEl.innerHTML = "";
+    items.forEach(function(it, i){
+      var row = document.createElement("div");
+      row.textContent = it.label;
+      if (i === slashSel) row.className = "sel";
+      row.addEventListener("mousedown", function(ev){ ev.preventDefault(); chooseSlash(it.key); });
+      slashEl.appendChild(row);
+    });
+    var r = editEl.getBoundingClientRect();
+    slashEl.style.top = (r.bottom + window.scrollY + 4) + "px";
+    slashEl.style.left = (r.left + window.scrollX) + "px";
+  }
+  function chooseSlash(key){
+    if (!editEl) return;
+    var el = editEl;
+    hideSlash();
+    // The "/" and whatever was typed after it were only ever a command.
+    var plan = blockOps(el, key, "");
+    if (plan) sendOps(plan.ops, plan.focus);
+  }
+
+  // --- drag to reorder -----------------------------------------------------
+
+  var grip = null, dropLine = null, dragEl = null, dropAt = null;
+
+  function ensureGrip(){
+    if (grip) return grip;
+    grip = document.createElement("div");
+    grip.id = "jh-grip";
+    grip.setAttribute("data-jh-ui","1");
+    grip.textContent = "⠿";
+    grip.addEventListener("pointerdown", startDrag);
+    document.body.appendChild(grip);
+    return grip;
+  }
+  function showGrip(el){
+    if (!editing || !el) return;
+    var g = ensureGrip();
+    var r = el.getBoundingClientRect();
+    g.style.top = (r.top + window.scrollY) + "px";
+    g.style.left = (r.left + window.scrollX - 22) + "px";
+    g.__target = el;
+  }
+  function startDrag(ev){
+    dragEl = grip && grip.__target;
+    if (!dragEl) return;
+    ev.preventDefault();
+    if (!dropLine){
+      dropLine = document.createElement("div");
+      dropLine.id = "jh-drop";
+      dropLine.setAttribute("data-jh-ui","1");
+      document.body.appendChild(dropLine);
+    }
+    dropLine.style.display = "block";
+    document.addEventListener("pointermove", onDrag, true);
+    document.addEventListener("pointerup", endDrag, true);
+  }
+  function onDrag(ev){
+    if (!dragEl) return;
+    var over = document.elementFromPoint(ev.clientX, ev.clientY);
+    var block = over && over.closest ? over.closest(EDIT_BLOCKS + ",ul,ol,table") : null;
+    if (!block || block === dragEl || dragEl.contains(block)) return;
+    var r = block.getBoundingClientRect();
+    var below = ev.clientY > r.top + r.height / 2;
+    dropAt = { el: block, below: below };
+    dropLine.style.top = ((below ? r.bottom : r.top) + window.scrollY) + "px";
+    dropLine.style.left = (r.left + window.scrollX) + "px";
+    dropLine.style.width = r.width + "px";
+  }
+  function endDrag(){
+    document.removeEventListener("pointermove", onDrag, true);
+    document.removeEventListener("pointerup", endDrag, true);
+    if (dropLine) dropLine.style.display = "none";
+    var moving = dragEl, target = dropAt;
+    dragEl = null; dropAt = null;
+    if (!moving || !target) return;
+    var src = srcOf(moving), parent = srcOf(target.el.parentNode);
+    if (src == null || parent == null) return;
+    var after = target.below ? srcOf(target.el) : srcOf(target.el.previousElementSibling);
+    sendOps([{ op:"move", src:src, parent:parent, after: after == null ? null : after }], null);
+  }
+
+  // --- the trailing "add a paragraph" zone ---------------------------------
+
+  function ensureAppendZone(){
+    if (document.getElementById("jh-append") || !document.body) return;
+    var z = document.createElement("div");
+    z.id = "jh-append";
+    z.setAttribute("data-jh-ui","1");
+    z.textContent = "Click to add a paragraph";
+    z.addEventListener("click", function(){
+      var src = srcOf(document.body);
+      if (src != null){
+        sendOps([{ op:"insert", src:src, where:"append", blocks:[{ tag:"p", runs:[] }] }], null);
+        return;
+      }
+      // A document with no <body> tag has nothing to append INTO, so append after
+      // its last element instead.
+      var all = document.querySelectorAll("[data-jh-src]");
+      for (var i = all.length - 1; i >= 0; i--){
+        if (isOurs(all[i])) continue;
+        sendOps([{ op:"insert", src:srcOf(all[i]), where:"after", blocks:[{ tag:"p", runs:[] }] }], null);
+        return;
+      }
+    });
+    document.body.appendChild(z);
+  }
+
+  // --- state the shell's toolbar and status pill render --------------------
+
+  function reportEditSel(){
+    if (!editing || !editEl){ send({type:"jh:editSel", active:false}); return; }
+    var sel = window.getSelection();
+    var marks = [], href = null;
+    for (var n = sel && sel.focusNode; n && n !== editEl; n = n.parentNode){
+      if (!n.nodeName) break;
+      var m = MARK_OF[n.nodeName];
+      if (m && marks.indexOf(m) === -1) marks.push(m);
+      if (n.nodeName === "A") href = n.getAttribute("href");
+    }
+    // A collapsed caret has no rectangle of its own, so fall back to the block's:
+    // the toolbar still needs a place to sit while you change the block's type.
+    var rect = null;
+    try {
+      var box = (sel && sel.rangeCount && !sel.isCollapsed)
+        ? sel.getRangeAt(0).getBoundingClientRect()
+        : editEl.getBoundingClientRect();
+      rect = { top: box.top + window.scrollY, left: box.left, right: box.right,
+               bottom: box.bottom + window.scrollY, viewTop: box.top,
+               collapsed: !(sel && sel.rangeCount && !sel.isCollapsed) };
+    } catch(e){}
+    send({
+      type:"jh:editSel", active:true, marks:marks, href:href, rect:rect,
+      tag: editEl.nodeName.toLowerCase(), code: isCodeBlock(editEl)
+    });
+  }
+
+  function reportWords(){
+    if (!document.body) return;
+    // editTextNodes already steps over our injected UI, so this counts the
+    // author's text and not the chrome we added around it.
+    var t = editTextNodes(document.body).map(function(n){ return n.nodeValue; }).join(" ");
+    var words = t.split(/\s+/).filter(function(w){ return w.length; }).length;
+    send({type:"jh:words", words: words, chars: t.replace(/\s+/g, " ").length});
+  }
+
+  // --- mode ----------------------------------------------------------------
 
   function setEditMode(on){
     on = !!on;
@@ -903,6 +1479,7 @@ export const OVERLAY_SCRIPT = String.raw`
     editing = on;
     if (on){
       ensureEditStyle();
+      ensureAppendZone();
       // Unwrap highlight segments first: they split text nodes mid-run, and an
       // edit must diff the author's nodes, not our paint.
       clearHighlights();
@@ -910,33 +1487,166 @@ export const OVERLAY_SCRIPT = String.raw`
       try { var s = window.getSelection(); if (s) s.removeAllRanges(); } catch(e){}
       send({type:"jh:selectionCleared"});
       document.documentElement.classList.add("jh-editmode");
+      reportWords();
     } else {
       commitEdit();
+      hideSlash();
       document.documentElement.classList.remove("jh-editmode");
+      send({type:"jh:editSel", active:false});
       paint();
     }
+  }
+
+  // After a reload, put the viewer back where they were.
+  function focusBlock(src, offset, scrollY){
+    if (typeof scrollY === "number"){ try { window.scrollTo(0, scrollY); } catch(e){} }
+    var el = elBySrc(src);
+    if (!el || !editing) return;
+    beginEdit(el);
+    placeCaret(el, typeof offset === "number" ? offset : 0);
+    try { el.scrollIntoView({block:"nearest"}); } catch(e){}
+  }
+
+  // The shell collected a URL for the range ⌘K was pressed over.
+  function applyPendingLink(href){
+    var range = pendingLink; pendingLink = null;
+    if (!range || !editEl) return;
+    try {
+      var s = window.getSelection(); s.removeAllRanges(); s.addRange(range);
+    } catch(e){ return; }
+    toggleMark("link", href || null);
   }
 
   document.addEventListener("click", function(ev){
     if (!editing) return;
     var t = ev.target;
+    if (t && t.closest && t.closest("[data-jh-ui]")) return;
     // Links are text to edit here, not navigation — the iframe must not leave.
     if (t && t.closest && t.closest("a[href]")) ev.preventDefault();
     var el = t && t.closest && t.closest(EDIT_BLOCKS);
-    if (!el){ commitEdit(); return; }
+    if (!el){ commitEdit(); hideSlash(); return; }
     beginEdit(el);
   }, true);
 
+  document.addEventListener("mouseover", function(ev){
+    if (!editing) return;
+    var el = ev.target && ev.target.closest ? ev.target.closest(EDIT_BLOCKS) : null;
+    if (el) showGrip(el);
+  }, true);
+
+  // Touch: a long press opens a block for editing, turning edit mode on first if
+  // it is off. A phone has no hover, and the shell's pencil is a long way from
+  // the paragraph you meant.
+  var pressTimer = null;
+  document.addEventListener("touchstart", function(ev){
+    if (!editAllowed) return;
+    var el = ev.target && ev.target.closest ? ev.target.closest(EDIT_BLOCKS) : null;
+    if (!el) return;
+    pressTimer = setTimeout(function(){
+      pressTimer = null;
+      if (!editing) send({type:"jh:requestEditMode"});
+      setEditMode(true);
+      beginEdit(el);
+    }, 550);
+  }, {passive:true});
+  ["touchend","touchmove","touchcancel"].forEach(function(n){
+    document.addEventListener(n, function(){ if (pressTimer){ clearTimeout(pressTimer); pressTimer = null; } }, {passive:true});
+  });
+
   document.addEventListener("keydown", function(ev){
     if (!editEl) return;
-    if (ev.key === "Enter"){
-      // No new blocks: a split paragraph isn't expressible as a text patch.
-      // Cmd/Ctrl-Enter is the explicit save.
+    var meta = ev.metaKey || ev.ctrlKey;
+
+    if (slashEl){
+      var items = slashMatches();
+      if (ev.key === "ArrowDown"){ ev.preventDefault(); slashSel = (slashSel + 1) % items.length; drawSlash(); return; }
+      if (ev.key === "ArrowUp"){ ev.preventDefault(); slashSel = (slashSel - 1 + items.length) % items.length; drawSlash(); return; }
+      if (ev.key === "Enter"){ ev.preventDefault(); if (items[slashSel]) chooseSlash(items[slashSel].key); return; }
+      if (ev.key === "Escape"){ ev.preventDefault(); hideSlash(); return; }
+    }
+
+    if (meta && !ev.altKey){
+      var k = ev.key.toLowerCase();
+      if (k === "b"){ ev.preventDefault(); toggleMark("strong"); return; }
+      if (k === "i"){ ev.preventDefault(); toggleMark("em"); return; }
+      if (k === "e"){ ev.preventDefault(); toggleMark("code"); return; }
+      if (k === "x" && ev.shiftKey){ ev.preventDefault(); toggleMark("del"); return; }
+      if (k === "k"){
+        ev.preventDefault();
+        var sel = window.getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed){
+          pendingLink = sel.getRangeAt(0).cloneRange();
+          var existing = markAncestor(sel.focusNode, "link");
+          send({type:"jh:linkPrompt", href: existing ? existing.getAttribute("href") : null});
+        }
+        return;
+      }
+      if (ev.shiftKey && (k === "7" || k === "8")){
+        ev.preventDefault(); setBlockKind(k === "7" ? "ol" : "ul"); return;
+      }
+      if (ev.shiftKey && ev.key === "."){ ev.preventDefault(); setBlockKind("blockquote"); return; }
+    }
+    if (meta && ev.altKey && /^[0-6]$/.test(ev.key)){
       ev.preventDefault();
-      if (ev.metaKey || ev.ctrlKey) commitEdit();
+      setBlockKind(ev.key === "0" ? "p" : "h" + ev.key);
       return;
     }
-    if (ev.key === "Escape"){ ev.preventDefault(); cancelEdit(); }
+
+    if (ev.key === "Tab"){
+      var cell = editEl.closest("td,th");
+      if (cell){
+        ev.preventDefault();
+        var step = ev.shiftKey ? -1 : 1;
+        var cells = Array.prototype.slice.call(cell.closest("table").querySelectorAll("td,th"));
+        var next = cells[cells.indexOf(cell) + step];
+        if (next) beginEdit(next);
+        else if (step === 1){
+          var rsrc = srcOf(cell.closest("tr"));
+          if (rsrc != null) sendOps([{ op:"insertRow", src:rsrc }], null);
+        }
+        return;
+      }
+      if (editEl.nodeName === "LI"){
+        ev.preventDefault();
+        var lsrc = srcOf(editEl);
+        if (lsrc != null) sendOps([{ op: ev.shiftKey ? "outdent" : "indent", src:lsrc }], { src:lsrc, offset: caretOffset() });
+        return;
+      }
+    }
+
+    if (ev.key === "Enter"){
+      if (isCodeBlock(editEl)) return;   // a code block keeps its newlines
+      ev.preventDefault();
+      if (meta){ commitEdit(); return; }
+      if (tryBlockShortcut()) return;
+      if (tryInlineMarkdown()) return;
+      splitBlock();
+      return;
+    }
+
+    if (ev.key === "Backspace" && !isCodeBlock(editEl)){
+      var sel2 = window.getSelection();
+      if (sel2 && sel2.isCollapsed && caretOffset() === 0 && blockText(editEl) === ""){
+        ev.preventDefault();
+        deleteBlock(editEl);
+        return;
+      }
+    }
+
+    if (ev.key === "Escape"){ ev.preventDefault(); hideSlash(); cancelEdit(); }
+  });
+
+  document.addEventListener("input", function(){
+    if (!editEl) return;
+    setDirty(true);
+    if (isCodeBlock(editEl)) return;
+    var text = blockText(editEl);
+    // "/" on an otherwise empty block opens the block menu; keep filtering as the
+    // author narrows it, and give up as soon as it stops matching.
+    if (text.charAt(0) === "/"){ slashFilter = text.slice(1); slashSel = 0; drawSlash(); }
+    else hideSlash();
+    // A block shortcut fires the moment its prefix is complete.
+    if (/^(#{1,6} |[-*+] |\d+[.)] |> )$/.test(text)) tryBlockShortcut();
   });
 
   document.addEventListener("paste", function(ev){
@@ -944,13 +1654,29 @@ export const OVERLAY_SCRIPT = String.raw`
     ev.preventDefault();
     var t = "";
     try { t = ((ev.clipboardData || window.clipboardData).getData("text/plain") || ""); } catch(e){}
-    t = t.replace(/\s*\n+\s*/g, " ");
-    if (t){ try { document.execCommand("insertText", false, t); } catch(e){} }
+    if (!t) return;
+    // A multi-line paste is markdown: turn it into real blocks rather than
+    // flattening someone's outline into a single paragraph.
+    if (!isCodeBlock(editEl) && /\n/.test(t.trim())){
+      var blocks = mdBlocks(t);
+      var psrc = srcOf(editEl);
+      if (blocks.length && psrc != null){
+        var ops = [{ op:"insert", src:psrc, where:"after", blocks: blocks }];
+        if (blockText(editEl) === "") ops.push({ op:"delete", src:psrc });
+        sendOps(ops, null);
+        return;
+      }
+    }
+    try { document.execCommand("insertText", false, t.replace(/\s*\n+\s*/g, " ")); } catch(e){}
   });
 
   document.addEventListener("focusout", function(ev){
     // Click-away (including onto the shell's chrome) saves.
     if (editEl && ev.target === editEl) commitEdit();
+  });
+
+  document.addEventListener("selectionchange", function(){
+    if (editing) reportEditSel();
   });
 
   // ---- selection → anchor ----
@@ -1070,7 +1796,26 @@ export const OVERLAY_SCRIPT = String.raw`
       applyDocScheme();
       sampleTheme(); // re-read colors so the chrome + highlight follow the forced doc theme
     }
-    else if (d.type === "jh:editMode"){ setEditMode(d.on); }
+    else if (d.type === "jh:editMode"){
+      editAllowed = !!d.allowed;
+      setEditMode(d.on);
+    }
+    else if (d.type === "jh:focusBlock"){ focusBlock(d.src, d.offset, d.scrollY); }
+    else if (d.type === "jh:applyLink"){ applyPendingLink(d.href); }
+    else if (d.type === "jh:cmd"){
+      // The shell's format toolbar. Its buttons suppress focus loss on mousedown,
+      // so the block is still open and the selection still live when this lands.
+      if (d.name === "mark") toggleMark(d.arg);
+      else if (d.name === "block") setBlockKind(d.arg);
+      else if (d.name === "linkPrompt"){
+        var lsel = window.getSelection();
+        if (lsel && lsel.rangeCount && !lsel.isCollapsed){
+          pendingLink = lsel.getRangeAt(0).cloneRange();
+          var have = markAncestor(lsel.focusNode, "link");
+          send({type:"jh:linkPrompt", href: have ? have.getAttribute("href") : null});
+        }
+      }
+    }
     else if (d.type === "jh:editResult"){
       // The shell reports what the server did with the patch we sent. Accepted →
       // the DOM already shows the new text, nothing to do. Rejected → put the
