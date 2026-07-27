@@ -1,5 +1,6 @@
 import { bookmarkExists, findBySlug } from "@/lib/docs/store";
 import { canViewSession, canView } from "@/lib/docs/access";
+import { canEdit } from "@/lib/docs/grants";
 import { mintViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
 import { headers } from "next/headers";
@@ -81,15 +82,20 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   if (viewtoken) rawQuery = `?viewtoken=${encodeURIComponent(viewtoken)}`;
   else if (!doc.is_public) rawQuery = `?cap=${encodeURIComponent(mintViewCap(slug))}`;
 
-  // Can this viewer comment and/or react? (Drives whether the rail is
-  // interactive and whether the selection toolbar offers comment/react.)
+  // Can this viewer comment, react, and/or edit? (Drives whether the rail is
+  // interactive, whether the selection toolbar offers comment/react, and whether
+  // the bar offers inline edit mode.) Editing is deliberately the narrowest of the
+  // three — owner or editor grant only, straight off the same resolved access, so
+  // a view-token holder who may comment still cannot type into the document.
   const principal = await resolveCommentPrincipal(null, session);
   let canComment = false;
   let canReact = false;
+  let canEditDoc = false;
   if (principal) {
     const cap = await resolveCapability(doc, principal, canView(doc, viewtoken));
     canComment = cap.canComment;
     canReact = cap.canReact;
+    canEditDoc = canEdit(cap.access);
   }
 
   const threadData = await allThreads(doc);
@@ -123,6 +129,7 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       viewtoken={viewtoken}
       canComment={canComment}
       canReact={canReact}
+      canEdit={canEditDoc}
       signedIn={session !== null}
       docId={doc.id}
       bookmarked={bookmarked}

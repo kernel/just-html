@@ -54,6 +54,9 @@ const slugParam = registry.registerParameter(
 
 const jsonError = { "application/json": { schema: ApiError } };
 const security = [{ [bearerApiKey.name]: [] }];
+// Surfaces that accept an API key OR a signed-in session. A session is presented
+// via cookie, not the Bearer scheme, so the list adds the anonymous/{} option.
+const keyOrSessionSecurity = [{ [bearerApiKey.name]: [] }, {}];
 
 // POST /api/v1/docs — create
 registry.registerPath({
@@ -223,9 +226,9 @@ registry.registerPath({
   tags: ["docs"],
   summary: "Apply deterministic patches",
   description:
-    "exact-match-then-fuzzy edit application. Owner or editor grant. Always send base_version; a mismatch returns 409. Ambiguous, no-match, or overlapping edits return 422 naming the failing edit index.",
+    "exact-match-then-fuzzy edit application. Owner or editor grant. Identity: API key OR signed-in session (the viewer's inline edit mode posts here). Always send base_version; a mismatch returns 409. Ambiguous, no-match, or overlapping edits return 422 naming the failing edit index.",
   operationId: "editDoc",
-  security,
+  security: keyOrSessionSecurity,
   request: {
     params: z.object({ slug: slugParam }),
     body: { required: true, content: { "application/json": { schema: EditsBody } } },
@@ -401,12 +404,9 @@ registry.registerPath({
 });
 
 // =========================================================================
-// Comments + reactions. Both surfaces accept an API key OR a signed-in session,
-// so the security list adds the anonymous/{} option (a session is presented via
-// cookie, not the Bearer scheme), yielding `security: [{ bearerApiKey: [] }, {}]`.
+// Comments + reactions. Both surfaces accept an API key OR a signed-in session
+// (keyOrSessionSecurity above).
 // =========================================================================
-
-const commentOrSessionSecurity = [{ [bearerApiKey.name]: [] }, {}];
 
 const commentIdParam = registry.registerParameter(
   "CommentId",
@@ -444,7 +444,7 @@ registry.registerPath({
   description:
     "Returns every live thread the caller can see, exactly as the viewer shell shows humans: anchored threads in document order, then doc-level threads, then orphaned threads, each carrying resolved/orphaned flags, 1-level replies, and reactions. Read access required (owner/grant via identity, a valid view token, or a public doc).",
   operationId: "listComments",
-  security: commentOrSessionSecurity,
+  security: keyOrSessionSecurity,
   request: { params: z.object({ slug: slugParam }), query: viewtokenQuery },
   responses: {
     200: {
@@ -467,7 +467,7 @@ registry.registerPath({
   description:
     "Comment on a span by QUOTING it (anchor), at the doc level (omit anchor), or reply to a root comment (parent_id). Identity required: API key OR signed-in session — anonymous never writes. Permission to comment: owner, editor or commenter grant, view-token holder with identity, or any identity on a public doc.",
   operationId: "createComment",
-  security: commentOrSessionSecurity,
+  security: keyOrSessionSecurity,
   request: {
     params: z.object({ slug: slugParam }),
     query: viewtokenQuery,
@@ -497,7 +497,7 @@ registry.registerPath({
   tags: ["collaboration"],
   summary: "Edit body (author) and/or resolve/unresolve (anyone who can comment)",
   operationId: "updateComment",
-  security: commentOrSessionSecurity,
+  security: keyOrSessionSecurity,
   request: {
     params: z.object({ slug: slugParam, id: commentIdParam }),
     body: { required: true, content: { "application/json": { schema: UpdateCommentBody } } },
@@ -528,7 +528,7 @@ registry.registerPath({
   tags: ["collaboration"],
   summary: "Soft-delete a comment (author own, owner any)",
   operationId: "deleteComment",
-  security: commentOrSessionSecurity,
+  security: keyOrSessionSecurity,
   request: { params: z.object({ slug: slugParam, id: commentIdParam }) },
   responses: {
     200: {
@@ -553,7 +553,7 @@ registry.registerPath({
   description:
     "Add an emoji reaction. The target is 3-way and MUTUALLY EXCLUSIVE: comment_id set → react on that comment; anchor set → react on a text span (W3C text-quote, same shape + validation as a comment anchor; an agent \"highlights\" by quoting); neither set → react on the whole document. Supplying BOTH comment_id and anchor → 400. Attributed-only (identity required); unique per (target, author, emoji) — for span reactions the \"target\" is the anchor signature, so the same emoji on two different spans are two distinct reactions. Re-posting the same reaction removes it (toggle). Anchored reactions re-anchor on every doc edit exactly like comments (move, or orphan + later un-orphan); an orphaned anchored reaction degrades to doc-level display. React permission: anyone who can view, with identity.",
   operationId: "addReaction",
-  security: commentOrSessionSecurity,
+  security: keyOrSessionSecurity,
   request: {
     params: z.object({ slug: slugParam }),
     body: { required: true, content: { "application/json": { schema: CreateReactionBody } } },
@@ -585,7 +585,7 @@ registry.registerPath({
   tags: ["collaboration"],
   summary: "Remove your own reaction",
   operationId: "deleteReaction",
-  security: commentOrSessionSecurity,
+  security: keyOrSessionSecurity,
   request: { params: z.object({ slug: slugParam, id: reactionIdParam }) },
   responses: {
     200: {

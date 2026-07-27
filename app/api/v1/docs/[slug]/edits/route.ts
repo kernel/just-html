@@ -1,15 +1,21 @@
 import {
+  forbiddenScope,
+  hasScope,
   json,
   notFoundDoc,
   parseJsonObject,
   payloadTooLarge,
   quotaExceeded,
-  requireApiKey,
+  rateLimit,
   staleVersion,
   unprocessableEdit,
 } from "@/lib/docs/api";
+import { authenticate, authFail } from "@/lib/auth/bearer";
+import { getSession } from "@/lib/auth/session";
+import { resolveCommentPrincipal } from "@/lib/docs/comments";
+import { checkLimits } from "@/lib/auth/ratelimit";
 import { EditsBody, editsBadRequest } from "@/lib/docs/schemas";
-import { MAX_HTML_BYTES } from "@/lib/docs/config";
+import { MAX_HTML_BYTES, RL_WRITES_PER_MIN } from "@/lib/docs/config";
 import { applyPatch, findBySlug, granteeView, ownerView } from "@/lib/docs/store";
 import { EditApplyError, type Edit } from "@/lib/docs/edit-diff";
 import { accessRoleLabel, canEdit, resolveAccess } from "@/lib/docs/grants";
@@ -20,11 +26,43 @@ type Ctx = { params: Promise<{ slug: string }> };
 
 // POST /api/v1/docs/:slug/edits — apply deterministic patches (birthday.md
 // "Editing"). Body: { edits: [{ oldText, newText }, ...], base_version? }.
-// Scope: docs.write. Owner OR editor grant (birthday.md "Permissions model").
+//
+// Auth: API key (agents, scope docs.write) OR a signed-in browser session — the
+// same dual identity the comment routes accept, because the viewer's inline edit
+// mode posts here from the shell with a cookie, not a jh_live_ key. What each
+// identity may do is UNCHANGED and enforced below by canEdit: owner or editor
+// grant, nothing else. A view-token holder or a public-doc reader resolves to no
+// access and gets the same 404 they always did — read links stay read-only.
 export async function POST(req: Request, ctx: Ctx): Promise<Response> {
-  const auth = await requireApiKey(req, "docs.write", "write");
-  if ("response" in auth) return auth.response;
-  const { principal } = auth;
+  const apiPrincipal = await authenticate(req);
+  if (apiPrincipal && !hasScope(apiPrincipal, "docs.write")) return forbiddenScope("docs.write");
+  const session = apiPrincipal ? null : await getSession(req);
+  // Neither identity → the Bearer 401 an agent can bootstrap from (a session
+  // always resolves to a principal, so this is the truly-anonymous case).
+  const principal = await resolveCommentPrincipal(apiPrincipal, session);
+  if (!principal) return authFail(req);
+
+  // Rate limit per credential: the existing per-key bucket for agents, a
+  // per-session bucket at the same ceiling for the browser.
+  if (apiPrincipal) {
+    const limited = await rateLimit(req, apiPrincipal, "write");
+    if (limited) return limited;
+  } else {
+    const tripped = await checkLimits([
+      { key: `docs:write:sess:${session!.id}`, limit: RL_WRITES_PER_MIN, window: "minute" },
+    ]);
+    if (tripped) {
+      return json(
+        {
+          error: "rate_limited",
+          message: `Too many requests. Retry after ${tripped.retryAfter} seconds.`,
+          retry_after: tripped.retryAfter,
+        },
+        429,
+        { "Retry-After": String(tripped.retryAfter) }
+      );
+    }
+  }
 
   // Size cap by Content-Length before parse (the produced html is re-checked
   // under the write lock inside applyPatch). This precheck runs before the doc
