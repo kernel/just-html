@@ -1,13 +1,13 @@
 import { manPage, htmlResponse, esc, redirect } from "@/lib/page";
 import { getSession } from "@/lib/auth/session";
 import { sanitizeNext, loginLanding, isEmailish } from "@/lib/auth/url";
-import { originOk, clientIp } from "@/lib/auth/request";
+import { originOk, clientIp, linkOrigin } from "@/lib/auth/request";
 import { enforceRateLimit, EMAIL_SEND_LIMITS } from "@/lib/auth/ratelimit";
 import { mintLoginToken, sha256Hex } from "@/lib/auth/tokens";
 import { sendLoginEmail } from "@/lib/auth/email";
 import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
-import { LOGIN_TOKEN_TTL_S, LOGIN_TOKEN_TTL_MIN, ORIGIN } from "@/lib/auth/config";
+import { LOGIN_TOKEN_TTL_S, LOGIN_TOKEN_TTL_MIN } from "@/lib/auth/config";
 
 export const dynamic = "force-dynamic";
 
@@ -169,7 +169,9 @@ export async function POST(req: Request): Promise<Response> {
   );
   const tokenId = rows[0].id;
 
-  const verifyUrl = `${ORIGIN}/login/verify?token=${token}&next=${encodeURIComponent(next)}`;
+  // Link back to the origin this request came in on, so a login started on a
+  // preview deployment finishes there instead of bouncing to production.
+  const verifyUrl = `${linkOrigin(req)}/login/verify?token=${token}&next=${encodeURIComponent(next)}`;
 
   let resendId: string | null = null;
   try {
