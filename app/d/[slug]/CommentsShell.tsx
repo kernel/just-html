@@ -5,6 +5,7 @@ import { buildChromePalette, type ThemeSample, type ChromePalette } from "@/lib/
 import CommentMarkdown from "@/lib/docs/comments/CommentMarkdown";
 import type { Section } from "@/lib/docs/sections";
 import { fragmentFor, parseHash } from "@/lib/docs/deeplink";
+import { buildInlineEdits, type TextChange } from "@/lib/docs/inline-edit";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
 // architecture", "CHOSEN: variant B"). The google-docs-style comment rail. The
@@ -78,6 +79,10 @@ type Props = {
   viewtoken: string | null;
   canComment: boolean;
   canReact: boolean;
+  // Inline edit mode is offered only to the owner or an editor grantee (resolved
+  // server-side by canEdit). Everyone else — including view-token holders who may
+  // comment — never sees the affordance, and the API would refuse them anyway.
+  canEdit: boolean;
   signedIn: boolean;
   docId: number;
   bookmarked: boolean;
@@ -135,6 +140,20 @@ function legacyCopy(text: string): boolean {
   }
 }
 
+/**
+ * Turn an /edits failure into something a person can act on. The engine's reason
+ * codes are precise but written for an agent retrying with more context; a human
+ * needs to know whether to reload, retype, or hand the change to their agent.
+ */
+function editErrorMessage(status: number, body: { reason?: string; message?: string } | null): string {
+  if (status === 409) return "edited elsewhere — reload for the latest";
+  if (status === 429) return "too many edits — wait a moment";
+  if (status === 401 || status === 403 || status === 404) return "no edit access";
+  if (status === 422 && body?.reason === "multiple_matches") return "text repeats — edit via your agent";
+  if (status === 422 && body?.reason === "not_found") return "couldn’t place that text — edit via your agent";
+  return body?.message || "save failed";
+}
+
 export default function CommentsShell(props: Props) {
   const {
     slug,
@@ -143,6 +162,7 @@ export default function CommentsShell(props: Props) {
     viewtoken,
     canComment,
     canReact,
+    canEdit,
     signedIn,
     docId,
     me,
@@ -234,6 +254,20 @@ export default function CommentsShell(props: Props) {
     [effectiveTheme]
   );
   const isDark = palette !== null;
+
+  // Inline edit mode. versionRef tracks the version every patch is based on, so a
+  // concurrent write 409s instead of silently overwriting; the server hands back
+  // the new version on each save.
+  const [editing, setEditing] = useState(false);
+  const [editStatus, setEditStatus] = useState<string | null>(null);
+  const versionRef = useRef(props.version);
+  const saveInlineEditRef = useRef<(changes: TextChange[]) => void>(() => {});
+  const statusTimer = useRef<number | null>(null);
+  const showEditStatus = useCallback((msg: string | null, clearAfterMs?: number) => {
+    setEditStatus(msg);
+    if (statusTimer.current) window.clearTimeout(statusTimer.current);
+    if (msg && clearAfterMs) statusTimer.current = window.setTimeout(() => setEditStatus(null), clearAfterMs);
+  }, []);
 
   // Selection state (from the overlay) → the floating toolbar + a pending draft.
   const [selection, setSelection] = useState<{ anchor: NonNullable<Anchor>; top: number; viewTop: number } | null>(null);
@@ -350,6 +384,13 @@ export default function CommentsShell(props: Props) {
       postToOverlay({ type: "jh:reactions", groups: paintReactionGroups, me, avatars });
   }, [overlayReady, paintReactionGroups, me, avatars, postToOverlay]);
 
+  // Sync edit mode to the overlay. Keyed on overlayReadyNonce as well as
+  // overlayReady so an iframe reload re-enters edit mode rather than silently
+  // dropping it (the fresh overlay starts with editing off).
+  useEffect(() => {
+    if (overlayReady) postToOverlay({ type: "jh:editMode", on: editing });
+  }, [overlayReady, overlayReadyNonce, editing, postToOverlay]);
+
   // Send sections likewise — on change or when the overlay (re)becomes ready — so
   // heading ids + gutter icons don't go stale if initialSections changes in place.
   useEffect(() => {
@@ -463,6 +504,14 @@ export default function CommentsShell(props: Props) {
           // A chip was clicked inside the iframe → optimistic toggle (add/remove).
           if (canReact && d.anchor && d.anchor.exact) reactAnchoredRef.current(d.emoji, d.anchor);
           break;
+        case "jh:edit":
+          // A block left edit mode with changed text. canEdit is re-checked
+          // server-side on every patch; this is only the UI gate.
+          if (canEdit && Array.isArray(d.changes)) saveInlineEditRef.current(d.changes);
+          break;
+        case "jh:editRejected":
+          showEditStatus("structure changed — use your agent for that", 6000);
+          break;
         case "jh:copyLink":
           // The section link icon (inside the iframe) was clicked. Clipboard is
           // unreliable from the opaque-origin sandbox, so the copy happens here on
@@ -473,7 +522,7 @@ export default function CommentsShell(props: Props) {
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [paintAnchors, paintReactionGroups, me, avatars, postToOverlay, canComment, canReact, initialSections, copyLink]);
+  }, [paintAnchors, paintReactionGroups, me, avatars, postToOverlay, canComment, canReact, canEdit, initialSections, copyLink, showEditStatus]);
 
   const reload = useCallback(async () => {
     const r = await fetch(`${apiBase}/comments${tokenQuery}`, { credentials: "same-origin" });
@@ -636,6 +685,50 @@ export default function CommentsShell(props: Props) {
     [apiBase, tokenQuery, reload, me]
   );
   reactAnchoredRef.current = reactAnchored;
+
+  // Save one block's inline edit. The overlay reports TEXT-NODE before/after pairs
+  // (never HTML — see lib/docs/inline-edit.ts), which become the same deterministic
+  // {oldText,newText} patch an agent posts, so the stored bytes change only where
+  // the text actually changed and everything around it stays byte-for-byte.
+  const saveInlineEdit = useCallback(
+    async (changes: TextChange[]) => {
+      const payloads = buildInlineEdits(changes);
+      if (!payloads) return;
+      showEditStatus("saving…");
+
+      const post = (edits: { oldText: string; newText: string }[]) =>
+        fetch(`${apiBase}/edits${tokenQuery}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ edits, base_version: versionRef.current }),
+        });
+
+      let r = await post(payloads.edits);
+      let body = await r.json().catch(() => null);
+      // A miss here usually means the source spells the text with entities
+      // (`&amp;`, `&nbsp;`), so the DOM text isn't a substring of it. Retry once
+      // with the escaped form before telling the viewer we can't place it.
+      if (r.status === 422 && body?.reason === "not_found") {
+        r = await post(payloads.escaped);
+        body = await r.json().catch(() => null);
+      }
+
+      // Tell the overlay first: on a rejection it puts the author's text back, so
+      // the rendered document never disagrees with the stored bytes.
+      postToOverlay({ type: "jh:editResult", ok: r.ok });
+      if (!r.ok) {
+        showEditStatus(editErrorMessage(r.status, body), 6000);
+        return;
+      }
+      if (typeof body?.version === "number") versionRef.current = body.version;
+      showEditStatus("saved", 2000);
+      // The write re-anchored comments in the same transaction; pull the result.
+      await reload();
+    },
+    [apiBase, tokenQuery, postToOverlay, reload, showEditStatus]
+  );
+  saveInlineEditRef.current = (changes) => void saveInlineEdit(changes);
 
   // Sync the active highlight to the overlay.
   useEffect(() => {
@@ -857,6 +950,42 @@ export default function CommentsShell(props: Props) {
               </svg>
             </button>
           ) : null}
+          {canEdit ? (
+            <>
+              {editStatus ? (
+                <span aria-live="polite" style={{ fontSize: "0.75rem", opacity: 0.85 }}>
+                  {editStatus}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                aria-pressed={editing}
+                aria-label={editing ? "stop editing" : "edit this document"}
+                title={editing ? "Stop editing" : "Edit text inline — click a paragraph to type"}
+                onClick={() => {
+                  setEditing((e) => !e);
+                  showEditStatus(null);
+                }}
+                style={{ ...commentBtnStyle(editing), lineHeight: 1 }}
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="13"
+                  height="13"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  style={{ display: "block" }}
+                >
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z" />
+                </svg>
+              </button>
+            </>
+          ) : null}
           <button
             type="button"
             className="jh-commentbtn"
@@ -886,7 +1015,7 @@ export default function CommentsShell(props: Props) {
               selection's viewport-top within the iframe. Shows on selection when
               the viewer can comment OR react (react-only viewers still get the
               react affordance). */}
-          {selection && (canComment || canReact) ? (
+          {selection && !editing && (canComment || canReact) ? (
             <SelectionToolbar
               viewTop={selection.viewTop}
               canComment={canComment}

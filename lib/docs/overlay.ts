@@ -13,6 +13,8 @@
 //                     { type:"jh:scrollTo", id }
 //                     { type:"jh:clearSelection" }
 //                     { type:"jh:themeMode", mode }        ("dark"|"light" force doc theme; else auto)
+//                     { type:"jh:editMode", on }           (enter/leave inline edit mode)
+//                     { type:"jh:editResult", ok }         (server verdict on the last jh:edit)
 //   overlay → shell:  { type:"jh:ready" }
 //                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight, scrollY }
 //                          (comment highlight y in doc space; doc scroll for rail sync)
@@ -21,6 +23,8 @@
 //                     { type:"jh:focus", key, keys }      (a segment was clicked: focused key + full covering set)
 //                     { type:"jh:hlHover", id } / { type:"jh:hlHoverOut" }
 //                     { type:"jh:reactionToggle", anchor:{exact,prefix,suffix}, emoji } (chip click)
+//                     { type:"jh:edit", changes:[{before, after}] }  (a block was edited)
+//                     { type:"jh:editRejected", reason }   (edit changed structure; not sent)
 //
 // B14 (birthday.md "Overlap semantics", founder-approved 2026-06-12): the one
 // structural decision is **paint segments, not nested wrappers**. Partially-
@@ -487,6 +491,10 @@ export const OVERLAY_SCRIPT = String.raw`
 
   // ---- segment painting (the B14 core) ----
   function paint(){
+    // Never repaint mid-edit: wrapping segments splits the text nodes we're
+    // diffing and would drop the caret. setEditMode(false) repaints on exit, and
+    // the anchors/rxGroups vars keep accumulating meanwhile, so nothing is lost.
+    if (editing) return;
     ensureStyle();
     clearHighlights();
     var tx = buildText();
@@ -783,6 +791,168 @@ export const OVERLAY_SCRIPT = String.raw`
     rec.segEls[0].scrollIntoView({block:"center", behavior:"smooth"});
   }
 
+  // ---- inline edit mode (owners + editor grantees) ----
+  //
+  // Edit mode NEVER re-serializes the document. Clicking a block makes THAT BLOCK
+  // contentEditable and snapshots its text nodes; on commit we diff the snapshot
+  // and report {before, after} pairs, which the shell turns into the same
+  // deterministic {oldText,newText} patch an agent posts to /edits (the reasoning
+  // is in lib/docs/inline-edit.ts). Structural changes can't be expressed that
+  // way, so Enter is suppressed, paste is flattened to text, and a node
+  // split/merge/removal aborts the save instead of guessing.
+  var editing = false;  // edit mode on: blocks are click-to-edit
+  var editEl = null;    // the block currently contentEditable
+  var editSnap = null;  // { nodes:[{node,text}], html } baseline for editEl
+  var editSent = null;  // snapshot to revert from, awaiting the shell's jh:editResult
+  var EDIT_BLOCKS = "p,h1,h2,h3,h4,h5,h6,li,blockquote,figcaption,dd,dt,td,th,caption,summary";
+
+  function ensureEditStyle(){
+    if (document.getElementById("jh-edit-style")) return;
+    var st = document.createElement("style"); st.id = "jh-edit-style";
+    var hover = EDIT_BLOCKS.split(",").map(function(s){ return "html.jh-editmode " + s + ":hover"; }).join(",");
+    st.textContent =
+      hover + "{outline:1px dashed rgba(245,197,24,.8);outline-offset:2px;cursor:text}"
+      + "html.jh-editmode [data-jh-edit],html.jh-editmode [data-jh-edit]:hover"
+      + "{outline:2px solid #f5c518;outline-offset:2px;background:rgba(245,197,24,.08)}";
+    (document.head||document.documentElement).appendChild(st);
+  }
+
+  // Text nodes of one block, under the same exclusions as buildText (our own
+  // injected chips/anchors are not the author's text and must never be patched).
+  function editTextNodes(el){
+    var w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null), out = [];
+    while (w.nextNode()){
+      var n = w.currentNode, p = n.parentNode;
+      if (p && (p.nodeName === "SCRIPT" || p.nodeName === "STYLE")) continue;
+      if (p && p.closest && p.closest("[data-jh-chip],[data-jh-sec-anchor]")) continue;
+      out.push(n);
+    }
+    return out;
+  }
+
+  function beginEdit(el){
+    if (editEl === el) return;
+    // Re-entering a block supersedes any revert we still owed for its in-flight
+    // save: the viewer's newer text wins over restoring the old one under their
+    // cursor. Cleared BEFORE the commit below, which records the outgoing block's.
+    editSent = null;
+    commitEdit();
+    editEl = el;
+    editSnap = {
+      nodes: editTextNodes(el).map(function(n){ return { node:n, text:n.nodeValue }; }),
+      html: el.innerHTML
+    };
+    el.setAttribute("data-jh-edit","1");
+    el.setAttribute("contenteditable","true");
+    try { el.focus(); } catch(e){}
+  }
+
+  function leaveEdit(el){
+    el.removeAttribute("contenteditable");
+    el.removeAttribute("data-jh-edit");
+  }
+
+  /** Restore the edited text nodes' original values (server rejected the patch). */
+  function revertSnap(snap){
+    for (var i=0;i<snap.nodes.length;i++){
+      var e = snap.nodes[i];
+      try { if (e.node.isConnected) e.node.nodeValue = e.text; } catch(err){}
+    }
+  }
+
+  function commitEdit(){
+    if (!editEl) return;
+    var el = editEl, snap = editSnap;
+    editEl = null; editSnap = null;
+    leaveEdit(el);
+
+    // A text patch can only express "this run of text became that one". If the
+    // node list moved at all, the edit changed structure — restore the block's
+    // markup (a view-local repair; the stored bytes were never touched) and say so.
+    var live = editTextNodes(el);
+    var structural = live.length !== snap.nodes.length;
+    var changes = [];
+    for (var i=0;i<snap.nodes.length && !structural;i++){
+      if (live[i] !== snap.nodes[i].node){ structural = true; break; }
+      var now = snap.nodes[i].node.nodeValue;
+      if (now !== snap.nodes[i].text) changes.push({ before: snap.nodes[i].text, after: now });
+    }
+    if (structural){
+      try { el.innerHTML = snap.html; } catch(e){}
+      send({type:"jh:editRejected", reason:"structural"});
+      return;
+    }
+    if (!changes.length) return;
+    editSent = snap;
+    send({type:"jh:edit", changes: changes});
+  }
+
+  function cancelEdit(){
+    if (!editEl) return;
+    var el = editEl, snap = editSnap;
+    editEl = null; editSnap = null;
+    leaveEdit(el);
+    // Discard everything, including a structural change the node-value revert
+    // can't undo. View-local only — the stored bytes were never touched.
+    try { el.innerHTML = snap.html; } catch(e){}
+  }
+
+  function setEditMode(on){
+    on = !!on;
+    if (on === editing) return;
+    editing = on;
+    if (on){
+      ensureEditStyle();
+      // Unwrap highlight segments first: they split text nodes mid-run, and an
+      // edit must diff the author's nodes, not our paint.
+      clearHighlights();
+      hidePop();
+      try { var s = window.getSelection(); if (s) s.removeAllRanges(); } catch(e){}
+      send({type:"jh:selectionCleared"});
+      document.documentElement.classList.add("jh-editmode");
+    } else {
+      commitEdit();
+      document.documentElement.classList.remove("jh-editmode");
+      paint();
+    }
+  }
+
+  document.addEventListener("click", function(ev){
+    if (!editing) return;
+    var t = ev.target;
+    // Links are text to edit here, not navigation — the iframe must not leave.
+    if (t && t.closest && t.closest("a[href]")) ev.preventDefault();
+    var el = t && t.closest && t.closest(EDIT_BLOCKS);
+    if (!el){ commitEdit(); return; }
+    beginEdit(el);
+  }, true);
+
+  document.addEventListener("keydown", function(ev){
+    if (!editEl) return;
+    if (ev.key === "Enter"){
+      // No new blocks: a split paragraph isn't expressible as a text patch.
+      // Cmd/Ctrl-Enter is the explicit save.
+      ev.preventDefault();
+      if (ev.metaKey || ev.ctrlKey) commitEdit();
+      return;
+    }
+    if (ev.key === "Escape"){ ev.preventDefault(); cancelEdit(); }
+  });
+
+  document.addEventListener("paste", function(ev){
+    if (!editEl) return;
+    ev.preventDefault();
+    var t = "";
+    try { t = ((ev.clipboardData || window.clipboardData).getData("text/plain") || ""); } catch(e){}
+    t = t.replace(/\s*\n+\s*/g, " ");
+    if (t){ try { document.execCommand("insertText", false, t); } catch(e){} }
+  });
+
+  document.addEventListener("focusout", function(ev){
+    // Click-away (including onto the shell's chrome) saves.
+    if (editEl && ev.target === editEl) commitEdit();
+  });
+
   // ---- selection → anchor ----
   function anchorFromSelection(sel){
     // Derive exact/prefix/suffix from the SAME clean text model as anchor
@@ -817,6 +987,9 @@ export const OVERLAY_SCRIPT = String.raw`
     return !!(t && t.closest && (t.closest("[data-jh-chip]") || t.closest(".jh-pop")));
   }
   function reportSelection(){
+    // In edit mode the caret IS the selection — reporting it would pop the
+    // comment toolbar over the text being typed.
+    if (editing) return;
     try {
       var sel = window.getSelection();
       if (!sel || !sel.rangeCount || sel.isCollapsed || !sel.toString().trim()){ send({type:"jh:selectionCleared"}); return; }
@@ -896,6 +1069,14 @@ export const OVERLAY_SCRIPT = String.raw`
       forcedScheme = (d.mode === "dark" || d.mode === "light") ? d.mode : null;
       applyDocScheme();
       sampleTheme(); // re-read colors so the chrome + highlight follow the forced doc theme
+    }
+    else if (d.type === "jh:editMode"){ setEditMode(d.on); }
+    else if (d.type === "jh:editResult"){
+      // The shell reports what the server did with the patch we sent. Accepted →
+      // the DOM already shows the new text, nothing to do. Rejected → put the
+      // author's text back so the view never disagrees with the stored bytes.
+      var sent = editSent; editSent = null;
+      if (sent && !d.ok){ revertSnap(sent); if (!editing) paint(); }
     }
     else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
   });

@@ -192,6 +192,8 @@ Auth:
 
 Documents (`/api/v1`, `Authorization: Bearer jh_live_…`): `docs` CRUD,
 `/edits` (deterministic patches), `/rotate-token`, `/versions`, `/grants`.
+`/edits` additionally accepts a signed-in session — it backs the viewer's inline
+edit mode (see below); every other document endpoint stays API-key-only.
 `GET /api/v1/docs` items carry `access` and `comment_count`. Creating an
 **email** grant sends the grantee a share-notification email — one single-use,
 7-day login link (`kind='share'` on `login_tokens`) with `next=/d/:slug` that
@@ -217,6 +219,21 @@ span's end (chip hover → reactor gravatars/emails; click your own → toggle o
 the chip/highlight appear optimistically the instant you react, no reload. Comment:
 owner / editor or commenter grant / view-token holder with identity / any identity
 on a public doc. React: anyone who can view, with identity. Anonymous never writes.
+
+Inline editing (`/d/:slug`, owner or editor grant): the bar's pencil enters edit
+mode; clicking a block makes THAT BLOCK contentEditable, and blur / ⌘-Enter saves.
+The overlay never serializes the DOM back to HTML — a round-trip would rewrite the
+whole document (attribute order, entity forms, script-rendered subtrees) and
+byte-exact `/raw` is the product. Instead it diffs the block's TEXT NODES and
+reports `{before, after}` pairs; `lib/docs/inline-edit.ts` turns those into the
+same `{oldText,newText}` patch an agent posts to `/edits`, so versioning,
+re-anchoring, quotas and the 409/422 outcomes are all the existing paths. A text
+node's content is verbatim in the stored HTML, except where the author used
+entities — hence two payloads (literal, then entity-escaped on a `not_found`), and
+`newText` is always escaped so typing `<b>` lands as text. Structural edits are
+not expressible as text patches: Enter is suppressed, paste is flattened, and a
+node split/merge/removal restores the block and reports "structure changed" rather
+than guessing. Those go through the agent API.
 
 Viewing: `/d/:slug` (shell + sandboxed iframe; the google-docs-style comment
 rail appears once a doc has comments/reactions or the viewer can interact —

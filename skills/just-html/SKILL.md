@@ -102,6 +102,10 @@ Patch (deterministic edits) -> POST /docs/:slug/edits   { edits:[{oldText,newTex
   # Always send base_version. Mismatch -> 409 with current_version. Ambiguous /
   # no-match / overlapping edits -> 422 naming the failing edit (retry with more
   # context).
+  # This endpoint also accepts a signed-in session, which is how the viewer's
+  # inline edit mode saves: an owner or editor grantee opens /d/:slug, clicks the
+  # pencil, and types on the page. It patches TEXT only (typos, rewording) and
+  # posts the same edits you would; structural changes stay an agent job.
 
 Delete (soft) -> DELETE /docs/:slug
   curl -s -X DELETE https://justhtml.sh/api/v1/docs/fierce-tiger-12345 -H "Authorization: Bearer $JUSTHTML_API_KEY"

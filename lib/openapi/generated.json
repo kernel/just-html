@@ -2135,12 +2135,13 @@
           "docs"
         ],
         "summary": "Apply deterministic patches",
-        "description": "exact-match-then-fuzzy edit application. Owner or editor grant. Always send base_version; a mismatch returns 409. Ambiguous, no-match, or overlapping edits return 422 naming the failing edit index.",
+        "description": "exact-match-then-fuzzy edit application. Owner or editor grant. Identity: API key OR signed-in session (the viewer's inline edit mode posts here). Always send base_version; a mismatch returns 409. Ambiguous, no-match, or overlapping edits return 422 naming the failing edit index.",
         "operationId": "editDoc",
         "security": [
           {
             "bearerApiKey": []
-          }
+          },
+          {}
         ],
         "parameters": [
           {
