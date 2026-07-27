@@ -109,7 +109,7 @@ Patch (deterministic edits) -> POST /docs/:slug/edits   { edits:[{oldText,newTex
 Structural edits -> POST /docs/:slug/ops   { ops:[{op, src, ...}], base_version }
   # The markup sibling of /edits. /edits changes TEXT by matching it; /ops changes
   # MARKUP by naming an element: setRuns, setInline, setText, unwrap, retag,
-  # replaceWith, wrap, insert, delete, move, indent, outdent, insertRow.
+  # replaceWith, wrap, insert, delete, move, indent, outdent, insertRow, splitAt.
   #
   # Ops describe INTENT, not html — a block is {tag, runs:[{kind:"text", text,
   # marks:["strong"|"em"|"code"|"del"], href?}]} — and the server renders it, so

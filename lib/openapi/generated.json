@@ -1889,6 +1889,229 @@
                     "op",
                     "src"
                   ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "enum": [
+                        "splitAt"
+                      ]
+                    },
+                    "src": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "container": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "child": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "before": {
+                      "type": "string"
+                    },
+                    "tag": {
+                      "type": "string",
+                      "enum": [
+                        "p",
+                        "h1",
+                        "h2",
+                        "h3",
+                        "h4",
+                        "h5",
+                        "h6",
+                        "blockquote",
+                        "li",
+                        "dt",
+                        "dd",
+                        "figcaption",
+                        "td",
+                        "th",
+                        "caption",
+                        "summary",
+                        "ul",
+                        "ol"
+                      ]
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "head": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "text"
+                                ]
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "marks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "strong",
+                                    "em",
+                                    "del",
+                                    "code"
+                                  ]
+                                },
+                                "maxItems": 4
+                              },
+                              "href": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "br"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "img"
+                                ]
+                              },
+                              "src": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "alt": {
+                                "type": "string",
+                                "maxLength": 500
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "src"
+                            ]
+                          }
+                        ]
+                      },
+                      "maxItems": 400
+                    },
+                    "tail": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "text"
+                                ]
+                              },
+                              "text": {
+                                "type": "string",
+                                "maxLength": 20000
+                              },
+                              "marks": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "strong",
+                                    "em",
+                                    "del",
+                                    "code"
+                                  ]
+                                },
+                                "maxItems": 4
+                              },
+                              "href": {
+                                "type": "string",
+                                "maxLength": 2048
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "text"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "br"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "kind"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "kind": {
+                                "type": "string",
+                                "enum": [
+                                  "img"
+                                ]
+                              },
+                              "src": {
+                                "type": "string",
+                                "maxLength": 2048
+                              },
+                              "alt": {
+                                "type": "string",
+                                "maxLength": 500
+                              }
+                            },
+                            "required": [
+                              "kind",
+                              "src"
+                            ]
+                          }
+                        ]
+                      },
+                      "maxItems": 400
+                    }
+                  },
+                  "required": [
+                    "op",
+                    "src",
+                    "container",
+                    "child",
+                    "before",
+                    "tag"
+                  ]
                 }
               ]
             },

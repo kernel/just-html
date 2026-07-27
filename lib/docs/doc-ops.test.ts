@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyOps, OpApplyError, type Op } from "@/lib/docs/doc-ops";
-import { parseSource } from "@/lib/docs/html-source";
+import { decodeMap, parseSource } from "@/lib/docs/html-source";
 
 /** Id of the nth element with this tag, as the browser would have been served it. */
 function idOf(html: string, tag: string, nth = 0): number {
@@ -224,6 +224,178 @@ describe("block shape", () => {
     const html = "<table>\n  <tr><th>a</th><th>b</th></tr>\n</table>";
     const out = run(html, [{ op: "insertRow", src: idOf(html, "tr") }]);
     expect(out).toContain("<tr><th>a</th><th>b</th></tr>\n  <tr><td></td><td></td></tr>");
+  });
+});
+
+describe("splitAt", () => {
+  /** The block, text-node and offset an Enter at `at` characters in resolves to. */
+  function at(html: string, tag: string, nth: number, offset: number) {
+    const map = parseSource(html);
+    const block = map.elements.filter((e) => e.tag === tag)[nth];
+    let seen = 0;
+    const walk = (
+      el: (typeof map.elements)[number]
+    ): { container: number; child: number; offset: number; before: string } | null => {
+      for (let i = 0; i < el.children.length; i++) {
+        const c = el.children[i];
+        if (c.kind === "text") {
+          const text = decodeMap(html.slice(c.start, c.end)).text;
+          if (seen + text.length >= offset) {
+            return { container: el.id, child: i, offset: offset - seen, before: text };
+          }
+          seen += text.length;
+        } else if (c.kind === "element" && c.id !== undefined) {
+          const hit = walk(map.elements[c.id]);
+          if (hit) return hit;
+        }
+      }
+      return null;
+    };
+    const pos = walk(block)!;
+    return { op: "splitAt" as const, src: block.id, ...pos, tag: "p" as const };
+  }
+
+  it("breaks a paragraph in two at the caret", () => {
+    const html = "<p>Plain sentence one two three.</p>";
+    expect(run(html, [at(html, "p", 0, 14)])).toBe("<p>Plain sentence</p>\n<p> one two three.</p>");
+  });
+
+  it("puts the caret at the start of the second half", () => {
+    const html = "<p>Plain sentence one two three.</p>";
+    const res = applyOps(html, [at(html, "p", 0, 14)]);
+    const el = parseSource(res.html).elements[res.focus!];
+    expect(res.html.slice(el.start, el.end)).toBe("<p> one two three.</p>");
+  });
+
+  it("splits at the very start, leaving an empty block above and the caret with the text", () => {
+    const html = "<p>Text.</p>";
+    const res = applyOps(html, [at(html, "p", 0, 0)]);
+    expect(res.html).toBe("<p></p>\n<p>Text.</p>");
+    const el = parseSource(res.html).elements[res.focus!];
+    expect(res.html.slice(el.start, el.end)).toBe("<p>Text.</p>");
+  });
+
+  it("splits at the very end, leaving an empty block below", () => {
+    const html = "<p>Text.</p>";
+    const res = applyOps(html, [at(html, "p", 0, 5)]);
+    expect(res.html).toBe("<p>Text.</p>\n<p></p>");
+    const el = parseSource(res.html).elements[res.focus!];
+    expect(res.html.slice(el.start, el.end)).toBe("<p></p>");
+  });
+
+  it("splits a block holding markup the run model cannot describe", () => {
+    // The whole point of splitting by BYTES: a <span> is not something the editor
+    // can re-render, and it does not have to be.
+    const html = '<p>Wrapped in a <span class="k">span</span> here.</p>';
+    expect(run(html, [at(html, "p", 0, 8)])).toBe(
+      '<p>Wrapped </p>\n<p>in a <span class="k">span</span> here.</p>'
+    );
+  });
+
+  it("closes and reopens the inline element the caret sits inside", () => {
+    const html = "<p>a <strong>bold text</strong> b</p>";
+    expect(run(html, [at(html, "p", 0, 6)])).toBe(
+      "<p>a <strong>bold</strong></p>\n<p><strong> text</strong> b</p>"
+    );
+  });
+
+  it("keeps the class on both halves but the id on only one", () => {
+    const html = '<p class="lead" id="intro">one two</p>';
+    expect(run(html, [at(html, "p", 0, 3)])).toBe('<p class="lead" id="intro">one</p>\n<p class="lead"> two</p>');
+  });
+
+  it("gives the second half a different tag when asked", () => {
+    const html = "<h2>Title here</h2>";
+    const map = parseSource(html);
+    expect(
+      run(html, [
+        {
+          op: "splitAt",
+          src: map.elements[0].id,
+          container: map.elements[0].id,
+          child: 0,
+          before: "Title here",
+          offset: 5,
+          tag: "p",
+        },
+      ])
+    ).toBe("<h2>Title</h2>\n<p> here</p>");
+  });
+
+  it("leaves an entity beside the cut spelled as it was written", () => {
+    const html = "<p>R&amp;D and more</p>";
+    expect(run(html, [at(html, "p", 0, 8)])).toBe("<p>R&amp;D and </p>\n<p>more</p>");
+  });
+
+  it("carries uncommitted typing and resolved markdown into both halves", () => {
+    // The block was opened holding "old text"; the author has typed over it and
+    // pressed Enter without ever blurring, so the split has to write what is on
+    // screen, not what is stored.
+    const html = "<p>old text</p>";
+    expect(
+      run(html, [
+        {
+          op: "splitAt",
+          src: 0,
+          container: 0,
+          child: 0,
+          before: "old text",
+          tag: "p",
+          head: [
+            { kind: "text", text: "see " },
+            { kind: "text", text: "this", marks: ["strong"] },
+          ],
+          tail: [{ kind: "text", text: " now" }],
+        },
+      ])
+    ).toBe("<p>see <strong>this</strong></p>\n<p> now</p>");
+  });
+
+  it("keeps markup before the caret on the first half when replacing the halves", () => {
+    const html = "<p><em>lead</em> old text</p>";
+    const map = parseSource(html);
+    expect(
+      run(html, [
+        {
+          op: "splitAt",
+          src: 0,
+          container: 0,
+          child: map.elements[0].children.findIndex((c) => c.kind === "text" && html.slice(c.start, c.end) === " old text"),
+          before: " old text",
+          tag: "p",
+          head: [{ kind: "text", text: " one" }],
+          tail: [{ kind: "text", text: " two" }],
+        },
+      ])
+    ).toBe("<p><em>lead</em> one</p>\n<p> two</p>");
+  });
+
+  it("refuses when the stored text is not what the caller expected", () => {
+    const html = "<p>Text.</p>";
+    expect(
+      reason(html, [
+        { op: "splitAt", src: 0, container: 0, child: 0, before: "Something else", offset: 2, tag: "p" },
+      ])
+    ).toBe("anchor_mismatch");
+  });
+
+  it("refuses a cut position that is not in the text", () => {
+    const html = "<p>R&amp;D</p>";
+    expect(
+      reason(html, [{ op: "splitAt", src: 0, container: 0, child: 0, before: "R&D", offset: 99, tag: "p" }])
+    ).toBe("anchor_mismatch");
+  });
+
+  it("refuses a caret outside the block it claims to split", () => {
+    const html = "<div><p>one</p><p>two</p></div>";
+    const map = parseSource(html);
+    const p0 = map.elements.filter((e) => e.tag === "p")[0];
+    const p1 = map.elements.filter((e) => e.tag === "p")[1];
+    expect(
+      reason(html, [
+        { op: "splitAt", src: p0.id, container: p1.id, child: 0, before: "two", offset: 1, tag: "p" },
+      ])
+    ).toBe("not_editable");
   });
 });
 

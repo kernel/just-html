@@ -79,7 +79,29 @@ export type Op =
   /** Lift a nested list item out to its grandparent list. */
   | { op: "outdent"; src: number }
   /** Append a row with the same cell count to the table holding this row. */
-  | { op: "insertRow"; src: number };
+  | { op: "insertRow"; src: number }
+  /**
+   * Break a block in two at a caret. `container`/`child` name the text node the
+   * caret is in and `before` is the text that node must currently hold; `tag` is
+   * what the second half becomes.
+   *
+   * Two forms. With `offset`, the node is CUT at that character and both halves
+   * keep their bytes exactly — which is what makes Enter work in a block holding
+   * markup this editor could never re-render. With `head`/`tail`, the node is
+   * replaced by the two halves' new content, which is how a split carries
+   * uncommitted typing and resolves markdown in the same write.
+   */
+  | {
+      op: "splitAt";
+      src: number;
+      container: number;
+      child: number;
+      before: string;
+      tag: RetagTag;
+      offset?: number;
+      head?: Run[];
+      tail?: Run[];
+    };
 
 export const WRAP_TAGS = ["ul", "ol", "blockquote"] as const;
 export type WrapTag = (typeof WRAP_TAGS)[number];
@@ -96,7 +118,14 @@ const OFF_LIMITS = new Set(["script", "style", "head", "title", "template"]);
 /** Elements that can hold new content but must never be renamed or removed. */
 const STRUCTURAL = new Set(["body", "html", "head"]);
 
-type Splice = { start: number; end: number; text: string; focus?: boolean };
+type Splice = {
+  start: number;
+  end: number;
+  text: string;
+  focus?: boolean;
+  /** Where in `text` the new element starts, when it isn't the first tag there. */
+  focusIn?: number;
+};
 
 function fail(reason: OpFailureReason, i: number, message: string): never {
   throw new OpApplyError(reason, i, message);
@@ -178,6 +207,23 @@ function spliceTextChild(
     end: start + dm.at[cut],
     text: escapeHtmlText(after.slice(p, after.length - s)),
   };
+}
+
+/**
+ * A start tag with any id attribute removed. Splitting a block copies its start
+ * tag so the second half keeps the class that styles it, but an id is unique by
+ * definition and duplicating it would break every anchor and selector using it.
+ */
+function startTagWithoutId(tag: string): string {
+  return tag.replace(/\s+id\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/i, "");
+}
+
+/** Whether `el` is `ancestor`, or sits inside it. */
+function within(map: SourceMap, el: SrcElement, ancestor: SrcElement): boolean {
+  for (let c: SrcElement | null = el; c; c = c.parent === null ? null : map.elements[c.parent]) {
+    if (c.id === ancestor.id) return true;
+  }
+  return false;
 }
 
 /** The element children of an element, in source order. */
@@ -309,6 +355,72 @@ function opSplices(map: SourceMap, op: Op, i: number): Splice[] {
           : { start: startWithLeadingBlank(html, el.start), end: el.end, text: "" };
       return [removal, { start: outerItem.end, end: outerItem.end, text: `\n${moved}`, focus: true }];
     }
+    case "splitAt": {
+      const block = reshapeable(map, need(map, op.src, i), i);
+      const container = editable(map, need(map, op.container, i), i);
+      if (!within(map, container, block)) {
+        fail("not_editable", i, `Op ${i} splits at a position outside the block it names.`);
+      }
+      const child = container.children[op.child];
+      if (!child || child.kind !== "text") {
+        fail("unknown_element", i, `Op ${i} names child ${op.child} of element ${op.container}, which is not text.`);
+      }
+      const dm = decodeMap(html.slice(child.start, child.end));
+      if (dm.text !== op.before) {
+        fail("anchor_mismatch", i, `Op ${i} expected different text at the split point; reload and retry.`);
+      }
+
+      // Inline elements the caret sits inside have to be closed before the block
+      // ends and reopened inside the new one, or both halves are unbalanced.
+      const chain: SrcElement[] = [];
+      for (
+        let c: SrcElement | null = container;
+        c && c.id !== block.id;
+        c = c.parent === null ? null : map.elements[c.parent]
+      ) {
+        chain.push(c);
+      }
+      const close = chain.map((e) => `</${e.tag}>`).join("");
+      const reopen = [...chain].reverse().map((e) => html.slice(e.start, e.innerStart)).join("");
+      const startTag =
+        op.tag === block.tag
+          ? startTagWithoutId(html.slice(block.start, block.innerStart))
+          : `<${op.tag}>`;
+      const boundary = `${close}</${block.tag}>\n${startTag}${reopen}`;
+      const focusIn = close.length + `</${block.tag}>\n`.length;
+
+      let splice: Splice;
+      if (op.head || op.tail) {
+        const head = renderRuns(op.head ?? []);
+        splice = {
+          start: child.start,
+          end: child.end,
+          text: `${head}${boundary}${renderRuns(op.tail ?? [])}`,
+          focus: true,
+          focusIn: head.length + focusIn,
+        };
+      } else {
+        const at = op.offset ?? 0;
+        const clean =
+          at >= 0 && at <= dm.text.length && (at === 0 || at === dm.text.length || dm.at[at] > dm.at[at - 1]);
+        if (!clean) fail("anchor_mismatch", i, `Op ${i} splits inside a character reference; reload and retry.`);
+        const cut = child.start + dm.at[at];
+        splice = { start: cut, end: cut, text: boundary, focus: true, focusIn };
+      }
+
+      const splices: Splice[] = [splice];
+      // The block's own end tag now closes the SECOND half, so it has to be
+      // renamed too — otherwise splitting an <h2> into a <p> leaves `</h2>`
+      // closing it.
+      if (op.tag !== block.tag) {
+        splices.push({
+          start: block.innerEnd,
+          end: block.hasEndTag ? block.end : block.innerEnd,
+          text: `</${op.tag}>`,
+        });
+      }
+      return splices;
+    }
     case "insertRow": {
       const el = reshapeable(map, need(map, op.src, i), i);
       if (el.tag !== "tr") fail("not_editable", i, `Op ${i} can only add a row after a table row.`);
@@ -355,7 +467,10 @@ export function applyOps(html: string, ops: Op[]): { html: string; focus?: numbe
     const shift = splices
       .filter((s) => s !== focusSplice && s.start < focusSplice.start)
       .reduce((sum, s) => sum + (s.text.length - (s.end - s.start)), 0);
-    const at = focusSplice.start + shift + Math.max(0, focusSplice.text.indexOf("<"));
+    const at =
+      focusSplice.start +
+      shift +
+      (focusSplice.focusIn ?? Math.max(0, focusSplice.text.indexOf("<")));
     focus = parseSource(out).elements.find((e) => e.start === at)?.id;
   }
   return { html: out, focus };

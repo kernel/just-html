@@ -321,9 +321,15 @@ export default function CommentsShell(props: Props) {
   const applyOpsRef = useRef<(ops: unknown[], focus: { src?: number; offset?: number } | null, scrollY: number) => void>(
     () => {}
   );
+  // Mirrored so the message handler can tell which load a jh:ready came from
+  // without re-subscribing on every reload.
+  const reloadNonceRef = useRef(0);
   const reloadDoc = useCallback(() => {
     setOverlayReady(false);
-    setReloadNonce((n) => n + 1);
+    setReloadNonce((n) => {
+      reloadNonceRef.current = n + 1;
+      return n + 1;
+    });
   }, []);
 
   // Selection state (from the overlay) → the floating toolbar + a pending draft.
@@ -497,7 +503,13 @@ export default function CommentsShell(props: Props) {
           // A structural write reloaded the iframe out from under the viewer.
           // Edit mode is re-sent by its own effect (keyed on the ready nonce);
           // this puts the scroll and the caret back where they were.
-          if (pendingFocus.current) {
+          //
+          // Only once the NEW document is the one answering: a reload leaves the
+          // outgoing document alive until the new one commits, and it replies to
+          // the readiness ping first. Restoring into it would put the caret in a
+          // page about to be discarded — which reads as the caret being lost on
+          // every Enter.
+          if (pendingFocus.current && (d.r || "0") === String(reloadNonceRef.current)) {
             const f = pendingFocus.current;
             pendingFocus.current = null;
             postToOverlay({ type: "jh:focusBlock", src: f.src, offset: f.offset, scrollY: f.scrollY });

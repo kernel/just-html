@@ -696,6 +696,17 @@ export const OpSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("indent"), src: elementId }),
   z.object({ op: z.literal("outdent"), src: elementId }),
   z.object({ op: z.literal("insertRow"), src: elementId }),
+  z.object({
+    op: z.literal("splitAt"),
+    src: elementId,
+    container: elementId,
+    child: z.number().int().min(0),
+    before: z.string(),
+    tag: z.enum(RETAG_TAGS),
+    offset: z.number().int().min(0).optional(),
+    head: RunsSchema.optional(),
+    tail: RunsSchema.optional(),
+  }),
 ]);
 
 export const OpsBody = registry.register(

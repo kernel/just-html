@@ -259,8 +259,22 @@ injected into the overlay): `**bold**`, `` `code` ``, `[t](u)`, bare URLs, `## `
 / `- ` / `> ` / ``` ``` ``` / `---` at a block start, and a multi-line paste all
 parse to runs/blocks that the server renders. Nothing round-trips back to
 asterisks. Keys: ⌘B / ⌘I / ⌘E / ⌘⇧X / ⌘K, ⌘⌥1-3 headings, ⌘⇧7 / ⌘⇧8 lists,
-⌘⇧. quote, Tab / ⇧Tab list indent and table-cell movement, Enter splits a block,
-Backspace on an empty block deletes it, `/` opens the block menu, Esc cancels.
+⌘⇧. quote, Tab / ⇧Tab list indent and table-cell movement, Backspace on an empty
+block deletes it, `/` opens the block menu, Esc cancels.
+
+**Enter always splits the block at the caret** — it is never a save (⌘Enter is),
+and nothing is allowed to swallow it. It is one `splitAt` op: the caret's text
+node is CUT at a byte offset, both halves keep their bytes exactly, and the
+inline elements the caret sits inside are closed before the block ends and
+reopened inside the new one. Because nothing is re-rendered, this works in a
+block holding markup the run model could never describe — a `<span>`, a `<sup>` —
+which the earlier describe-both-halves approach silently declined to split. At
+either end of a block the same op leaves an empty half, so there are no special
+cases. When the block has uncommitted typing, or markdown before the caret, the
+op instead carries the two halves' new content, which is how a split saves what
+is on screen and resolves markdown in the same write. The split is applied to the
+DOM immediately and the reload lands on top of it, so Enter doesn't wait on a
+round trip.
 Blocks drag to reorder by the gutter grip. A block holding markup the run model
 can't describe (an unknown inline element) is REFUSED rather than reformatted.
 

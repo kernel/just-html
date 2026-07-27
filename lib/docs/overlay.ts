@@ -19,7 +19,7 @@ import { MARKDOWN_INPUT_SOURCE } from "@/lib/docs/markdown-input";
 //                     { type:"jh:editResult", ok }         (server verdict on the last jh:edit)
 //                     { type:"jh:focusBlock", src, offset, scrollY }  (after an ops write + reload)
 //                     { type:"jh:applyLink", href }        (URL collected for the pending Cmd-K)
-//   overlay → shell:  { type:"jh:ready" }
+//   overlay → shell:  { type:"jh:ready", r }         (r = the ?r= of the load that is answering)
 //                     { type:"jh:positions", positions:{ [id]: yTopPx }, docHeight, scrollY }
 //                          (comment highlight y in doc space; doc scroll for rail sync)
 //                     { type:"jh:selection", anchor:{exact,prefix,suffix}, rect:{...} }
@@ -986,7 +986,7 @@ ${MARKDOWN_INPUT_SOURCE}
     // save: the viewer's newer text wins over restoring the old one under their
     // cursor. Cleared BEFORE the commit below, which records the outgoing block's.
     editSent = null;
-    commitEdit();
+    if (commitEdit()) return;
     editEl = el;
     editSnap = {
       nodes: editTextNodes(el).map(function(n){ return { node:n, text:n.nodeValue }; }),
@@ -1021,8 +1021,16 @@ ${MARKDOWN_INPUT_SOURCE}
     send({type:"jh:dirty", on: on});
   }
 
+  /**
+   * Close the open block. Returns true when it handed off to an ops write, in
+   * which case a reload is coming and the caller should not carry on with the
+   * block it was holding.
+   */
   function commitEdit(){
-    if (!editEl) return;
+    if (!editEl) return false;
+    // Markdown typed into the block resolves on the way out. Doing it here rather
+    // than on Enter is what lets Enter always mean "split".
+    if (tryInlineMarkdown()) return true;
     var el = editEl, snap = editSnap;
     editEl = null; editSnap = null;
     setDirty(false);
@@ -1052,11 +1060,12 @@ ${MARKDOWN_INPUT_SOURCE}
     if (structural){
       try { el.innerHTML = snap.html; } catch(e){}
       send({type:"jh:editRejected", reason:"structural"});
-      return;
+      return false;
     }
-    if (!changes.length) return;
+    if (!changes.length) return false;
     editSent = snap;
     send({type:"jh:edit", changes: changes});
+    return false;
   }
 
   function cancelEdit(){
@@ -1075,9 +1084,7 @@ ${MARKDOWN_INPUT_SOURCE}
   // and sends jh:focusBlock to put the caret back.
   function sendOps(ops, focus){
     if (!ops || !ops.length) return;
-    if (editEl) leaveEdit(editEl);
-    editEl = null; editSnap = null; editSent = null;
-    setDirty(false);
+    closeBlock();
     hideSlash();
     send({ type:"jh:ops", ops: ops, focus: focus || null, scrollY: window.scrollY });
   }
@@ -1217,42 +1224,125 @@ ${MARKDOWN_INPUT_SOURCE}
     if (plan) sendOps(plan.ops, plan.focus);
   }
 
-  function sliceRuns(runs, a, b){
-    var out = [], pos = 0;
-    for (var i = 0; i < runs.length; i++){
-      var r = runs[i];
-      if (r.kind !== "text"){ if (pos >= a && pos <= b) out.push(r); continue; }
-      var start = pos, end = pos + r.text.length; pos = end;
-      if (end <= a || start >= b) continue;
-      out.push(splitRun(r, r.text.slice(Math.max(a, start) - start, Math.min(b, end) - start)));
+  // The caret's text node and the offset inside it, which is what a byte-level
+  // split needs. A caret parked on an element resolves to the child it names.
+  function caretNode(){
+    var s = window.getSelection();
+    if (!s || !s.rangeCount) return null;
+    var r = s.getRangeAt(0), n = r.startContainer, off = r.startOffset;
+    if (n.nodeType !== 3){
+      var kids = [];
+      for (var i = 0; i < n.childNodes.length; i++) if (!isOurs(n.childNodes[i])) kids.push(n.childNodes[i]);
+      var t = kids[off] || kids[kids.length - 1];
+      if (!t || t.nodeType !== 3) return null;
+      n = t; off = 0;
     }
-    return out.filter(function(r){ return r.kind !== "text" || r.text !== ""; });
+    return { node:n, offset:off };
   }
 
-  // Enter: split the block at the caret, or add an empty one next to it.
+  /** What a text node held when the block was opened — i.e. what the server has. */
+  function snapshotTextOf(node){
+    if (!editSnap) return null;
+    for (var i = 0; i < editSnap.nodes.length; i++){
+      if (editSnap.nodes[i].node === node) return editSnap.nodes[i].text;
+    }
+    return null;
+  }
+
+  // Marked runs for a stretch of typed text, or null when there is no markdown in
+  // it. Scoped to ONE text node, so markup elsewhere in the block is never
+  // flattened by reading the block as plain text.
+  function mdRuns(text){
+    if (!/[*\x60~[]|https?:\/\//.test(text)) return null;
+    var runs = mdInline(text);
+    return runs.some(function(r){ return (r.marks && r.marks.length) || r.href; }) ? runs : null;
+  }
+
+  /**
+   * Close the open block without saving it. Called before a preview: extract-
+   * Contents moves the node the caret sits in, and the focusout that follows
+   * would otherwise be read as a text edit and store the truncated block.
+   */
+  function closeBlock(){
+    // Clear the state BEFORE touching the element: removing contenteditable from
+    // the focused block fires focusout synchronously, and that handler would
+    // otherwise read it as a click-away and save the block a second time.
+    var el = editEl;
+    editEl = null; editSnap = null; editSent = null;
+    if (el) leaveEdit(el);
+    setDirty(false);
+  }
+
+  // Show the split before the server confirms it. Enter is the most-pressed
+  // structural key there is, and a round trip of dead air on every one of them is
+  // the difference between writing and waiting. The write stays authoritative —
+  // the iframe reloads onto the stored bytes right after — and extractContents
+  // splits the text node and clones the inline ancestors exactly the way splitAt
+  // does, so the two agree and the reload is invisible.
+  function previewSplit(el, node, offset, tag){
+    try {
+      var r = document.createRange();
+      r.setStart(node, offset);
+      r.setEndAfter(el.lastChild || el);
+      var next = document.createElement(tag);
+      next.appendChild(r.extractContents());
+      el.parentNode.insertBefore(next, el.nextSibling);
+    } catch(e){}
+  }
+
+  // Enter breaks the block at the caret. ALWAYS — it is never a save, and nothing
+  // else is allowed to swallow it. At either end of the block the split leaves an
+  // empty half, which is exactly what pressing Enter there should give you, so
+  // there are no special cases and no way to end up with a block appended
+  // somewhere you weren't looking.
   function splitBlock(){
     if (!editEl) return;
-    var src = srcOf(editEl);
+    var el = editEl, src = srcOf(el);
     if (src == null){ refuse("markup"); return; }
-    var tag = editEl.nodeName.toLowerCase();
-    // A heading is a title, not a body: continuing one gives a paragraph.
-    var nextTag = tag === "li" ? "li" : "p";
-    var at = caretOffset();
-    var whole = runsOf(editEl);
-    var total = blockText(editEl).length;
-
-    if (!whole || at >= total){
+    var nextTag = el.nodeName === "LI" ? "li" : "p";
+    var caret = caretNode();
+    var parent = caret ? caret.node.parentNode : null;
+    var container = parent ? srcOf(parent) : null;
+    var child = parent ? childIndexOf(parent, caret.node) : -1;
+    var before = caret ? snapshotTextOf(caret.node) : null;
+    // Nothing to cut at: an empty block, or a caret we can't line up with the
+    // stored bytes. Adding a block after this one is the honest fallback.
+    if (!caret || container == null || child < 0 || before === null){
       sendOps([{ op:"insert", src:src, where:"after", blocks:[{ tag:nextTag, runs:[] }] }], null);
       return;
     }
-    if (at <= 0){
-      sendOps([{ op:"insert", src:src, where:"before", blocks:[{ tag:nextTag, runs:[] }] }], { src:src, offset:0 });
-      return;
+
+    // Any OTHER run of the block that was typed into travels with the split, as
+    // its own text op — separate text nodes, so separate byte ranges.
+    var ops = [];
+    for (var i = 0; editSnap && i < editSnap.nodes.length; i++){
+      var e = editSnap.nodes[i];
+      if (e.node === caret.node || e.node.nodeValue === e.text) continue;
+      var p = e.node.parentNode, c = p ? childIndexOf(p, e.node) : -1, s = p ? srcOf(p) : null;
+      if (s == null || c < 0) continue;
+      ops.push({ op:"setRuns", src:s, child:c, before:e.text, runs:[{ kind:"text", text:e.node.nodeValue }] });
     }
-    sendOps([
-      { op:"setInline", src:src, runs: sliceRuns(whole, 0, at) },
-      { op:"insert", src:src, where:"after", blocks:[{ tag:nextTag, runs: sliceRuns(whole, at, total) }] }
-    ], null);
+
+    var live = caret.node.nodeValue;
+    var head = live.slice(0, caret.offset), tail = live.slice(caret.offset);
+    var marked = mdRuns(head);
+    var op = { op:"splitAt", src:src, container:container, child:child, before:before, tag:nextTag };
+    if (live === before && !marked){
+      // Neither typed over nor reformatted: cut the stored bytes where they are,
+      // and show it immediately, since the halves are what is already on screen.
+      op.offset = caret.offset;
+      ops.push(op);
+      closeBlock();
+      previewSplit(el, caret.node, caret.offset, nextTag);
+    } else {
+      // The node is being rewritten anyway, so the split carries the typing and
+      // resolves markdown typed before the caret in the same write.
+      op.head = marked || [{ kind:"text", text:head }];
+      op.tail = [{ kind:"text", text:tail }];
+      ops.push(op);
+      closeBlock();
+    }
+    sendOps(ops, null);
   }
 
   function deleteBlock(el){
@@ -1488,7 +1578,12 @@ ${MARKDOWN_INPUT_SOURCE}
       send({type:"jh:selectionCleared"});
       document.documentElement.classList.add("jh-editmode");
       reportWords();
+      if (pendingFocusReq){
+        var f = pendingFocusReq; pendingFocusReq = null;
+        focusBlock(f.src, f.offset);
+      }
     } else {
+      pendingFocusReq = null;
       commitEdit();
       hideSlash();
       document.documentElement.classList.remove("jh-editmode");
@@ -1498,10 +1593,18 @@ ${MARKDOWN_INPUT_SOURCE}
   }
 
   // After a reload, put the viewer back where they were.
+  //
+  // The shell sends this from its jh:ready handler, but it re-sends edit mode
+  // from an effect that runs AFTER that handler — so on a reload this reliably
+  // arrives while edit mode is still off. Hold the request until the mode is back
+  // rather than dropping the caret, which would cost the viewer a click after
+  // every Enter.
+  var pendingFocusReq = null;
   function focusBlock(src, offset, scrollY){
     if (typeof scrollY === "number"){ try { window.scrollTo(0, scrollY); } catch(e){} }
+    if (!editing){ pendingFocusReq = { src:src, offset:offset }; return; }
     var el = elBySrc(src);
-    if (!el || !editing) return;
+    if (!el) return;
     beginEdit(el);
     placeCaret(el, typeof offset === "number" ? offset : 0);
     try { el.scrollIntoView({block:"nearest"}); } catch(e){}
@@ -1618,8 +1721,8 @@ ${MARKDOWN_INPUT_SOURCE}
       if (isCodeBlock(editEl)) return;   // a code block keeps its newlines
       ev.preventDefault();
       if (meta){ commitEdit(); return; }
+      // A completed block prefix ("## ") is a command with no content to split.
       if (tryBlockShortcut()) return;
-      if (tryInlineMarkdown()) return;
       splitBlock();
       return;
     }
@@ -1823,7 +1926,7 @@ ${MARKDOWN_INPUT_SOURCE}
       var sent = editSent; editSent = null;
       if (sent && !d.ok){ revertSnap(sent); if (!editing) paint(); }
     }
-    else if (d.type === "jh:ping"){ send({type:"jh:ready"}); }
+    else if (d.type === "jh:ping"){ sendReady(); }
   });
 
   // covering keys that overlap a given key's span (for cycle context when focusing
@@ -1834,11 +1937,23 @@ ${MARKDOWN_INPUT_SOURCE}
     return orderBySize(ks);
   }
 
+  /**
+   * Announce readiness, tagged with the ?r= of THIS load. A reload leaves the old
+   * document alive until the new one commits, so the shell's readiness ping gets
+   * answered by the outgoing overlay first; without the tag the shell would hand
+   * the restored caret to a document that is about to be thrown away.
+   */
+  function sendReady(){
+    var r = "";
+    try { r = new URLSearchParams(location.search).get("r") || ""; } catch(e){}
+    send({type:"jh:ready", r: r});
+  }
+
   var ticking = false;
   window.addEventListener("scroll", function(){ if(ticking) return; ticking=true; requestAnimationFrame(function(){ reportPositions(); ticking=false; }); }, {passive:true});
   window.addEventListener("resize", function(){ paint(); });
 
-  send({type:"jh:ready"});
+  sendReady();
   // Capture the authored theme NOW, while the doc is still unforced, so we can keep
   // reporting it once a forced theme is painted over the document. Don't emit yet — the
   // shell's jh:themeMode reply drives the first emit with the viewer's mode known (no
