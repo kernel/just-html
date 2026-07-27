@@ -34,6 +34,12 @@ export const PROTECTED_RESOURCE_METADATA_URL = `${ORIGIN}/.well-known/oauth-prot
 export const WWW_AUTHENTICATE_CHALLENGE = `Bearer resource_metadata="${PROTECTED_RESOURCE_METADATA_URL}"`;
 
 export const SESSION_COOKIE = "jh_sess";
+// Short-lived marker set on the browser that requested a login link (POST
+// /login). GET /login/verify reads it to decide invisible auto-submit vs a
+// no-JS confirm button: a mail link scanner that opens the emailed URL never
+// carries this cookie, so it only ever gets the confirm page and can't burn the
+// single-use token by running the auto-submit script before the human taps.
+export const LOGIN_INTENT_COOKIE = "jh_login_intent";
 
 export const RESEND_FROM = "justhtml.sh <login@notify.justhtml.sh>";
 export const LOGIN_SUBJECT = "justhtml.sh login";

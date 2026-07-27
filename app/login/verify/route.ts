@@ -1,18 +1,26 @@
 import { htmlResponse, redirect } from "@/lib/page";
-import { signingInPage, deadLinkPage } from "@/lib/auth/verify-pages";
+import { signingInPage, confirmSignInPage, deadLinkPage } from "@/lib/auth/verify-pages";
 import { loginLanding } from "@/lib/auth/url";
 import { originOk } from "@/lib/auth/request";
 import { sha256Hex } from "@/lib/auth/tokens";
-import { createSession, sessionCookieHeader } from "@/lib/auth/session";
+import { createSession, sessionCookieHeader, hasLoginIntent } from "@/lib/auth/session";
 import { query } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
 
 export const dynamic = "force-dynamic";
 
-// GET /login/verify?token=…&next=… — render the invisible auto-submit shim.
-// Does NOT consume the token (scanners/prefetchers fetch GETs and would burn a
-// single-use link); only the POST consumes. A token-less hit gets the dead-link
-// page (410) with no form/script, so we never auto-submit into an error.
+// These pages embed the single-use token in their HTML, so they must never be
+// cached by a CDN or shared proxy.
+const NO_STORE = { "Cache-Control": "no-store" };
+
+// GET /login/verify?token=…&next=… — render the sign-in page. NEVER consumes the
+// token (only the POST does), so a scanner/prefetcher GET can't burn it. Which
+// page depends on the login-intent cookie: the browser that just requested the
+// link (cookie present) gets the invisible auto-submit shim; everyone else — a
+// mail scanner opening the URL, a share/comment link, a link opened in a
+// different browser — gets the no-JS confirm button, so only a real tap
+// consumes the token. A token-less hit gets the dead-link page (410) with no
+// form/script, so we never auto-submit into an error.
 export function GET(req: Request): Response {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";
@@ -24,8 +32,11 @@ export function GET(req: Request): Response {
   // exactly the landing the spec says to avoid (birthday.md "post-verify (no
   // next) → /docs").
   const next = loginLanding(url.searchParams.get("next"));
-  if (!token) return htmlResponse(deadLinkPage(next), { status: 410 });
-  return htmlResponse(signingInPage(token, next));
+  if (!token) return htmlResponse(deadLinkPage(next), { status: 410, headers: NO_STORE });
+  const page = hasLoginIntent(req)
+    ? signingInPage(token, next)
+    : confirmSignInPage(token, next);
+  return htmlResponse(page, { headers: NO_STORE });
 }
 
 // POST /login/verify (form: token, next) — atomic single-use consume, mint
