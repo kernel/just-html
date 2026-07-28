@@ -719,8 +719,6 @@ export const OVERLAY_SCRIPT = String.raw`
   // allow-popups-to-escape-sandbox so the target loads as a normal page).
   // Same-document fragments (#section, the gutter section links) stay in-frame.
   function externalHref(a){
-    var raw = a.getAttribute("href");
-    if (!raw || raw.charAt(0) === "#") return null;
     var u;
     try { u = new URL(a.href, document.baseURI); } catch(e){ return null; }
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
@@ -740,17 +738,20 @@ export const OVERLAY_SCRIPT = String.raw`
     if (editing){ ev.preventDefault(); return; }
     // Our own chrome can sit INSIDE an author link: a reaction chip is appended
     // after the segment that ends its span, so a span ending mid-link puts the
-    // chip in the anchor. That click is ours — swallow the anchor's navigation
-    // (the chip handler stops propagation but not the default action), and open
-    // no tab.
-    if (fromOverlayChrome(ev)){ ev.preventDefault(); return; }
+    // chip in the anchor, and the section anchor is a link of ours. Those clicks
+    // are ours — swallow the anchor's navigation (the chip handler stops
+    // propagation but not the default action), and open no tab.
+    if (fromOverlayChrome(ev) || t.closest("[data-jh-sec-anchor]")){ ev.preventDefault(); return; }
     var href = externalHref(a);
     if (!href) return;
     // A click on a link is navigation, not an annotation click: the frame must not
     // move, and the segment handler must not focus the rail / open the anchor picker.
     ev.preventDefault();
     ev.stopPropagation();
+    // Click-elsewhere semantics, which stopPropagation keeps the handler below from
+    // applying: a click off the annotation UI drops the popover and pinned focus.
     hidePop();
+    if (focusKey && !t.closest("[data-jh-seg]")) clearFocus();
     // …but a selection that survives the click is a comment/react gesture (a drag
     // that ended in linked text), so keep the selection and open nothing. Same
     // emptiness test as reportSelection.
