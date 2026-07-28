@@ -733,10 +733,24 @@ export const OVERLAY_SCRIPT = String.raw`
     if (editing) return;
     if (ev.type === "auxclick" && ev.button !== 1) return; // middle-click only
     var t = ev.target;
-    var a = t && t.closest && t.closest("a[href]");
+    if (!t || !t.closest) return;
+    // Our own chrome can sit INSIDE an author link: a reaction chip is appended
+    // after the segment that ends its span, so a span ending mid-link puts the
+    // chip in the anchor. Those clicks are ours — swallow the anchor's navigation
+    // (the chip handler stops propagation but not the default action), and open
+    // no tab.
+    if (t.closest("[data-jh-chip]") || t.closest(".jh-pop")){
+      if (t.closest("a[href]")) ev.preventDefault();
+      return;
+    }
+    var a = t.closest("a[href]");
     var href = a && externalHref(a);
     if (!href) return;
+    // Following a link is navigation, not an annotation click: keep the segment
+    // handler from also focusing the rail / opening the anchor picker.
     ev.preventDefault();
+    ev.stopPropagation();
+    hidePop();
     window.open(href, "_blank", "noopener");
   }
   document.addEventListener("click", openLink, true);
