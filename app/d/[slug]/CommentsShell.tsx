@@ -1003,11 +1003,13 @@ export default function CommentsShell(props: Props) {
 
       <div ref={stageRef} className="jh-stage" data-rail={railOpen ? "open" : "closed"} style={stageStyle}>
         <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+          {/* allow-popups (+ escape-sandbox): the overlay opens the doc's links in a new
+              tab rather than navigating this frame, which X-Frame-Options sites refuse. */}
           <iframe
             ref={iframeRef}
             title={title}
             src={rawSrc}
-            sandbox="allow-scripts allow-downloads"
+            sandbox="allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox"
             referrerPolicy="no-referrer"
             style={{ border: "none", width: "100%", height: "100%", display: "block", background: "var(--jh-stage-bg, #fff)" }}
           />

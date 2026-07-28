@@ -709,6 +709,37 @@ export const OVERLAY_SCRIPT = String.raw`
     send({type:"jh:focus", key:null, id:null, keys:[]});
   }
 
+  // ---- links leave the frame, never navigate it ----
+  // The doc renders in an opaque-origin sandbox inside the shell's iframe, so a
+  // plain <a href="https://…"> click navigates the FRAME, and any site sending
+  // X-Frame-Options / frame-ancestors (github.com, most of the web) then paints
+  // "refused to connect" where the doc was. The sandbox also can't reach the top
+  // window, and target="_blank" alone is a blocked popup — so we open the tab
+  // ourselves from inside the user gesture (sandbox carries allow-popups +
+  // allow-popups-to-escape-sandbox so the target loads as a normal page).
+  // Same-document fragments (#section, the gutter section links) stay in-frame.
+  function externalHref(a){
+    var raw = a.getAttribute("href");
+    if (!raw || raw.charAt(0) === "#") return null;
+    var u;
+    try { u = new URL(a.href, document.baseURI); } catch(e){ return null; }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (u.href.split("#")[0] === location.href.split("#")[0]) return null;
+    return u.href;
+  }
+  function openLink(ev){
+    if (editing || ev.defaultPrevented) return;
+    if (ev.type === "auxclick" && ev.button !== 1) return; // middle-click only
+    var t = ev.target;
+    var a = t && t.closest && t.closest("a[href]");
+    var href = a && externalHref(a);
+    if (!href) return;
+    ev.preventDefault();
+    window.open(href, "_blank", "noopener");
+  }
+  document.addEventListener("click", openLink);
+  document.addEventListener("auxclick", openLink);
+
   // click-elsewhere (on non-highlight) clears focus + selection popovers
   document.addEventListener("click", function(ev){
     var t = ev.target;
