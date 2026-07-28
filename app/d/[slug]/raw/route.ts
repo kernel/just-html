@@ -15,10 +15,13 @@ type Ctx = { params: Promise<{ slug: string }> };
 // can never execute same-origin with our auth/session surface (birthday.md "The
 // one security decision that matters").
 //
-//   Content-Security-Policy: sandbox allow-scripts allow-downloads → the response
-//     is treated as a unique opaque origin; scripts run and user-initiated file
-//     downloads work, but the document cannot read our cookies / tokens or reach
-//     our origin's storage.
+//   Content-Security-Policy: sandbox allow-scripts allow-downloads allow-popups
+//     allow-popups-to-escape-sandbox → the response is treated as a unique opaque
+//     origin; scripts run, user-initiated file downloads work, and the doc's links
+//     can open in a new tab (the overlay routes them there — navigating the frame
+//     itself breaks on every X-Frame-Options site), but the document cannot read
+//     our cookies / tokens or reach our origin's storage. The popup escapes the
+//     sandbox so the linked site loads as a normal page, never as our origin.
 //   X-Content-Type-Options: nosniff                 → no MIME sniffing.
 //
 // Directly linkable for zero-chrome viewing; same token rules as /d/:slug.
@@ -98,7 +101,8 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "sandbox allow-scripts allow-downloads",
+      "Content-Security-Policy":
+        "sandbox allow-scripts allow-downloads allow-popups allow-popups-to-escape-sandbox",
       "X-Content-Type-Options": "nosniff",
       // Never cache private content at shared caches; tokens are capability URLs.
       "Cache-Control": "private, no-store",

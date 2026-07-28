@@ -629,6 +629,8 @@ export const OVERLAY_SCRIPT = String.raw`
     span.addEventListener("mouseleave", function(){ setHover(null); send({type:"jh:hlHoverOut"}); });
     span.addEventListener("click", function(ev){
       ev.stopPropagation();
+      // A click the link interceptor claimed is navigation, not an annotation click.
+      if (ev === linkClick) return;
       onSegClick(seg, ev);
     });
   }
@@ -708,6 +710,62 @@ export const OVERLAY_SCRIPT = String.raw`
     applyFocusStyles();
     send({type:"jh:focus", key:null, id:null, keys:[]});
   }
+
+  // ---- links leave the frame, never navigate it ----
+  // The doc renders in an opaque-origin sandbox inside the shell's iframe, so a
+  // plain <a href="https://…"> click navigates the FRAME, and any site sending
+  // X-Frame-Options / frame-ancestors (github.com, most of the web) then paints
+  // "refused to connect" where the doc was. The sandbox also can't reach the top
+  // window, and target="_blank" alone is a blocked popup — so we open the tab
+  // ourselves from inside the user gesture (sandbox carries allow-popups +
+  // allow-popups-to-escape-sandbox so the target loads as a normal page).
+  // Same-document fragments (#section, the gutter section links) stay in-frame.
+  // The raw attribute, not a.href: on an SVG <a> that property is an
+  // SVGAnimatedString and stringifies to garbage.
+  function externalHref(a){
+    var raw = a.getAttribute("href");
+    if (raw == null) raw = a.getAttribute("xlink:href");
+    if (raw == null) return null;
+    var u;
+    try { u = new URL(raw, document.baseURI); } catch(e){ return null; }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    if (u.href.split("#")[0] === location.href.split("#")[0]) return null;
+    return u.href;
+  }
+  // Capture phase: a link inside a highlighted span would otherwise be swallowed
+  // by the segment's own click handler (it stopPropagation()s) and navigate. We
+  // never stop propagation ourselves — the doc may have its own click handlers on
+  // the link — so the claimed event is recorded instead, and the segment handler
+  // skips focusing for it.
+  var linkClick = null;
+  function openLink(ev){
+    if (ev.type === "auxclick" && ev.button !== 1) return; // middle-click only
+    var t = ev.target;
+    if (!t || !t.closest) return;
+    var a = t.closest("a");
+    if (!a) return;
+    // In edit mode a link is text to retype. The edit-mode handler already eats
+    // the click; this also covers middle-click, which would open a tab.
+    if (editing){ ev.preventDefault(); return; }
+    // Our own chrome can sit INSIDE an author link: a reaction chip is appended
+    // after the segment that ends its span, so a span ending mid-link puts the
+    // chip in the anchor, and the section anchor is a link of ours. Those clicks
+    // are ours — swallow the anchor's navigation (the chip handler stops
+    // propagation but not the default action), and open no tab.
+    if (fromOverlayChrome(ev) || t.closest("[data-jh-sec-anchor]")){ ev.preventDefault(); return; }
+    var href = externalHref(a);
+    if (!href) return;
+    ev.preventDefault();
+    linkClick = ev;
+    // A selection that survives the click is a comment/react gesture (a drag that
+    // ended in linked text), not navigation: keep the selection, open nothing.
+    // Same emptiness test as reportSelection.
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed && sel.toString().trim()) return;
+    window.open(href, "_blank", "noopener");
+  }
+  document.addEventListener("click", openLink, true);
+  document.addEventListener("auxclick", openLink, true);
 
   // click-elsewhere (on non-highlight) clears focus + selection popovers
   document.addEventListener("click", function(ev){
