@@ -629,6 +629,8 @@ export const OVERLAY_SCRIPT = String.raw`
     span.addEventListener("mouseleave", function(){ setHover(null); send({type:"jh:hlHoverOut"}); });
     span.addEventListener("click", function(ev){
       ev.stopPropagation();
+      // A click the link interceptor claimed is navigation, not an annotation click.
+      if (ev === linkClick) return;
       onSegClick(seg, ev);
     });
   }
@@ -718,20 +720,29 @@ export const OVERLAY_SCRIPT = String.raw`
   // ourselves from inside the user gesture (sandbox carries allow-popups +
   // allow-popups-to-escape-sandbox so the target loads as a normal page).
   // Same-document fragments (#section, the gutter section links) stay in-frame.
+  // The raw attribute, not a.href: on an SVG <a> that property is an
+  // SVGAnimatedString and stringifies to garbage.
   function externalHref(a){
+    var raw = a.getAttribute("href");
+    if (raw == null) raw = a.getAttribute("xlink:href");
+    if (raw == null) return null;
     var u;
-    try { u = new URL(a.href, document.baseURI); } catch(e){ return null; }
+    try { u = new URL(raw, document.baseURI); } catch(e){ return null; }
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
     if (u.href.split("#")[0] === location.href.split("#")[0]) return null;
     return u.href;
   }
   // Capture phase: a link inside a highlighted span would otherwise be swallowed
-  // by the segment's own click handler (it stopPropagation()s) and navigate.
+  // by the segment's own click handler (it stopPropagation()s) and navigate. We
+  // never stop propagation ourselves — the doc may have its own click handlers on
+  // the link — so the claimed event is recorded instead, and the segment handler
+  // skips focusing for it.
+  var linkClick = null;
   function openLink(ev){
     if (ev.type === "auxclick" && ev.button !== 1) return; // middle-click only
     var t = ev.target;
     if (!t || !t.closest) return;
-    var a = t.closest("a[href]");
+    var a = t.closest("a");
     if (!a) return;
     // In edit mode a link is text to retype. The edit-mode handler already eats
     // the click; this also covers middle-click, which would open a tab.
@@ -744,17 +755,11 @@ export const OVERLAY_SCRIPT = String.raw`
     if (fromOverlayChrome(ev) || t.closest("[data-jh-sec-anchor]")){ ev.preventDefault(); return; }
     var href = externalHref(a);
     if (!href) return;
-    // A click on a link is navigation, not an annotation click: the frame must not
-    // move, and the segment handler must not focus the rail / open the anchor picker.
     ev.preventDefault();
-    ev.stopPropagation();
-    // Click-elsewhere semantics, which stopPropagation keeps the handler below from
-    // applying: a click off the annotation UI drops the popover and pinned focus.
-    hidePop();
-    if (focusKey && !t.closest("[data-jh-seg]")) clearFocus();
-    // …but a selection that survives the click is a comment/react gesture (a drag
-    // that ended in linked text), so keep the selection and open nothing. Same
-    // emptiness test as reportSelection.
+    linkClick = ev;
+    // A selection that survives the click is a comment/react gesture (a drag that
+    // ended in linked text), not navigation: keep the selection, open nothing.
+    // Same emptiness test as reportSelection.
     var sel = window.getSelection();
     if (sel && sel.rangeCount && !sel.isCollapsed && sel.toString().trim()) return;
     window.open(href, "_blank", "noopener");
