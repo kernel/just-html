@@ -739,13 +739,21 @@ export const OVERLAY_SCRIPT = String.raw`
     // chip in the anchor. Those clicks are ours — swallow the anchor's navigation
     // (the chip handler stops propagation but not the default action), and open
     // no tab.
-    if (t.closest("[data-jh-chip]") || t.closest(".jh-pop")){
+    if (fromOverlayChrome(ev)){
       if (t.closest("a[href]")) ev.preventDefault();
       return;
     }
     var a = t.closest("a[href]");
     var href = a && externalHref(a);
     if (!href) return;
+    // A selection that survives the click is a comment/react gesture (a drag that
+    // ended in linked text), not navigation: keep the selection and stay put.
+    // Same emptiness test as reportSelection.
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed && sel.toString().trim()){
+      ev.preventDefault();
+      return;
+    }
     // Following a link is navigation, not an annotation click: keep the segment
     // handler from also focusing the rail / opening the anchor picker.
     ev.preventDefault();
