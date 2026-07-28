@@ -727,8 +727,10 @@ export const OVERLAY_SCRIPT = String.raw`
     if (u.href.split("#")[0] === location.href.split("#")[0]) return null;
     return u.href;
   }
+  // Capture phase: a link inside a highlighted span would otherwise be swallowed
+  // by the segment's own click handler (it stopPropagation()s) and navigate.
   function openLink(ev){
-    if (editing || ev.defaultPrevented) return;
+    if (editing) return;
     if (ev.type === "auxclick" && ev.button !== 1) return; // middle-click only
     var t = ev.target;
     var a = t && t.closest && t.closest("a[href]");
@@ -737,8 +739,8 @@ export const OVERLAY_SCRIPT = String.raw`
     ev.preventDefault();
     window.open(href, "_blank", "noopener");
   }
-  document.addEventListener("click", openLink);
-  document.addEventListener("auxclick", openLink);
+  document.addEventListener("click", openLink, true);
+  document.addEventListener("auxclick", openLink, true);
 
   // click-elsewhere (on non-highlight) clears focus + selection popovers
   document.addEventListener("click", function(ev){
