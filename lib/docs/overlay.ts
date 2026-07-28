@@ -730,21 +730,21 @@ export const OVERLAY_SCRIPT = String.raw`
   // Capture phase: a link inside a highlighted span would otherwise be swallowed
   // by the segment's own click handler (it stopPropagation()s) and navigate.
   function openLink(ev){
-    if (editing) return;
     if (ev.type === "auxclick" && ev.button !== 1) return; // middle-click only
     var t = ev.target;
     if (!t || !t.closest) return;
+    var a = t.closest("a[href]");
+    if (!a) return;
+    // In edit mode a link is text to retype. The edit-mode handler already eats
+    // the click; this also covers middle-click, which would open a tab.
+    if (editing){ ev.preventDefault(); return; }
     // Our own chrome can sit INSIDE an author link: a reaction chip is appended
     // after the segment that ends its span, so a span ending mid-link puts the
-    // chip in the anchor. Those clicks are ours — swallow the anchor's navigation
+    // chip in the anchor. That click is ours — swallow the anchor's navigation
     // (the chip handler stops propagation but not the default action), and open
     // no tab.
-    if (fromOverlayChrome(ev)){
-      if (t.closest("a[href]")) ev.preventDefault();
-      return;
-    }
-    var a = t.closest("a[href]");
-    var href = a && externalHref(a);
+    if (fromOverlayChrome(ev)){ ev.preventDefault(); return; }
+    var href = externalHref(a);
     if (!href) return;
     // A selection that survives the click is a comment/react gesture (a drag that
     // ended in linked text), not navigation: keep the selection and stay put.
