@@ -746,19 +746,16 @@ export const OVERLAY_SCRIPT = String.raw`
     if (fromOverlayChrome(ev)){ ev.preventDefault(); return; }
     var href = externalHref(a);
     if (!href) return;
-    // A selection that survives the click is a comment/react gesture (a drag that
-    // ended in linked text), not navigation: keep the selection and stay put.
-    // Same emptiness test as reportSelection.
-    var sel = window.getSelection();
-    if (sel && sel.rangeCount && !sel.isCollapsed && sel.toString().trim()){
-      ev.preventDefault();
-      return;
-    }
-    // Following a link is navigation, not an annotation click: keep the segment
-    // handler from also focusing the rail / opening the anchor picker.
+    // A click on a link is navigation, not an annotation click: the frame must not
+    // move, and the segment handler must not focus the rail / open the anchor picker.
     ev.preventDefault();
     ev.stopPropagation();
     hidePop();
+    // …but a selection that survives the click is a comment/react gesture (a drag
+    // that ended in linked text), so keep the selection and open nothing. Same
+    // emptiness test as reportSelection.
+    var sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed && sel.toString().trim()) return;
     window.open(href, "_blank", "noopener");
   }
   document.addEventListener("click", openLink, true);
