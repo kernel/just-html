@@ -279,31 +279,22 @@ export const OVERLAY_SCRIPT = String.raw`
     }
     return { nodes: nodes, full: full };
   }
-  function locate(nodes, offset){
+  // Map an offset range [start,end) onto the text nodes it covers, clamped to each
+  // node, so every slice is confined to ONE text node. Wrapping a single text node
+  // only ever splits that node — it never partially-selects an element, so
+  // Range.extractContents can't CLONE a straddled ancestor (a callout, a paragraph)
+  // into the wrapper. Those clones would survive clearHighlights (which only unwraps
+  // our own spans) and pile up on every repaint. One span per text node keeps paint
+  // fully reversible, and since we never wrap a block, a highlight at a block's
+  // leading edge can't vanish either.
+  function sliceNodes(nodes, start, end){
+    var out = [];
     for (var i=0;i<nodes.length;i++){
-      var e = nodes[i];
-      if (offset >= e.start && offset <= e.start + e.node.nodeValue.length)
-        return { node: e.node, offset: offset - e.start };
+      var e = nodes[i], ns = e.start, ne = e.start + e.node.nodeValue.length;
+      var a = Math.max(start, ns), b = Math.min(end, ne);
+      if (b > a) out.push({ node: e.node, start: a - ns, end: b - ns });
     }
-    return null;
-  }
-  // Like locate but forward-biased for a range START: an offset sitting exactly on
-  // a text-node boundary resolves to the NEXT node's start, not the previous node's
-  // end. Otherwise a range whose first character is the start of a block (a heading,
-  // a paragraph) begins at the block's leading edge, and wrapping it pulls the whole
-  // block into an inline <span> — whose background never paints, so the highlight
-  // silently vanishes. Bias the start inward so we wrap the text, not the block.
-  function locateStart(nodes, offset){
-    for (var i=0;i<nodes.length;i++){
-      var e = nodes[i], len = e.node.nodeValue.length;
-      if (offset >= e.start && offset < e.start + len) return { node: e.node, offset: offset - e.start };
-      if (offset === e.start + len){
-        var nx = nodes[i+1];
-        if (nx && nx.start === offset) return { node: nx.node, offset: 0 };
-        return { node: e.node, offset: len };
-      }
-    }
-    return null;
+    return out;
   }
   function squash(s){ return (s||"").replace(/\s+/g," "); }
 
@@ -339,12 +330,6 @@ export const OVERLAY_SCRIPT = String.raw`
       pick = bestIdx;
     }
     return { start: pick, len: a.exact.length };
-  }
-
-  function mkRange(nodes, start, len){
-    var a = locateStart(nodes, start), b = locate(nodes, start+len);
-    if (!a || !b) return null;
-    try { var r = document.createRange(); r.setStart(a.node, a.offset); r.setEnd(b.node, b.offset); return r; } catch(e){ return null; }
   }
 
   function clearHighlights(){
@@ -537,22 +522,30 @@ export const OVERLAY_SCRIPT = String.raw`
     // 3) wrap each segment. Process LAST-to-FIRST so wrapping an earlier segment
     //    never invalidates the offsets of a later one (we re-walk per wrap, but
     //    reverse order keeps untouched offsets stable in the model we re-query).
+    //    A segment is wrapped one text node at a time (sliceNodes): each per-node
+    //    range only splits its own node, so nothing is cloned and clearHighlights
+    //    can fully undo the paint. A segment spanning several nodes becomes several
+    //    adjacent spans with the same cover (identical styling) — the chip,
+    //    position, and focus code already treat segEls as a set, so this is
+    //    transparent to them.
     for (var k=segments.length-1;k>=0;k--){
       var seg = segments[k];
-      var r = mkRange(tx.nodes, seg.start, seg.end - seg.start);
-      if (!r) continue;
-      try {
-        var span = document.createElement("span");
-        span.setAttribute("data-jh-seg","1");
-        span.setAttribute("data-cover", seg.cover.join(","));
-        var depth = Math.min(3, seg.cover.length);
-        span.className = "d"+depth;
-        span.appendChild(r.extractContents());
-        r.insertNode(span);
-        seg.cover.forEach(function(key){ if (byKey[key]) byKey[key].segEls.push(span); });
-        segs.push(span);
-        attachSegHandlers(span, seg);
-      } catch(e){}
+      var depth = Math.min(3, seg.cover.length);
+      sliceNodes(tx.nodes, seg.start, seg.end).forEach(function(sl){
+        try {
+          var r = document.createRange();
+          r.setStart(sl.node, sl.start); r.setEnd(sl.node, sl.end);
+          var span = document.createElement("span");
+          span.setAttribute("data-jh-seg","1");
+          span.setAttribute("data-cover", seg.cover.join(","));
+          span.className = "d"+depth;
+          span.appendChild(r.extractContents());
+          r.insertNode(span);
+          seg.cover.forEach(function(key){ if (byKey[key]) byKey[key].segEls.push(span); });
+          segs.push(span);
+          attachSegHandlers(span, seg);
+        } catch(e){}
+      });
       document.body.normalize();
       tx = buildText(); // re-snapshot for the next (earlier) segment
     }
