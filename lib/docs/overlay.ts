@@ -23,7 +23,7 @@
 //                     { type:"jh:focus", key, keys }      (a segment was clicked: focused key + full covering set)
 //                     { type:"jh:hlHover", id } / { type:"jh:hlHoverOut" }
 //                     { type:"jh:reactionToggle", anchor:{exact,prefix,suffix}, emoji } (chip click)
-//                     { type:"jh:readtime", minutes }     (read time of the VISIBLE text)
+//                     { type:"jh:readtime", words, cjk }  (counts of the VISIBLE text)
 //                     { type:"jh:edit", changes:[{before, after}] }  (a block was edited)
 //                     { type:"jh:editRejected", reason }   (edit changed structure; not sent)
 //
@@ -163,19 +163,16 @@ export const OVERLAY_SCRIPT = String.raw`
   }
 
   // ---- visible read time (jh:readtime) ----
-  // The server's estimate counts every word in the stored HTML. Only here, with a
-  // laid-out DOM, can we tell what the reader actually SEES: a tab panel hidden by a
-  // class defined in a <style> block, a closed <details>, a dialog that hasn't been
-  // opened. We prune hidden subtrees, count the text that survives, and post the
-  // minutes for the shell's chip.
-  //
-  // Rate constants MUST match lib/docs/reading-time.ts (server code this stringified
-  // script cannot import) — same duplication as the reaction sig comment above.
-  var RT_WPM = 200, RT_CJK_PER_MIN = 500;
+  // The chip's whole number comes from here: only with a laid-out DOM can we tell what
+  // the reader actually SEES — a tab panel hidden by a class defined in a <style>
+  // block, a closed <details>, a dialog that hasn't been opened. We prune hidden
+  // subtrees and post the raw counts; the shell turns them into minutes (the rate and
+  // the thresholds live in lib/docs/reading-time.ts, which this stringified script
+  // cannot import — so we send counts rather than duplicating the arithmetic).
   var RT_CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/gu;
   var RT_WORDISH = /[\p{L}\p{N}]/u;
-  // Non-prose (the server masks the same set), plus our own injected UI: a reaction
-  // chip's "👍 2" and a section anchor's link glyph are chrome, not the doc.
+  // Non-prose, plus our own injected UI: a reaction chip's "👍 2" and a section
+  // anchor's link glyph are chrome, not the doc.
   var RT_SKIP = { SCRIPT:1, STYLE:1, TEMPLATE:1, NOSCRIPT:1, SVG:1, CANVAS:1 };
   function rtHidden(el){
     if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return true;
@@ -210,9 +207,10 @@ export const OVERLAY_SCRIPT = String.raw`
       var text = parts.join(" ");
       var cjk = (text.match(RT_CJK) || []).length;
       var words = 0, toks = text.replace(RT_CJK, " ").split(/\s+/);
+      // A token counts as a word only if it carries a letter or a digit, so bullets,
+      // rules and stray punctuation don't inflate the count.
       for (var i=0;i<toks.length;i++) if (RT_WORDISH.test(toks[i])) words++;
-      var minutes = (words === 0 && cjk === 0) ? 0 : Math.ceil(words/RT_WPM + cjk/RT_CJK_PER_MIN);
-      send({ type:"jh:readtime", minutes: minutes });
+      send({ type:"jh:readtime", words: words, cjk: cjk });
     } catch(e){}
   }
 
@@ -1207,12 +1205,14 @@ export const OVERLAY_SCRIPT = String.raw`
   // late-applied CSS and for any host that never sends jh:themeMode.
   authoredTheme = sampleAuthored();
   try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", effectiveDark()); } catch(e){}
-  // Read time rides the theme sample's load + settle ticks, plus one later tick of its
-  // own: measured too early, a doc whose tab UI is built by script still has every
-  // panel visible and we would just re-report the server's full-text number. Each
-  // report supersedes the last, so a doc that only settles late still converges.
-  window.addEventListener("load", function(){ sampleTheme(); reportReadTime(); });
-  setTimeout(function(){ sampleTheme(); reportReadTime(); }, 400);
+  window.addEventListener("load", sampleTheme);
+  setTimeout(sampleTheme, 400);
+  // Read time deliberately does NOT ride those ticks. The shell shows no chip until our
+  // first report, so a count taken while a script-built tab UI still has every panel
+  // visible would put up a number we'd then have to correct — worse than one that
+  // arrives a beat late. Report once the doc has settled, then once more for a doc that
+  // rearranges itself very late; an unchanged count is a no-op for the shell.
   setTimeout(reportReadTime, 1500);
+  setTimeout(reportReadTime, 5000);
 })();
 `;

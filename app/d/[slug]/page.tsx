@@ -13,7 +13,6 @@ import {
 } from "@/lib/docs/comments";
 import { detectServerTheme } from "@/lib/docs/theme";
 import { extractSections } from "@/lib/docs/sections";
-import { estimateReadMinutes } from "@/lib/docs/reading-time";
 import CommentsShell from "./CommentsShell";
 
 export const dynamic = "force-dynamic";
@@ -110,10 +109,6 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   // ids to headings in document order and paints the gutter link icon.
   const sections = extractSections(doc.html);
 
-  // Estimated read time for the bar — derived from the stored HTML, like the
-  // section list. 0 for a doc with no prose (the bar omits it).
-  const readMinutes = estimateReadMinutes(doc.html);
-
   // Adaptive chrome (variant D): coarsely detect a DARK doc from the stored
   // HTML's unconditional html/body background so the shell renders themed at SSR —
   // CommentsShell uses it as the initial theme to avoid a light→dark flash before the
@@ -143,7 +138,6 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       initialDocReactions={docReactions}
       initialAnchoredReactions={anchoredReactions}
       initialSections={sections}
-      readMinutes={readMinutes}
       version={doc.version}
       initialTheme={serverTheme}
     />
