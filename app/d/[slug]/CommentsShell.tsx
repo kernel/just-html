@@ -93,6 +93,9 @@ type Props = {
   // Ordered heading list + stable fragment ids for section deeplinks (from
   // lib/docs/sections extractSections). Forwarded to the overlay as jh:sections.
   initialSections: Section[];
+  // Estimated minutes to read the doc (lib/docs/reading-time). 0 = no prose to
+  // read, and the bar leaves the slot out entirely.
+  readMinutes: number;
   version: number;
   // Coarse SSR theme (from the stored HTML's unconditional html/body bg). Present
   // only when the server is confident the doc is dark — gives the shell a dark
@@ -167,6 +170,7 @@ export default function CommentsShell(props: Props) {
     docId,
     me,
     initialSections,
+    readMinutes,
   } = props;
   const [bookmarked, setBookmarked] = useState(props.bookmarked);
   const bookmarkPending = useRef(false);
@@ -924,6 +928,11 @@ export default function CommentsShell(props: Props) {
           {title}
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
+          {readMinutes > 0 ? (
+            <span className="jh-readtime" title={`Estimated read time: ${readMinutes} minute${readMinutes === 1 ? "" : "s"}`}>
+              {readMinutes} min read
+            </span>
+          ) : null}
           <ThemeToggle mode={mode} onChange={chooseMode} />
           {signedIn ? (
             <button
@@ -1713,6 +1722,8 @@ const RAIL_CSS = `
   .jh-stage[data-rail="open"] .jh-rail { transform: translateX(0); }
   .jh-railclose { display: inline-block; }
   .jh-scrim { display: block; }
+  /* The bar is already tight at this width; the read time is the first thing to go. */
+  .jh-readtime { display: none; }
 }
 `;
 
