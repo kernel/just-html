@@ -23,6 +23,7 @@
 //                     { type:"jh:focus", key, keys }      (a segment was clicked: focused key + full covering set)
 //                     { type:"jh:hlHover", id } / { type:"jh:hlHoverOut" }
 //                     { type:"jh:reactionToggle", anchor:{exact,prefix,suffix}, emoji } (chip click)
+//                     { type:"jh:readtime", minutes }     (read time of the VISIBLE text)
 //                     { type:"jh:edit", changes:[{before, after}] }  (a block was edited)
 //                     { type:"jh:editRejected", reason }   (edit changed structure; not sent)
 //
@@ -158,6 +159,60 @@ export const OVERLAY_SCRIPT = String.raw`
       // (auto → this sample; dark/light → forced chrome), so it's correct in every mode
       // and never left tinted by a stale forced sample after switching back to auto.
       if (authoredTheme) send({ type:"jh:theme", bg: authoredTheme.bg, fg: authoredTheme.fg, accent: authoredTheme.accent, isDark: authoredTheme.isDark, gradient: authoredTheme.gradient });
+    } catch(e){}
+  }
+
+  // ---- visible read time (jh:readtime) ----
+  // The server's estimate counts every word in the stored HTML. Only here, with a
+  // laid-out DOM, can we tell what the reader actually SEES: a tab panel hidden by a
+  // class defined in a <style> block, a closed <details>, a dialog that hasn't been
+  // opened. We prune hidden subtrees, count the text that survives, and post the
+  // minutes for the shell's chip.
+  //
+  // Rate constants MUST match lib/docs/reading-time.ts (server code this stringified
+  // script cannot import) — same duplication as the reaction sig comment above.
+  var RT_WPM = 200, RT_CJK_PER_MIN = 500;
+  var RT_CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/gu;
+  var RT_WORDISH = /[\p{L}\p{N}]/u;
+  // Non-prose (the server masks the same set), plus our own injected UI: a reaction
+  // chip's "👍 2" and a section anchor's link glyph are chrome, not the doc.
+  var RT_SKIP = { SCRIPT:1, STYLE:1, TEMPLATE:1, NOSCRIPT:1, SVG:1, CANVAS:1 };
+  function rtHidden(el){
+    if (el.hasAttribute("hidden") || el.getAttribute("aria-hidden") === "true") return true;
+    if (el.nodeName === "DIALOG" && !el.open) return true;
+    var cs = getComputedStyle(el);
+    if (cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse") return true;
+    return parseFloat(cs.opacity) === 0;
+  }
+  // Recursive rather than a TreeWalker: pruning a hidden subtree is one
+  // getComputedStyle per element instead of one per ancestor per text node.
+  function rtCollect(el, out){
+    for (var n = el.firstChild; n; n = n.nextSibling){
+      if (n.nodeType === 3){ out.push(n.nodeValue); continue; }
+      if (n.nodeType !== 1) continue;
+      var tag = n.nodeName.toUpperCase();
+      if (RT_SKIP[tag]) continue;
+      if (n.hasAttribute("data-jh-chip") || n.hasAttribute("data-jh-sec-anchor")) continue;
+      if (rtHidden(n)) continue;
+      // A closed <details> shows its summary only; the rest is a click away.
+      if (tag === "DETAILS" && !n.open){
+        var sum = n.querySelector("summary");
+        if (sum) rtCollect(sum, out);
+        continue;
+      }
+      rtCollect(n, out);
+    }
+  }
+  function reportReadTime(){
+    try {
+      if (!document.body) return;
+      var parts = []; rtCollect(document.body, parts);
+      var text = parts.join(" ");
+      var cjk = (text.match(RT_CJK) || []).length;
+      var words = 0, toks = text.replace(RT_CJK, " ").split(/\s+/);
+      for (var i=0;i<toks.length;i++) if (RT_WORDISH.test(toks[i])) words++;
+      var minutes = (words === 0 && cjk === 0) ? 0 : Math.ceil(words/RT_WPM + cjk/RT_CJK_PER_MIN);
+      send({ type:"jh:readtime", minutes: minutes });
     } catch(e){}
   }
 
@@ -1152,7 +1207,12 @@ export const OVERLAY_SCRIPT = String.raw`
   // late-applied CSS and for any host that never sends jh:themeMode.
   authoredTheme = sampleAuthored();
   try { ensureStyle(); if (document.documentElement) document.documentElement.classList.toggle("jh-dark", effectiveDark()); } catch(e){}
-  window.addEventListener("load", sampleTheme);
-  setTimeout(sampleTheme, 400);
+  // Read time rides the theme sample's load + settle ticks, plus one later tick of its
+  // own: measured too early, a doc whose tab UI is built by script still has every
+  // panel visible and we would just re-report the server's full-text number. Each
+  // report supersedes the last, so a doc that only settles late still converges.
+  window.addEventListener("load", function(){ sampleTheme(); reportReadTime(); });
+  setTimeout(function(){ sampleTheme(); reportReadTime(); }, 400);
+  setTimeout(reportReadTime, 1500);
 })();
 `;

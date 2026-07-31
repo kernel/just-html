@@ -5,6 +5,7 @@ import { buildChromePalette, type ThemeSample, type ChromePalette } from "@/lib/
 import CommentMarkdown from "@/lib/docs/comments/CommentMarkdown";
 import type { Section } from "@/lib/docs/sections";
 import { fragmentFor, parseHash } from "@/lib/docs/deeplink";
+import { readTimeLevel, readTimeTitle } from "@/lib/docs/reading-time";
 import { buildInlineEdits, type TextChange } from "@/lib/docs/inline-edit";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
@@ -93,8 +94,9 @@ type Props = {
   // Ordered heading list + stable fragment ids for section deeplinks (from
   // lib/docs/sections extractSections). Forwarded to the overlay as jh:sections.
   initialSections: Section[];
-  // Estimated minutes to read the doc (lib/docs/reading-time). 0 = no prose to
-  // read, and the bar leaves the slot out entirely.
+  // Estimated minutes to read the doc, from the stored HTML (lib/docs/reading-time).
+  // 0 = no prose to read, and the bar leaves the chip out entirely. The overlay
+  // refines this to the VISIBLE text once the doc has settled (jh:readtime).
   readMinutes: number;
   version: number;
   // Coarse SSR theme (from the stored HTML's unconditional html/body bg). Present
@@ -170,8 +172,9 @@ export default function CommentsShell(props: Props) {
     docId,
     me,
     initialSections,
-    readMinutes,
   } = props;
+  // Seeded from the SSR full-text estimate, refined by the overlay's jh:readtime.
+  const [readMinutes, setReadMinutes] = useState(props.readMinutes);
   const [bookmarked, setBookmarked] = useState(props.bookmarked);
   const bookmarkPending = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -464,6 +467,13 @@ export default function CommentsShell(props: Props) {
               gradient: !!d.gradient,
             });
           }
+          break;
+        case "jh:readtime":
+          // The overlay measured the text actually VISIBLE on load (hidden tab panels
+          // and closed <details> excluded), which the server's regex over the stored
+          // HTML can't see. Replaces the SSR estimate; a doc whose overlay never runs
+          // keeps it.
+          if (typeof d.minutes === "number" && d.minutes >= 0) setReadMinutes(Math.round(d.minutes));
           break;
         case "jh:selection":
           if ((canComment || canReact) && d.anchor && d.anchor.exact) {
@@ -929,7 +939,7 @@ export default function CommentsShell(props: Props) {
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
           {readMinutes > 0 ? (
-            <span className="jh-readtime" title={`Estimated read time: ${readMinutes} minute${readMinutes === 1 ? "" : "s"}`}>
+            <span className="jh-readtime" data-level={readTimeLevel(readMinutes)} title={readTimeTitle(readMinutes)}>
               {readMinutes} min read
             </span>
           ) : null}
@@ -1203,6 +1213,12 @@ function paletteVars(p: ChromePalette): React.CSSProperties {
     ["--jh-sel-shadow" as string]: p.selShadow,
     ["--jh-sel-hover" as string]: p.selHover,
     ["--jh-drawer-shadow" as string]: p.drawerShadow,
+    // Read-time chip: same fills in both modes, but on a dark bar the grey hairline
+    // vanishes and the charcoal chip merges into the bar, so those two borders become a
+    // light tone that outlines them. Literals, not palette-derived — the chip has to
+    // hold its own contrast whatever colors the doc was sampled at.
+    ["--jh-read-warn-border" as string]: "#e1dccf",
+    ["--jh-read-over-border" as string]: "#f2f0e7",
     ["--jh-scrim-bg" as string]: p.scrimBg,
   };
 }
@@ -1697,6 +1713,19 @@ function LinkGlyph() {
 // rail is an off-canvas right drawer that slides in over the doc with a scrim.
 // Light mode only, monospace chrome — consistent with the rest of the shell.
 const RAIL_CSS = `
+/* Read-time chip. Kernel brand palette: the fill gets heavier as the estimate grows —
+   kernel-green #81b300 under 5 min, beige-muted #e1dccf to 15, charcoal #212225 past
+   that. The palette has no red or amber and gold is never a background, so the
+   escalation is contrast weight rather than hue; geometry mirrors the website's Tag
+   (4px radius, hairline border, 4/8px padding). Borders are var()s because dark needs
+   different ones (paletteVars). The transition repeats CHROME_TRANSITION's values —
+   that const is declared below this string, so it can't be interpolated — and covers
+   the bucket change when the overlay refines the estimate. */
+.jh-readtime { font: inherit; font-size: 12px; line-height: 1.6; padding: 2px 8px; border-radius: 4px; border: 0.5px solid; transition: background-color .22s ease, color .22s ease, border-color .22s ease; }
+.jh-readtime[data-level="ok"] { background: #81b300; color: #212225; border-color: #81b300; }
+.jh-readtime[data-level="warn"] { background: #e1dccf; color: #212225; border-color: var(--jh-read-warn-border, #d0d2d9); }
+.jh-readtime[data-level="over"] { background: #212225; color: #f2f0e7; border-color: var(--jh-read-over-border, #212225); }
+
 .jh-stage[data-rail="closed"] .jh-rail { display: none; }
 .jh-railclose { display: none; }
 .jh-scrim { display: none; }
