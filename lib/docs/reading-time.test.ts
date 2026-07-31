@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { estimateReadMinutes } from "@/lib/docs/reading-time";
+import { estimateReadMinutes, readTimeLevel, readTimeTitle } from "@/lib/docs/reading-time";
 
 const words = (n: number) => Array.from({ length: n }, (_, i) => `w${i}`).join(" ");
 
@@ -36,5 +36,24 @@ describe("estimateReadMinutes", () => {
   it("counts CJK characters individually (no spaces to tokenize on)", () => {
     expect(estimateReadMinutes(`<p>${"字".repeat(500)}</p>`)).toBe(1);
     expect(estimateReadMinutes(`<p>${"字".repeat(2000)}</p>`)).toBe(4);
+  });
+});
+
+describe("readTimeLevel", () => {
+  it("steps at 5 and 15 minutes", () => {
+    expect([1, 4].map(readTimeLevel)).toEqual(["ok", "ok"]);
+    expect([5, 15].map(readTimeLevel)).toEqual(["warn", "warn"]);
+    expect([16, 90].map(readTimeLevel)).toEqual(["over", "over"]);
+  });
+});
+
+describe("readTimeTitle", () => {
+  it("spells out the estimate so the fill color isn't the only signal", () => {
+    expect(readTimeTitle(1)).toBe("Estimated read time: 1 minute");
+    expect(readTimeTitle(7)).toBe("Estimated read time: 7 minutes");
+  });
+
+  it("names the problem past 15 minutes", () => {
+    expect(readTimeTitle(22)).toBe("Estimated read time: 22 minutes — long for a shared doc");
   });
 });
