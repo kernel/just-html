@@ -5,7 +5,7 @@ import { buildChromePalette, type ThemeSample, type ChromePalette } from "@/lib/
 import CommentMarkdown from "@/lib/docs/comments/CommentMarkdown";
 import type { Section } from "@/lib/docs/sections";
 import { fragmentFor, parseHash } from "@/lib/docs/deeplink";
-import { readTimeLevel, readTimeTitle } from "@/lib/docs/reading-time";
+import { readMinutesFor, readTimeLevel, readTimeTitle } from "@/lib/docs/reading-time";
 import { buildInlineEdits, type TextChange } from "@/lib/docs/inline-edit";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
@@ -94,10 +94,6 @@ type Props = {
   // Ordered heading list + stable fragment ids for section deeplinks (from
   // lib/docs/sections extractSections). Forwarded to the overlay as jh:sections.
   initialSections: Section[];
-  // Estimated minutes to read the doc, from the stored HTML (lib/docs/reading-time).
-  // 0 = no prose to read, and the bar leaves the chip out entirely. The overlay
-  // refines this to the VISIBLE text once the doc has settled (jh:readtime).
-  readMinutes: number;
   version: number;
   // Coarse SSR theme (from the stored HTML's unconditional html/body bg). Present
   // only when the server is confident the doc is dark — gives the shell a dark
@@ -173,8 +169,11 @@ export default function CommentsShell(props: Props) {
     me,
     initialSections,
   } = props;
-  // Seeded from the SSR full-text estimate, refined by the overlay's jh:readtime.
-  const [readMinutes, setReadMinutes] = useState(props.readMinutes);
+  // Null until the overlay reports what's VISIBLE (jh:readtime). No chip before that
+  // and none at all if the overlay never runs: a number counted from the stored HTML
+  // would include hidden tab panels, so showing one first would mean rendering a
+  // figure we know to be wrong and then correcting it.
+  const [readMinutes, setReadMinutes] = useState<number | null>(null);
   const [bookmarked, setBookmarked] = useState(props.bookmarked);
   const bookmarkPending = useRef(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -469,11 +468,12 @@ export default function CommentsShell(props: Props) {
           }
           break;
         case "jh:readtime":
-          // The overlay measured the text actually VISIBLE on load (hidden tab panels
-          // and closed <details> excluded), which the server's regex over the stored
-          // HTML can't see. Replaces the SSR estimate; a doc whose overlay never runs
-          // keeps it.
-          if (typeof d.minutes === "number" && d.minutes >= 0) setReadMinutes(Math.round(d.minutes));
+          // Word/CJK counts of the text the overlay found VISIBLE. Re-sent as the doc
+          // settles (a script-built tab UI hides its panels late), so the latest one
+          // always wins.
+          if (typeof d.words === "number" && typeof d.cjk === "number") {
+            setReadMinutes(readMinutesFor(d.words, d.cjk));
+          }
           break;
         case "jh:selection":
           if ((canComment || canReact) && d.anchor && d.anchor.exact) {
@@ -938,7 +938,7 @@ export default function CommentsShell(props: Props) {
           {title}
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
-          {readMinutes > 0 ? (
+          {readMinutes != null && readMinutes > 0 ? (
             <span className="jh-readtime" data-level={readTimeLevel(readMinutes)} title={readTimeTitle(readMinutes)}>
               {readMinutes} min read
             </span>
@@ -1720,7 +1720,7 @@ const RAIL_CSS = `
    (4px radius, hairline border, 4/8px padding). Borders are var()s because dark needs
    different ones (paletteVars). The transition repeats CHROME_TRANSITION's values —
    that const is declared below this string, so it can't be interpolated — and covers
-   the bucket change when the overlay refines the estimate. */
+   a bucket change when a late overlay report moves the estimate. */
 .jh-readtime { font: inherit; font-size: 12px; line-height: 1.6; padding: 2px 8px; border-radius: 4px; border: 0.5px solid; transition: background-color .22s ease, color .22s ease, border-color .22s ease; }
 .jh-readtime[data-level="ok"] { background: #81b300; color: #212225; border-color: #81b300; }
 .jh-readtime[data-level="warn"] { background: #e1dccf; color: #212225; border-color: var(--jh-read-warn-border, #d0d2d9); }
