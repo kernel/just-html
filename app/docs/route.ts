@@ -35,6 +35,8 @@ const VARIANT_C_STYLE = `
   .row a.title { font-weight: 700; }
   .row .tail { color: #888; }
   .row .tail a { color: #888; }
+  .session { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.75rem; }
+  .session form { margin: 0; }
 </style>`;
 
 // The paste-to-agent prompt and copy button, reused verbatim from the homepage
@@ -203,7 +205,7 @@ export async function GET(req: Request): Promise<Response> {
   const sections: string[] = [];
   sections.push(VARIANT_C_STYLE);
   sections.push(
-    `<div class="body"><pre>Signed in as <code>${esc(email)}</code>. See <a href="/bookmarks">bookmarks</a>.</pre></div>`
+    `<div class="body session"><pre>Signed in as <code>${esc(email)}</code>. See <a href="/bookmarks">bookmarks</a>.</pre><form method="POST" action="/logout"><button type="submit">log out</button></form></div>`
   );
   if (hasAccount) {
     sections.push(ownedSection(owned));

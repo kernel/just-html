@@ -103,6 +103,11 @@ export function sessionCookieHeader(token: string): string {
   return `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_TTL_S}`;
 }
 
+/** Expire the session cookie in the current browser. */
+export function clearSessionCookieHeader(): string {
+  return `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+}
+
 /**
  * Set-Cookie for the login-intent marker — set on the browser that just
  * requested a magic link. Scoped to /login so it rides the emailed
