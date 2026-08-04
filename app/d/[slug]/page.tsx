@@ -39,11 +39,20 @@ type Props = {
   searchParams: Promise<{ [k: string]: string | string[] | undefined }>;
 };
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
   const doc = await findBySlug(slug);
-  const title = doc ? (doc.title || doc.slug) : "private";
-  return { title: `${title} — justhtml.sh` };
+  if (doc) {
+    const sp = await searchParams;
+    const rawToken = sp.viewtoken;
+    const viewtoken = Array.isArray(rawToken) ? (rawToken[0] ?? null) : (rawToken ?? null);
+    const req = await reconstructRequest();
+    const session = await getSession(req);
+    if (await canViewSession(doc, session, viewtoken)) {
+      return { title: `${doc.title || doc.slug} — justhtml.sh` };
+    }
+  }
+  return { title: "justhtml.sh" };
 }
 
 async function reconstructRequest(): Promise<Request> {
