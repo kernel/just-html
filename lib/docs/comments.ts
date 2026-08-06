@@ -419,8 +419,9 @@ export async function createComment(opts: {
 /**
  * Re-anchor a comment to a new quote — the manual fix for an orphaned thread
  * whose text was rewritten rather than deleted (automatic re-anchoring only
- * un-orphans when the ORIGINAL quote comes back). Author only (enforced by
- * caller). `anchor === null` detaches: the comment becomes doc-level. Otherwise
+ * un-orphans when the ORIGINAL quote comes back). Author (own) or doc owner
+ * (any) — enforced by caller. `anchor === null` detaches: the comment becomes
+ * doc-level. Otherwise
  * the new selector is resolved against the current doc text exactly like at
  * creation (resolveInitialAnchor), so a re-anchored comment and a freshly
  * created one land identically: offsets re-stamped, anchored_version set to the

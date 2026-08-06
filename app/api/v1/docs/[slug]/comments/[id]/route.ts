@@ -25,9 +25,10 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ slug: string; id: string }> };
 
 // /api/v1/docs/:slug/comments/:id
-//   PATCH  — edit body (author only), re-anchor/detach (author only; the manual
-//            fix for an orphaned thread), and/or resolve|unresolve (anyone who
-//            can comment). birthday.md "Permission matrix".
+//   PATCH  — edit body (author only), re-anchor/detach (author own, doc owner
+//            any; the manual fix for an orphaned thread), and/or
+//            resolve|unresolve (anyone who can comment). birthday.md
+//            "Permission matrix".
 //   DELETE — soft-delete (author own, owner any).
 //
 // Auth: API key OR session, same as POST /comments.
@@ -102,13 +103,14 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
     await editCommentBody(doc.id, commentId, body);
   }
 
-  // Re-anchor / detach: AUTHOR ONLY (like body — the anchor is part of what the
-  // comment points at). A new quote re-resolves against the current doc text
+  // Re-anchor / detach: AUTHOR (own) OR DOC OWNER (any) — same shape as
+  // delete. The owner can repair orphaned threads on their document regardless
+  // of who authored them. A new quote re-resolves against the current doc text
   // (un-orphaning on success); null detaches to a doc-level comment. Replies
   // carry no anchor, same rule as POST /comments.
   if (hasAnchor) {
-    if (!isAuthor) {
-      return apiError(403, "forbidden", "Only the comment's author can re-anchor it.");
+    if (!isAuthor && !cap.isOwner) {
+      return apiError(403, "forbidden", "Only the comment's author or the document owner can re-anchor it.");
     }
     if (comment.parent_id !== null) {
       return apiError(400, "invalid_request", "A reply cannot carry its own anchor; omit 'anchor' on replies.");

@@ -714,9 +714,10 @@ export const CreateCommentBody = registry.register(
 // (the route's "Provide 'body' (edit), 'anchor' (re-anchor/detach), and/or
 // 'resolved'…" 400 stays in the route — it is ordering-sensitive: it runs
 // before the author/cap checks). body (author only) is a non-empty string ≤ cap
-// (byte cap in route); anchor (author only) re-anchors to a new quote or, when
-// null, detaches to a doc-level comment (parsed/normalized by parseAnchor in
-// the route, exactly like CreateCommentBody's anchor); resolved is a boolean.
+// (byte cap in route); anchor (author own, doc owner any) re-anchors to a new
+// quote or, when null, detaches to a doc-level comment (parsed/normalized by
+// parseAnchor in the route, exactly like CreateCommentBody's anchor); resolved
+// is a boolean.
 export const UpdateCommentBody = registry.register(
   "UpdateCommentBody",
   z
@@ -726,14 +727,14 @@ export const UpdateCommentBody = registry.register(
         .optional()
         .openapi({ description: "Author only. The new comment text (<= 10 KB)." }),
       // anchor stays PERMISSIVE at runtime: parseAnchor (lib/docs/anchor.ts) is
-      // the authoritative parse+normalize, and the author-only 403 + the
+      // the authoritative parse+normalize, and the author/owner 403 + the
       // reply-cannot-anchor 400 sit around it in the route (ordering-sensitive).
       anchor: z
         .unknown()
         .optional()
         .openapi({
           description:
-            "Author only; root comments only. Re-anchor to a new quote (W3C text-quote selector) — re-resolved against the current text, un-orphaning on success — or null to detach to a doc-level comment. The manual fix for an orphaned thread whose quoted text was rewritten.",
+            "The comment's author or the document owner; root comments only. Re-anchor to a new quote (W3C text-quote selector) — re-resolved against the current text, un-orphaning on success — or null to detach to a doc-level comment. The manual fix for an orphaned thread whose quoted text was rewritten.",
         }),
       resolved: z
         .boolean()
@@ -742,7 +743,7 @@ export const UpdateCommentBody = registry.register(
     })
     .openapi("UpdateCommentBody", {
       description:
-        "Edit body (author), re-anchor/detach (author), and/or resolve/unresolve (anyone who can comment). At least one field is required.",
+        "Edit body (author), re-anchor/detach (author or document owner), and/or resolve/unresolve (anyone who can comment). At least one field is required.",
     })
 );
 

@@ -178,8 +178,9 @@ See the WHOLE picture (what humans see) -> GET /docs/:slug/comments
 Reply / edit / re-anchor / resolve / delete -> PATCH|DELETE /docs/:slug/comments/:id
   # Reply: POST /comments with {"body":"+1","parent_id": <root id>}
   # Edit body (author only): PATCH /comments/:id {"body":"..."}
-  # Re-anchor an orphaned thread to a replacement quote (author only; root
-  # comments only): PATCH /comments/:id {"anchor":{"exact":"the new passage","prefix":"...","suffix":"..."}}
+  # Re-anchor an orphaned thread to a replacement quote (the comment's author
+  # or the document owner; root comments only):
+  #   PATCH /comments/:id {"anchor":{"exact":"the new passage","prefix":"...","suffix":"..."}}
   #   -> 200 { comment: { ..., orphaned:false } } when the new quote resolves.
   #   Send {"anchor":null} instead to detach the thread to doc-level.
   # Resolve/unresolve (anyone who can comment): PATCH /comments/:id {"resolved":true}

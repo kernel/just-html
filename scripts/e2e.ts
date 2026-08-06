@@ -307,6 +307,30 @@ async function main() {
       const sess = cookie.split(";")[0];
       const asGrantee = await jh(`/d/${slug}`, { headers: { Cookie: sess } });
       check("grantee session views the private doc (no token)", asGrantee.status === 200, `status ${asGrantee.status}`);
+
+      // Re-anchor permissions: the doc owner can re-anchor ANY thread (here the
+      // grantee's); a non-author editor grantee cannot re-anchor someone else's.
+      const granteeComment = await jh(`/api/v1/docs/${slug}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: sess },
+        body: JSON.stringify({ body: "grantee thread", anchor: { exact: "replaced entirely" } }),
+      });
+      const granteeCommentJson = await granteeComment.json();
+      check("grantee comment created", granteeComment.status === 201 && !!granteeCommentJson.comment?.id, `status ${granteeComment.status}`);
+      if (granteeCommentJson.comment?.id) {
+        const ownerReanchor = await jh(`/api/v1/docs/${slug}/comments/${granteeCommentJson.comment.id}`, {
+          method: "PATCH",
+          headers: authJson(ownerKey),
+          body: JSON.stringify({ anchor: { exact: `E2E ${marker}` } }),
+        });
+        check("doc owner can re-anchor another author's thread", ownerReanchor.status === 200, `status ${ownerReanchor.status}`);
+        const granteeReanchor = await jh(`/api/v1/docs/${slug}/comments/${commentJson.comment.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json", Cookie: sess },
+          body: JSON.stringify({ anchor: { exact: `E2E ${marker}` } }),
+        });
+        check("non-author editor cannot re-anchor (403)", granteeReanchor.status === 403, `status ${granteeReanchor.status}`);
+      }
     }
   }
 

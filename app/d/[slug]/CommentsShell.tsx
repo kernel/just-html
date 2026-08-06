@@ -84,6 +84,9 @@ type Props = {
   // server-side by canEdit). Everyone else — including view-token holders who may
   // comment — never sees the affordance, and the API would refuse them anyway.
   canEdit: boolean;
+  // The viewer owns this doc (resolved server-side). Owners can re-anchor ANY
+  // orphaned thread on their document; everyone else only their own.
+  isOwner: boolean;
   signedIn: boolean;
   docId: number;
   bookmarked: boolean;
@@ -164,6 +167,7 @@ export default function CommentsShell(props: Props) {
     canComment,
     canReact,
     canEdit,
+    isOwner,
     signedIn,
     docId,
     me,
@@ -581,7 +585,7 @@ export default function CommentsShell(props: Props) {
   );
 
   // Re-anchor a thread to a fresh quote (the orphaned-thread fix), or detach
-  // when the caller passes anchor null. Server enforces author-only.
+  // when the caller passes anchor null. Server enforces author-own / owner-any.
   const reanchor = useCallback(
     async (id: number, anchor: NonNullable<Anchor> | null) => {
       const r = await fetch(`${apiBase}/comments/${id}${tokenQuery}`, {
@@ -1068,7 +1072,7 @@ export default function CommentsShell(props: Props) {
                   setReanchorId(null);
                   showToast("comment re-anchored");
                 } else {
-                  showToast("couldn't re-anchor — only the author can");
+                  showToast("couldn't re-anchor — only the author or doc owner can");
                 }
               }}
               onCancel={() => {
@@ -1189,6 +1193,7 @@ export default function CommentsShell(props: Props) {
             }}
             onHover={(id) => setActiveId(id)}
             me={me}
+            isOwner={isOwner}
             onReply={postComment}
             onResolve={toggleResolve}
             onDelete={deleteComment}
@@ -1403,6 +1408,7 @@ function RailCards(props: {
   canComment: boolean;
   draft: { anchor: NonNullable<Anchor>; top: number } | null;
   me: string | null;
+  isOwner: boolean;
   onPin: (id: number | null) => void;
   onHover: (id: number | null) => void;
   onReply: (body: string, anchor: null, parentId: number) => Promise<boolean>;
@@ -1425,6 +1431,7 @@ function RailCards(props: {
     canComment,
     draft,
     me,
+    isOwner,
     onPin,
     onHover,
     onReply,
@@ -1506,7 +1513,7 @@ function RailCards(props: {
           onReply={(body) => onReply(body, null, t.id)}
           onResolve={(resolved) => onResolve(t.id, resolved)}
           onDelete={() => onDelete(t.id)}
-          canReanchor={me != null && t.author === me}
+          canReanchor={isOwner || (me != null && t.author === me)}
           onReanchor={() => onReanchor(t.id)}
           onReact={(emoji) => onReact(emoji, t.id)}
           onCopyLink={() => onCopyLink(t.id)}
