@@ -149,7 +149,9 @@ Omit "anchor" (or send null) for a DOC-LEVEL comment. "parent_id" makes a reply
 (1-level threads only). Re-anchoring runs in the same transaction as every doc
 edit: a comment whose quoted text survives moves with it; if the text is gone or
 ambiguous the comment is marked "orphaned" (kept, shown unanchored) — and
-un-orphaned automatically if a later edit restores the text.
+un-orphaned automatically if a later edit restores the text. If the text was
+REWRITTEN (so the original quote never comes back), the author can re-anchor
+the orphaned thread to a replacement quote manually (see PATCH below).
 
 Comment on a quote -> POST /docs/:slug/comments   { body, anchor?, parent_id? }
   curl -s https://justhtml.sh/api/v1/docs/fierce-tiger-12345/comments \
@@ -165,9 +167,14 @@ See the WHOLE picture (what humans see) -> GET /docs/:slug/comments
   #      replies:[...] } ] }   # anchored threads in document order, then
   #      doc-level, then orphaned. Resolved threads carry resolved:true.
 
-Reply / edit / resolve / delete -> PATCH|DELETE /docs/:slug/comments/:id
+Reply / edit / re-anchor / resolve / delete -> PATCH|DELETE /docs/:slug/comments/:id
   # Reply: POST /comments with {"body":"+1","parent_id": <root id>}
   # Edit body (author only): PATCH /comments/:id {"body":"..."}
+  # Re-anchor an orphaned thread to a replacement quote (the comment's author
+  # or the document owner; root comments only):
+  #   PATCH /comments/:id {"anchor":{"exact":"the new passage","prefix":"...","suffix":"..."}}
+  #   -> 200 { comment: { ..., orphaned:false } } when the new quote resolves.
+  #   Send {"anchor":null} instead to detach the thread to doc-level.
   # Resolve/unresolve (anyone who can comment): PATCH /comments/:id {"resolved":true}
   # Delete (author own, owner any; soft): DELETE /comments/:id
 

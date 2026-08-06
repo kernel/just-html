@@ -84,6 +84,9 @@ type Props = {
   // server-side by canEdit). Everyone else — including view-token holders who may
   // comment — never sees the affordance, and the API would refuse them anyway.
   canEdit: boolean;
+  // The viewer owns this doc (resolved server-side). Owners can re-anchor ANY
+  // orphaned thread on their document; everyone else only their own.
+  isOwner: boolean;
   signedIn: boolean;
   docId: number;
   bookmarked: boolean;
@@ -164,6 +167,7 @@ export default function CommentsShell(props: Props) {
     canComment,
     canReact,
     canEdit,
+    isOwner,
     signedIn,
     docId,
     me,
@@ -278,6 +282,10 @@ export default function CommentsShell(props: Props) {
   // Selection state (from the overlay) → the floating toolbar + a pending draft.
   const [selection, setSelection] = useState<{ anchor: NonNullable<Anchor>; top: number; viewTop: number } | null>(null);
   const [draft, setDraft] = useState<{ anchor: NonNullable<Anchor>; top: number } | null>(null);
+  // Re-anchor mode: the author of an orphaned thread is picking a new passage
+  // in the doc. While set, a selection drives a confirm bar (PATCH anchor)
+  // instead of the comment/react toolbar.
+  const [reanchorId, setReanchorId] = useState<number | null>(null);
 
   const apiBase = `/api/v1/docs/${encodeURIComponent(slug)}`;
   const tokenQuery = viewtoken ? `?viewtoken=${encodeURIComponent(viewtoken)}` : "";
@@ -572,6 +580,22 @@ export default function CommentsShell(props: Props) {
         body: JSON.stringify({ resolved }),
       });
       if (r.ok) await reload();
+    },
+    [apiBase, tokenQuery, reload]
+  );
+
+  // Re-anchor a thread to a fresh quote (the orphaned-thread fix), or detach
+  // when the caller passes anchor null. Server enforces author-own / owner-any.
+  const reanchor = useCallback(
+    async (id: number, anchor: NonNullable<Anchor> | null) => {
+      const r = await fetch(`${apiBase}/comments/${id}${tokenQuery}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ anchor }),
+      });
+      if (r.ok) await reload();
+      return r.ok;
     },
     [apiBase, tokenQuery, reload]
   );
@@ -1036,7 +1060,27 @@ export default function CommentsShell(props: Props) {
               selection's viewport-top within the iframe. Shows on selection when
               the viewer can comment OR react (react-only viewers still get the
               react affordance). */}
-          {selection && !editing && (canComment || canReact) ? (
+          {selection && !editing && reanchorId != null ? (
+            <ReanchorBar
+              viewTop={selection.viewTop}
+              exact={selection.anchor.exact}
+              onConfirm={async () => {
+                const ok = await reanchor(reanchorId, selection.anchor);
+                setSelection(null);
+                postToOverlay({ type: "jh:clearSelection" });
+                if (ok) {
+                  setReanchorId(null);
+                  showToast("comment re-anchored");
+                } else {
+                  showToast("couldn't re-anchor — only the author or doc owner can");
+                }
+              }}
+              onCancel={() => {
+                setSelection(null);
+                postToOverlay({ type: "jh:clearSelection" });
+              }}
+            />
+          ) : selection && !editing && (canComment || canReact) ? (
             <SelectionToolbar
               viewTop={selection.viewTop}
               canComment={canComment}
@@ -1094,6 +1138,22 @@ export default function CommentsShell(props: Props) {
             </span>
           </div>
 
+          {reanchorId != null ? (
+            <div style={{ padding: "7px 10px", fontSize: 11.5, color: "var(--jh-rail-muted, #666)", borderBottom: "1px solid var(--jh-rail-line, #eee)", background: "var(--jh-composer-bg, #fafafa)" }}>
+              re-anchoring — select the new passage in the document{" "}
+              <span
+                style={{ cursor: "pointer", textDecoration: "underline" }}
+                onClick={() => {
+                  setReanchorId(null);
+                  setSelection(null);
+                  postToOverlay({ type: "jh:clearSelection" });
+                }}
+              >
+                cancel
+              </span>
+            </div>
+          ) : null}
+
           {/* Doc-level reactions, compact in the rail header (birthday.md B11:
               "doc-level reactions render compactly in the rail header"). The
               react chip set + a mini picker for anyone who can react. */}
@@ -1132,9 +1192,12 @@ export default function CommentsShell(props: Props) {
               else postToOverlay({ type: "jh:focus", key: null });
             }}
             onHover={(id) => setActiveId(id)}
+            me={me}
+            isOwner={isOwner}
             onReply={postComment}
             onResolve={toggleResolve}
             onDelete={deleteComment}
+            onReanchor={(id) => setReanchorId(id)}
             onReact={react}
             onSubmitDraft={async (body) => {
               if (!draft) return;
@@ -1254,6 +1317,37 @@ function ThemeToggle({ mode, onChange }: { mode: ThemeMode; onChange: (m: ThemeM
   );
 }
 
+// Re-anchor confirm bar — shown in place of the selection toolbar while the
+// author of an orphaned thread is picking the replacement passage. Same floating
+// style/positioning as the selection toolbar.
+function ReanchorBar({
+  viewTop,
+  exact,
+  onConfirm,
+  onCancel,
+}: {
+  viewTop: number;
+  exact: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const top = `max(8px, min(${Math.max(8, Math.round(viewTop))}px, calc(100% - 84px)))`;
+  const excerpt = exact.length > 60 ? `${exact.slice(0, 60)}…` : exact;
+  return (
+    <div style={{ ...seltoolStyle, top, flexDirection: "row", alignItems: "center", gap: 6, padding: "5px 7px", maxWidth: 260 }}>
+      <span style={{ color: "var(--jh-sel-fg, #fff)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        re-anchor to “{excerpt}”?
+      </span>
+      <button title="re-anchor here" style={{ ...seltoolBtn, width: "auto", height: "auto", padding: "2px 7px", fontSize: 11 }} onClick={onConfirm}>
+        re-anchor
+      </button>
+      <button title="keep selecting" style={{ ...seltoolBtn, width: "auto", height: "auto", padding: "2px 5px", fontSize: 11, opacity: 0.75 }} onClick={onCancel}>
+        ✕
+      </button>
+    </div>
+  );
+}
+
 function SelectionToolbar({
   viewTop,
   canComment,
@@ -1313,11 +1407,14 @@ function RailCards(props: {
   activeId: number | null;
   canComment: boolean;
   draft: { anchor: NonNullable<Anchor>; top: number } | null;
+  me: string | null;
+  isOwner: boolean;
   onPin: (id: number | null) => void;
   onHover: (id: number | null) => void;
   onReply: (body: string, anchor: null, parentId: number) => Promise<boolean>;
   onResolve: (id: number, resolved: boolean) => void;
   onDelete: (id: number) => void;
+  onReanchor: (id: number) => void;
   onReact: (emoji: string, commentId: number | null) => void;
   onSubmitDraft: (body: string) => void;
   onCancelDraft: () => void;
@@ -1333,11 +1430,14 @@ function RailCards(props: {
     activeId,
     canComment,
     draft,
+    me,
+    isOwner,
     onPin,
     onHover,
     onReply,
     onResolve,
     onDelete,
+    onReanchor,
     onReact,
     onSubmitDraft,
     onCancelDraft,
@@ -1413,6 +1513,8 @@ function RailCards(props: {
           onReply={(body) => onReply(body, null, t.id)}
           onResolve={(resolved) => onResolve(t.id, resolved)}
           onDelete={() => onDelete(t.id)}
+          canReanchor={isOwner || (me != null && t.author === me)}
+          onReanchor={() => onReanchor(t.id)}
           onReact={(emoji) => onReact(emoji, t.id)}
           onCopyLink={() => onCopyLink(t.id)}
         />
@@ -1453,11 +1555,13 @@ const Card = forwardRef<
     onReply: (body: string) => Promise<boolean>;
     onResolve: (resolved: boolean) => void;
     onDelete: () => void;
+    canReanchor: boolean;
+    onReanchor: () => void;
     onReact: (emoji: string) => void;
     onCopyLink: () => void;
   }
 >(function Card(
-  { thread: t, pinned, active, canComment, onPin, onHoverIn, onHoverOut, onReply, onResolve, onDelete, onReact, onCopyLink },
+  { thread: t, pinned, active, canComment, onPin, onHoverIn, onHoverOut, onReply, onResolve, onDelete, canReanchor, onReanchor, onReact, onCopyLink },
   ref
 ) {
   const [replyText, setReplyText] = useState("");
@@ -1580,6 +1684,11 @@ const Card = forwardRef<
             <span style={{ cursor: "pointer" }} onClick={() => onDelete()}>
               delete
             </span>
+            {t.orphaned && canReanchor ? (
+              <span style={{ cursor: "pointer" }} title="Point this comment at a new passage" onClick={() => onReanchor()}>
+                re-anchor
+              </span>
+            ) : null}
             {showEmoji ? (
               <span style={{ display: "flex", gap: 4 }}>
                 {EMOJIS.map((e) => (

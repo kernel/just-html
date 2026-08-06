@@ -91,11 +91,13 @@ export default async function ViewerPage({ params, searchParams }: Props) {
   let canComment = false;
   let canReact = false;
   let canEditDoc = false;
+  let isOwner = false;
   if (principal) {
     const cap = await resolveCapability(doc, principal, canView(doc, viewtoken));
     canComment = cap.canComment;
     canReact = cap.canReact;
     canEditDoc = canEdit(cap.access);
+    isOwner = cap.isOwner;
   }
 
   const threadData = await allThreads(doc);
@@ -130,6 +132,7 @@ export default async function ViewerPage({ params, searchParams }: Props) {
       canComment={canComment}
       canReact={canReact}
       canEdit={canEditDoc}
+      isOwner={isOwner}
       signedIn={session !== null}
       docId={doc.id}
       bookmarked={bookmarked}

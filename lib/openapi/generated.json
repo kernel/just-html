@@ -881,12 +881,15 @@
             "type": "string",
             "description": "Author only. The new comment text (<= 10 KB)."
           },
+          "anchor": {
+            "description": "The comment's author or the document owner; root comments only. Re-anchor to a new quote (W3C text-quote selector) — re-resolved against the current text, un-orphaning on success — or null to detach to a doc-level comment. The manual fix for an orphaned thread whose quoted text was rewritten."
+          },
           "resolved": {
             "type": "boolean",
             "description": "Resolve/unresolve. Anyone who can comment."
           }
         },
-        "description": "Edit body (author) and/or resolve/unresolve (anyone who can comment). At least one field is required."
+        "description": "Edit body (author), re-anchor/detach (author or document owner), and/or resolve/unresolve (anyone who can comment). At least one field is required."
       },
       "CreateReactionBody": {
         "type": "object",
@@ -2852,7 +2855,8 @@
         "tags": [
           "collaboration"
         ],
-        "summary": "Edit body (author) and/or resolve/unresolve (anyone who can comment)",
+        "summary": "Edit body (author), re-anchor/detach (author or doc owner), and/or resolve/unresolve (anyone who can comment)",
+        "description": "anchor re-anchors the comment to a new quote (re-resolved against the current text; un-orphans on success) or, when null, detaches it to a doc-level comment — the manual fix for an orphaned thread whose quoted text was rewritten. The comment's author or the document owner; root comments only.",
         "operationId": "updateComment",
         "security": [
           {
@@ -2910,7 +2914,7 @@
             }
           },
           "403": {
-            "description": "Editing another author's body, or resolving without comment rights",
+            "description": "Editing another author's body, re-anchoring without being the author or doc owner, or resolving without comment rights",
             "content": {
               "application/json": {
                 "schema": {
