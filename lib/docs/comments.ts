@@ -416,6 +416,40 @@ export async function createComment(opts: {
   }
 }
 
+/**
+ * Re-anchor a comment to a new quote — the manual fix for an orphaned thread
+ * whose text was rewritten rather than deleted (automatic re-anchoring only
+ * un-orphans when the ORIGINAL quote comes back). Author only (enforced by
+ * caller). `anchor === null` detaches: the comment becomes doc-level. Otherwise
+ * the new selector is resolved against the current doc text exactly like at
+ * creation (resolveInitialAnchor), so a re-anchored comment and a freshly
+ * created one land identically: offsets re-stamped, anchored_version set to the
+ * current version, orphaned recomputed — a new quote that doesn't resolve yet
+ * keeps the comment orphaned with the NEW selector stored, so a later restoring
+ * edit can still un-orphan it.
+ */
+export async function reanchorComment(
+  doc: DocRow,
+  commentId: number,
+  anchor: TextAnchor | null
+): Promise<CommentRow | null> {
+  if (anchor === null) {
+    await query(
+      `UPDATE comments SET anchor = NULL, anchored_version = NULL, orphaned = false
+        WHERE id = $1 AND doc_id = $2 AND deleted_at IS NULL`,
+      [commentId, doc.id]
+    );
+  } else {
+    const { anchorJson, orphaned, anchoredVersion } = resolveInitialAnchor(doc.html, anchor, doc.version);
+    await query(
+      `UPDATE comments SET anchor = $3, anchored_version = $4, orphaned = $5
+        WHERE id = $1 AND doc_id = $2 AND deleted_at IS NULL`,
+      [commentId, doc.id, anchorJson, anchoredVersion, orphaned]
+    );
+  }
+  return findComment(doc.id, commentId);
+}
+
 /** Edit a comment's body (author only — enforced by caller). Sets edited_at. */
 export async function editCommentBody(docId: number, commentId: number, body: string): Promise<CommentRow | null> {
   await query(

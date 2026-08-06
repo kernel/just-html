@@ -243,6 +243,33 @@ async function main() {
   checkSchema("GET /comments", "GET", "/api/v1/docs/{slug}/comments", threadsRes.status, threads);
   check("GET /comments returns the thread", (threads.threads ?? []).length >= 1);
 
+  // Orphan + manual re-anchor: rewrite the doc so the quoted sentence is gone,
+  // then re-anchor the orphaned thread to a replacement quote, then detach it.
+  const rewrite = await jh(`/api/v1/docs/${slug}`, {
+    method: "PATCH",
+    headers: authJson(ownerKey),
+    body: JSON.stringify({ html: `<h1>E2E ${marker}</h1><p>replaced entirely.</p>` }),
+  });
+  check("rewrite removing the quote succeeds", rewrite.status === 200, `status ${rewrite.status}`);
+  const orphanedThreads = await (await jh(`/api/v1/docs/${slug}/comments`, { headers: { Authorization: `Bearer ${ownerKey}` } })).json();
+  const orphanedThread = (orphanedThreads.threads ?? []).find((t: { id: number }) => t.id === commentJson.comment.id);
+  check("thread orphaned after the quote is rewritten away", orphanedThread?.orphaned === true && orphanedThread?.group === "orphaned", JSON.stringify(orphanedThread).slice(0, 120));
+  const reanchorRes = await jh(`/api/v1/docs/${slug}/comments/${commentJson.comment.id}`, {
+    method: "PATCH",
+    headers: authJson(ownerKey),
+    body: JSON.stringify({ anchor: { exact: "replaced entirely", prefix: "", suffix: "." } }),
+  });
+  const reanchorJson = await reanchorRes.json();
+  checkSchema("PATCH /comments/:id (re-anchor)", "PATCH", "/api/v1/docs/{slug}/comments/{id}", reanchorRes.status, reanchorJson);
+  check("re-anchor un-orphans the thread", reanchorRes.status === 200 && reanchorJson.comment?.orphaned === false, `status ${reanchorRes.status}`);
+  const detachRes = await jh(`/api/v1/docs/${slug}/comments/${commentJson.comment.id}`, {
+    method: "PATCH",
+    headers: authJson(ownerKey),
+    body: JSON.stringify({ anchor: null }),
+  });
+  const detachJson = await detachRes.json();
+  check("anchor:null detaches the thread to doc-level", detachRes.status === 200 && detachJson.comment?.anchor === null && detachJson.comment?.orphaned === false, `status ${detachRes.status}`);
+
   // --- Phase 5: share by email -> grantee gets a one-click login that lands on the doc ---
   console.log("Phase 5 — share + grantee one-click login");
   const granteeInbox = await createInbox();
