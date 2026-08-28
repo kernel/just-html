@@ -1,6 +1,6 @@
 import { getSessionReadOnly } from "@/lib/auth/session";
 import { canView, canViewSession } from "@/lib/docs/access";
-import { findVersionBySlug } from "@/lib/docs/store";
+import { findVersionBySlug } from "@/lib/docs/version-cache";
 
 export const dynamic = "force-dynamic";
 

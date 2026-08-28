@@ -2,6 +2,7 @@ import { getPool, query } from "@/lib/db";
 import { generateSlug, generateViewToken } from "@/lib/docs/slug";
 import { applyEdits, type Edit } from "@/lib/docs/edit-diff";
 import { reanchorComments } from "@/lib/docs/reanchor";
+import { invalidateDocVersion } from "@/lib/docs/version-cache";
 import {
   MAX_DOCS_PER_USER,
   MAX_HTML_BYTES,
@@ -318,6 +319,7 @@ export async function rewriteDoc(opts: {
       /* re-anchoring is best-effort; never block a doc write on it */
     }
     await client.query("COMMIT");
+    invalidateDocVersion(current.slug);
     return { doc: updRows[0] as DocRow };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -423,6 +425,7 @@ export async function applyPatch(opts: {
       /* re-anchoring is best-effort; never block a doc write on it */
     }
     await client.query("COMMIT");
+    invalidateDocVersion(current.slug);
     return { doc: updRows[0] as DocRow };
   } catch (e) {
     await client.query("ROLLBACK").catch(() => {});
@@ -535,6 +538,7 @@ export async function updateMeta(opts: {
     `UPDATE documents SET ${sets.join(", ")} WHERE id = $1 RETURNING *`,
     params
   );
+  invalidateDocVersion(rows[0].slug);
   return rows[0];
 }
 
@@ -545,30 +549,24 @@ export async function rotateViewToken(docId: number): Promise<DocRow> {
      WHERE id = $1 RETURNING *`,
     [docId, generateViewToken()]
   );
+  invalidateDocVersion(rows[0].slug);
   return rows[0];
 }
 
 /** Soft-delete (sets deleted_at). Idempotent. */
 export async function softDelete(docId: number): Promise<void> {
-  await query(`UPDATE documents SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL`, [
-    docId,
-  ]);
+  const { rows } = await query<{ slug: string }>(
+    `UPDATE documents SET deleted_at = now()
+     WHERE id = $1 AND deleted_at IS NULL RETURNING slug`,
+    [docId]
+  );
+  if (rows[0]) invalidateDocVersion(rows[0].slug);
 }
 
 /** Fetch a live (non-deleted) doc by slug. */
 export async function findBySlug(slug: string): Promise<DocRow | null> {
   const { rows } = await query<DocRow>(
     `SELECT * FROM documents WHERE slug = $1 AND deleted_at IS NULL`,
-    [slug]
-  );
-  return rows[0] ?? null;
-}
-
-/** Fetch only the fields needed to authorize a viewer and compare versions. */
-export async function findVersionBySlug(slug: string): Promise<DocVersion | null> {
-  const { rows } = await query<DocVersion>(
-    `SELECT id, owner_id, is_public, view_token, version
-     FROM documents WHERE slug = $1 AND deleted_at IS NULL`,
     [slug]
   );
   return rows[0] ?? null;

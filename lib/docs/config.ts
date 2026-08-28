@@ -13,10 +13,6 @@ export const RL_CREATES_PER_HOUR = 60; // doc creates
 export const RL_WRITES_PER_MIN = 60; // PATCH, /edits, grants, rotate-token
 export const RL_READS_PER_MIN = 300; // GET
 
-// Unauthenticated viewer routes (per IP). The sandbox + token model is the real
-// protection; this just caps scraping.
-export const RL_VIEWER_PER_MIN = 300;
-
 export const ORIGIN = "https://justhtml.sh";
 
 // Title cap — generous, keeps the metadata column sane. Not in the plan's table

@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   getSessionReadOnly: vi.fn(),
 }));
 
-vi.mock("@/lib/docs/store", () => ({ findVersionBySlug: mocks.findVersionBySlug }));
+vi.mock("@/lib/docs/version-cache", () => ({ findVersionBySlug: mocks.findVersionBySlug }));
 vi.mock("@/lib/docs/access", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/docs/access")>()),
   canViewSession: mocks.canViewSession,
@@ -40,7 +40,7 @@ describe("document version", () => {
     mocks.canViewSession.mockResolvedValue(true);
   });
 
-  it("returns the current version without caching", async () => {
+  it("returns the current version without browser caching", async () => {
     const res = await GET(request(), ctx);
 
     expect(res.status).toBe(200);
