@@ -21,6 +21,36 @@ function clean(value: string): string {
   return htmlToText(value).replace(/\s+/g, " ").trim();
 }
 
+function metaTags(html: string): string[] {
+  const tags: string[] = [];
+  const lower = html.toLowerCase();
+  let cursor = 0;
+  while (cursor < html.length) {
+    const start = lower.indexOf("<meta", cursor);
+    if (start === -1) break;
+    const boundary = html[start + 5];
+    if (boundary && !/[\s/>]/.test(boundary)) {
+      cursor = start + 5;
+      continue;
+    }
+    let quote = "";
+    let end = start + 5;
+    for (; end < html.length; end++) {
+      const char = html[end];
+      if (quote) {
+        if (char === quote) quote = "";
+      } else if (char === '"' || char === "'") {
+        quote = char;
+      } else if (char === ">") {
+        tags.push(html.slice(start, end + 1));
+        break;
+      }
+    }
+    cursor = end + 1;
+  }
+  return tags;
+}
+
 function truncate(value: string, max: number): string {
   if (value.length <= max) return value;
   const cut = value.slice(0, max - 1);
@@ -39,10 +69,8 @@ export function extractPreviewDescription(html: string): string | null {
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<(script|style|template|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, "");
   const found = new Map<string, string>();
-  const re = /<meta\b[^>]*>/gi;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(source)) !== null) {
-    const attrs = attributes(match[0]);
+  for (const tag of metaTags(source)) {
+    const attrs = attributes(tag);
     const key = (attrs.get("name") ?? attrs.get("property") ?? "").toLowerCase();
     const content = clean(attrs.get("content") ?? "");
     if (content && !found.has(key)) found.set(key, content);

@@ -3,10 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   findBySlug: vi.fn(),
   canView: vi.fn(),
+  clientIp: vi.fn(),
+  checkLimits: vi.fn(),
 }));
 
 vi.mock("@/lib/docs/store", () => ({ findBySlug: mocks.findBySlug }));
 vi.mock("@/lib/docs/access", () => ({ canView: mocks.canView }));
+vi.mock("@/lib/auth/request", () => ({ clientIp: mocks.clientIp }));
+vi.mock("@/lib/auth/ratelimit", () => ({ checkLimits: mocks.checkLimits }));
 vi.mock("next/og", () => ({
   ImageResponse: class extends Response {
     constructor(_element: unknown, options: { headers?: HeadersInit } = {}) {
@@ -39,8 +43,19 @@ function request(query = "") {
 
 describe("GET /d/:slug/preview", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.findBySlug.mockResolvedValue(doc);
     mocks.canView.mockReturnValue(false);
+    mocks.clientIp.mockReturnValue("192.0.2.10");
+    mocks.checkLimits.mockResolvedValue(null);
+  });
+
+  it("rate limits image rendering by viewer IP", async () => {
+    mocks.checkLimits.mockResolvedValue({ retryAfter: 37 });
+    const res = await request("?viewtoken=secret-token");
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("37");
+    expect(mocks.findBySlug).not.toHaveBeenCalled();
   });
 
   it("does not expose a private document preview without a valid view token", async () => {

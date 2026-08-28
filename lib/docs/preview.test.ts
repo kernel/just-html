@@ -10,6 +10,12 @@ describe("document link previews", () => {
     ).toBe("Daily sessions & usage");
   });
 
+  it("keeps greater-than characters inside quoted descriptions", () => {
+    expect(extractPreviewDescription(`<meta name="description" content="Growth > baseline">`)).toBe(
+      "Growth > baseline"
+    );
+  });
+
   it("falls back through Open Graph and Twitter descriptions", () => {
     expect(extractPreviewDescription(`<meta property="og:description" content="Open Graph copy">`)).toBe(
       "Open Graph copy"
