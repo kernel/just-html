@@ -975,15 +975,19 @@ export default function CommentsShell(props: Props) {
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
           {title}
         </span>
-        <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
+        <span
+          className={`jh-bar-actions${updateAvailable ? " jh-has-update" : ""}`}
+          style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}
+        >
           {updateAvailable ? (
             <span role="status">
               <button
                 type="button"
+                aria-label="Updated. Refresh document"
                 onClick={() => window.location.reload()}
                 style={{ ...commentBtnStyle(true), fontWeight: 700 }}
               >
-                updated · refresh
+                <span className="jh-update-prefix">updated · </span>refresh
               </button>
             </span>
           ) : null}
@@ -1064,8 +1068,8 @@ export default function CommentsShell(props: Props) {
           >
             💬 {commentCount}
           </button>
-          <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "var(--jh-bar-muted, #666)" }}>history</a>
-          <span>made with <a href="/" style={{ color: "var(--jh-bar-muted, #666)" }}>justhtml.sh</a></span>
+          <a className="jh-history" href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "var(--jh-bar-muted, #666)" }}>history</a>
+          <span className="jh-brand">made with <a href="/" style={{ color: "var(--jh-bar-muted, #666)" }}>justhtml.sh</a></span>
         </span>
       </div>
 
@@ -1802,6 +1806,10 @@ const RAIL_CSS = `
   .jh-scrim { display: block; }
   /* The bar is already tight at this width; the read time is the first thing to go. */
   .jh-readtime { display: none; }
+  .jh-bar-actions { gap: 12px !important; padding-left: 12px !important; }
+  .jh-bar-actions.jh-has-update .jh-history,
+  .jh-bar-actions.jh-has-update .jh-brand,
+  .jh-bar-actions.jh-has-update .jh-update-prefix { display: none; }
 }
 `;
 
