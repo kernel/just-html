@@ -35,11 +35,9 @@
     "@types/pg": "^8.11.10",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
-    "@types/react-test-renderer": "^19.1.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "js-yaml": "^4.2.0",
-    "react-test-renderer": "^19.1.0",
     "tsx": "^4.22.4",
     "typescript": "^5.7.2",
     "vitest": "^4.1.8"
