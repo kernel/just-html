@@ -286,14 +286,18 @@ export default function CommentsShell(props: Props) {
   useEffect(() => {
     if (updateAvailable) return;
     let checking = false;
+    let controller: AbortController | null = null;
 
     const checkVersion = async () => {
       if (checking || document.hidden) return;
       checking = true;
+      controller = new AbortController();
+      const timeout = window.setTimeout(() => controller?.abort(), 15_000);
       try {
         const r = await fetch(`/d/${encodeURIComponent(slug)}/version${tokenQuery}`, {
           cache: "no-store",
           credentials: "same-origin",
+          signal: controller.signal,
         });
         if (!r.ok) return;
         const version = Number(await r.text());
@@ -301,12 +305,17 @@ export default function CommentsShell(props: Props) {
       } catch {
         return;
       } finally {
+        window.clearTimeout(timeout);
+        controller = null;
         checking = false;
       }
     };
 
     const interval = window.setInterval(() => void checkVersion(), 30_000);
-    return () => window.clearInterval(interval);
+    return () => {
+      window.clearInterval(interval);
+      controller?.abort();
+    };
   }, [slug, tokenQuery, updateAvailable]);
 
   // The anchors we ask the overlay to paint (anchored, non-orphaned roots that

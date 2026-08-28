@@ -122,6 +122,44 @@ describe("document update polling", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("aborts a stalled request and retries on the next interval", async () => {
+    const signals: AbortSignal[] = [];
+    const fetch = vi.fn((_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal as AbortSignal;
+        signals.push(signal);
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      })
+    );
+    vi.stubGlobal("fetch", fetch);
+    await renderShell();
+
+    await advance(30_000);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    await advance(15_000);
+    expect(signals[0].aborted).toBe(true);
+    await advance(15_000);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("aborts an active request when polling stops", async () => {
+    const fetch = vi.fn((_url: string, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        const signal = init.signal as AbortSignal;
+        signal.addEventListener("abort", () => reject(new Error("aborted")));
+      })
+    );
+    vi.stubGlobal("fetch", fetch);
+    await renderShell();
+    await advance(30_000);
+    const signal = fetch.mock.calls[0][1].signal as AbortSignal;
+
+    await act(async () => renderer?.unmount());
+    renderer = null;
+
+    expect(signal.aborted).toBe(true);
+  });
+
   it("shows the refresh control and stops polling after detecting a newer version", async () => {
     const fetch = vi.fn().mockResolvedValue(response("2"));
     vi.stubGlobal("fetch", fetch);

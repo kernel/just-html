@@ -1,5 +1,5 @@
-import { getSession } from "@/lib/auth/session";
-import { canViewSession } from "@/lib/docs/access";
+import { getSessionReadOnly } from "@/lib/auth/session";
+import { canView, canViewSession } from "@/lib/docs/access";
 import { findVersionBySlug } from "@/lib/docs/store";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +16,10 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
   if (!doc) return notFound();
 
   const viewtoken = new URL(req.url).searchParams.get("viewtoken");
-  const session = await getSession(req);
-  if (!(await canViewSession(doc, session, viewtoken))) return notFound();
+  if (!canView(doc, viewtoken)) {
+    const session = await getSessionReadOnly(req);
+    if (!(await canViewSession(doc, session, null))) return notFound();
+  }
 
   return new Response(String(doc.version), {
     headers: {

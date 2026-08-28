@@ -36,7 +36,12 @@ export function readSessionCookie(req: Request): string | null {
  * session.
  */
 export async function getSession(req: Request): Promise<Session | null> {
-  return getSessionFromToken(readSessionCookie(req));
+  return resolveSession(readSessionCookie(req), true);
+}
+
+/** Resolve a session without extending its expiry. */
+export async function getSessionReadOnly(req: Request): Promise<Session | null> {
+  return resolveSession(readSessionCookie(req), false);
 }
 
 /**
@@ -44,6 +49,10 @@ export async function getSession(req: Request): Promise<Session | null> {
  * e.g. React server components reading the cookie via next/headers.
  */
 export async function getSessionFromToken(raw: string | null): Promise<Session | null> {
+  return resolveSession(raw, true);
+}
+
+async function resolveSession(raw: string | null, slide: boolean): Promise<Session | null> {
   if (!raw || !raw.startsWith("sess_")) return null;
   const hash = sha256Hex(raw);
   const { rows } = await query<{
@@ -61,7 +70,7 @@ export async function getSessionFromToken(raw: string | null): Promise<Session |
   if (!row) return null;
 
   const lastSeen = new Date(row.last_seen_at).getTime();
-  if (Date.now() - lastSeen > SESSION_SLIDE_FLOOR_S * 1000) {
+  if (slide && Date.now() - lastSeen > SESSION_SLIDE_FLOOR_S * 1000) {
     // Slide forward; throttled by the floor check above to avoid a write/request.
     query(
       `UPDATE sessions
