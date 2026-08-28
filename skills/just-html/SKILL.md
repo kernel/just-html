@@ -248,6 +248,12 @@ view it — that's what the share-notification email link does. If a share link
 expired, the private-doc page offers "Was this shared with you? Sign in"
 (-> /login?next=/d/:slug), which recovers access in one email round-trip.
 
+Public documents and private ?viewtoken= links include Open Graph and Twitter
+Card metadata plus a generated preview image for Slack and other link unfurlers.
+A bare private URL never exposes the document title, description, or image; use
+the capability URL when the preview and document may be visible to anyone who
+has that link.
+
 ## Limits
 
 Resource quotas (per user):
