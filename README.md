@@ -78,6 +78,7 @@ flowchart TD
 - **Your HTML renders exactly as written, safely.** `/d/:slug/raw` serves your document byte-for-byte under a sandboxed, origin-less CSP — so a doc can run its own scripts (Mermaid, etc.) but can never touch justhtml.sh's session or other docs. A thin shell wraps it with light chrome.
 - **The document you publish is the document people see.** No build step, no framework, no transform. Stored as text in Postgres, served from a route handler.
 - **Private by default.** A private doc authorizes a viewer in order: owner session → a session whose email matches an email/domain grant → a `?viewtoken=` → public. Share by email and the grantee gets a one-click link that signs them in (no account) and lands them on the doc.
+- **Capability links unfurl cleanly.** Public documents and private `?viewtoken=` links include Open Graph and Twitter Card metadata with a generated preview image. Bare private URLs expose no document metadata, so link previews never weaken the default privacy model.
 
 ## Collaboration
 

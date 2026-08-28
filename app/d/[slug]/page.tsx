@@ -3,6 +3,7 @@ import { canViewSession, canView } from "@/lib/docs/access";
 import { canEdit } from "@/lib/docs/grants";
 import { mintViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
+import { linkOrigin } from "@/lib/auth/request";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/docs/comments";
 import { detectServerTheme } from "@/lib/docs/theme";
 import { extractSections } from "@/lib/docs/sections";
+import { documentPreview } from "@/lib/docs/preview";
 import CommentsShell from "./CommentsShell";
 
 export const dynamic = "force-dynamic";
@@ -39,31 +41,83 @@ type Props = {
   searchParams: Promise<{ [k: string]: string | string[] | undefined }>;
 };
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
+function readViewToken(sp: { [k: string]: string | string[] | undefined }): string | null {
+  const raw = sp.viewtoken;
+  return Array.isArray(raw) ? (raw[0] ?? null) : (raw ?? null);
+}
+
+export async function generateMetadata({ params, searchParams }: Props): Promise<Metadata> {
   const { slug } = await params;
+  const sp = await searchParams;
+  const viewtoken = readViewToken(sp);
   const doc = await findBySlug(slug);
-  const title = doc ? (doc.title || doc.slug) : "private";
-  return { title: `${title} — justhtml.sh` };
+
+  // Link-preview metadata follows the document's normal view authorization. In
+  // particular, a private slug without its view token must not disclose the
+  // document title or description to Slackbot (or any other anonymous caller).
+  const req = await reconstructRequest();
+  const session = await getSession(req);
+  if (!doc || !(await canViewSession(doc, session, viewtoken))) {
+    return { title: "justhtml.sh", robots: { index: false, follow: false } };
+  }
+
+  const preview = documentPreview(doc);
+  // The image request is independent of the page fetch and has no browser
+  // session. Private previews therefore carry the same view token in the image
+  // URL; session-only private views omit an image rather than minting a public
+  // metadata capability. Public documents need no query parameter.
+  const baseUrl = `${linkOrigin(req)}/d/${encodeURIComponent(slug)}`;
+  const tokenAuthorized = viewtoken !== null && canView(doc, viewtoken);
+  const tokenQuery = tokenAuthorized ? `?viewtoken=${encodeURIComponent(viewtoken)}` : "";
+  const imageUrl = doc.is_public || tokenAuthorized ? `${baseUrl}/preview${tokenQuery}` : null;
+  const pageUrl = `${baseUrl}${tokenQuery}`;
+  const images = imageUrl
+    ? [{ url: imageUrl, width: 1200, height: 630, alt: preview.title }]
+    : undefined;
+
+  return {
+    title: `${preview.title} — justhtml.sh`,
+    description: preview.description,
+    robots: doc.is_public ? undefined : { index: false, follow: false },
+    openGraph: {
+      type: "article",
+      siteName: "justhtml.sh",
+      title: preview.title,
+      description: preview.description,
+      url: pageUrl,
+      images,
+    },
+    twitter: {
+      card: imageUrl ? "summary_large_image" : "summary",
+      title: preview.title,
+      description: preview.description,
+      images: imageUrl ? [imageUrl] : undefined,
+    },
+  };
 }
 
 async function reconstructRequest(): Promise<Request> {
   // The comment principal/session helpers read cookies + Authorization off a
   // Request. In a server component we read them from next/headers and rebuild a
   // minimal Request so we reuse the exact same auth code paths the API uses.
+  // Forwarded host/proto let linkOrigin keep preview images on Vercel previews.
   const h = await headers();
   const hdrs = new Headers();
   const cookie = h.get("cookie");
   if (cookie) hdrs.set("cookie", cookie);
   const auth = h.get("authorization");
   if (auth) hdrs.set("authorization", auth);
+  for (const name of ["x-forwarded-host", "x-forwarded-proto"]) {
+    const value = h.get(name);
+    if (value) hdrs.set(name, value);
+  }
   return new Request("https://justhtml.sh/d", { headers: hdrs });
 }
 
 export default async function ViewerPage({ params, searchParams }: Props) {
   const { slug } = await params;
   const sp = await searchParams;
-  const rawToken = sp.viewtoken;
-  const viewtoken = Array.isArray(rawToken) ? (rawToken[0] ?? null) : (rawToken ?? null);
+  const viewtoken = readViewToken(sp);
 
   const doc = await findBySlug(slug);
   const req = await reconstructRequest();
