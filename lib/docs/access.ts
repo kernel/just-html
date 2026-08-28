@@ -1,5 +1,5 @@
 import { query } from "@/lib/db";
-import type { DocRow } from "@/lib/docs/store";
+import type { ViewableDoc } from "@/lib/docs/store";
 import type { Session } from "@/lib/auth/session";
 import { emailDomain, grantFor } from "@/lib/docs/grants";
 import { safeEqualStr } from "@/lib/auth/tokens";
@@ -22,7 +22,7 @@ import { safeEqualStr } from "@/lib/auth/tokens";
  * timing-safe string compare in lib/auth/tokens.ts). Used where no session
  * context is in play; the session-aware path is canViewSession below.
  */
-export function canView(doc: DocRow, viewtoken: string | null): boolean {
+export function canView(doc: ViewableDoc, viewtoken: string | null): boolean {
   if (doc.is_public) return true;
   if (!viewtoken) return false;
   return safeEqualStr(viewtoken, doc.view_token);
@@ -45,7 +45,7 @@ async function sessionHasGrant(docId: number, email: string): Promise<boolean> {
 }
 
 /** True if `email` is the registered owner of `doc` (one indexed lookup). */
-async function emailOwnsDoc(doc: DocRow, email: string): Promise<boolean> {
+async function emailOwnsDoc(doc: ViewableDoc, email: string): Promise<boolean> {
   const { rows } = await query<{ n: number }>(
     `SELECT count(*) AS n FROM users
      WHERE id = $1 AND email = $2`,
@@ -62,7 +62,7 @@ async function emailOwnsDoc(doc: DocRow, email: string): Promise<boolean> {
  * email-keyed session — that's the whole point of the share-notification flow).
  */
 export async function canViewSession(
-  doc: DocRow,
+  doc: ViewableDoc,
   session: Session | null,
   viewtoken: string | null
 ): Promise<boolean> {

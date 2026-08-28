@@ -266,6 +266,7 @@ export default function CommentsShell(props: Props) {
   // the new version on each save.
   const [editing, setEditing] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const versionRef = useRef(props.version);
   const saveInlineEditRef = useRef<(changes: TextChange[]) => void>(() => {});
   const statusTimer = useRef<number | null>(null);
@@ -281,6 +282,32 @@ export default function CommentsShell(props: Props) {
 
   const apiBase = `/api/v1/docs/${encodeURIComponent(slug)}`;
   const tokenQuery = viewtoken ? `?viewtoken=${encodeURIComponent(viewtoken)}` : "";
+
+  useEffect(() => {
+    if (updateAvailable) return;
+    let checking = false;
+
+    const checkVersion = async () => {
+      if (checking || document.hidden) return;
+      checking = true;
+      try {
+        const r = await fetch(`/d/${encodeURIComponent(slug)}/version${tokenQuery}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+        });
+        if (!r.ok) return;
+        const version = Number(await r.text());
+        if (Number.isInteger(version) && version > versionRef.current) setUpdateAvailable(true);
+      } catch {
+        return;
+      } finally {
+        checking = false;
+      }
+    };
+
+    const interval = window.setInterval(() => void checkVersion(), 30_000);
+    return () => window.clearInterval(interval);
+  }, [slug, tokenQuery, updateAvailable]);
 
   // The anchors we ask the overlay to paint (anchored, non-orphaned roots that
   // are visible under the resolved toggle).
@@ -732,10 +759,12 @@ export default function CommentsShell(props: Props) {
       // the rendered document never disagrees with the stored bytes.
       postToOverlay({ type: "jh:editResult", ok: r.ok });
       if (!r.ok) {
+        if (r.status === 409) setUpdateAvailable(true);
         showEditStatus(editErrorMessage(r.status, body), 6000);
         return;
       }
       if (typeof body?.version === "number") versionRef.current = body.version;
+      setUpdateAvailable(false);
       showEditStatus("saved", 2000);
       // The write re-anchored comments in the same transaction; pull the result.
       await reload();
@@ -938,6 +967,17 @@ export default function CommentsShell(props: Props) {
           {title}
         </span>
         <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
+          {updateAvailable ? (
+            <span role="status">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                style={{ ...commentBtnStyle(true), fontWeight: 700 }}
+              >
+                updated · refresh
+              </button>
+            </span>
+          ) : null}
           {readMinutes != null && readMinutes > 0 ? (
             <span className="jh-readtime" data-level={readTimeLevel(readMinutes)} title={readTimeTitle(readMinutes)}>
               {readMinutes} min read

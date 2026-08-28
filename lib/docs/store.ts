@@ -36,6 +36,9 @@ export type DocRow = {
   deleted_at: string | null;
 };
 
+export type ViewableDoc = Pick<DocRow, "id" | "owner_id" | "is_public" | "view_token">;
+export type DocVersion = ViewableDoc & Pick<DocRow, "version">;
+
 export type EditKind = "create" | "patch" | "rewrite";
 
 export function docUrl(slug: string): string {
@@ -556,6 +559,16 @@ export async function softDelete(docId: number): Promise<void> {
 export async function findBySlug(slug: string): Promise<DocRow | null> {
   const { rows } = await query<DocRow>(
     `SELECT * FROM documents WHERE slug = $1 AND deleted_at IS NULL`,
+    [slug]
+  );
+  return rows[0] ?? null;
+}
+
+/** Fetch only the fields needed to authorize a viewer and compare versions. */
+export async function findVersionBySlug(slug: string): Promise<DocVersion | null> {
+  const { rows } = await query<DocVersion>(
+    `SELECT id, owner_id, is_public, view_token, version
+     FROM documents WHERE slug = $1 AND deleted_at IS NULL`,
     [slug]
   );
   return rows[0] ?? null;

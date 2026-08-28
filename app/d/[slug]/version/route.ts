@@ -1,0 +1,28 @@
+import { getSession } from "@/lib/auth/session";
+import { canViewSession } from "@/lib/docs/access";
+import { findVersionBySlug } from "@/lib/docs/store";
+
+export const dynamic = "force-dynamic";
+
+type Ctx = { params: Promise<{ slug: string }> };
+
+function notFound(): Response {
+  return new Response(null, { status: 404 });
+}
+
+export async function GET(req: Request, ctx: Ctx): Promise<Response> {
+  const { slug } = await ctx.params;
+  const doc = await findVersionBySlug(slug);
+  if (!doc) return notFound();
+
+  const viewtoken = new URL(req.url).searchParams.get("viewtoken");
+  const session = await getSession(req);
+  if (!(await canViewSession(doc, session, viewtoken))) return notFound();
+
+  return new Response(String(doc.version), {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "private, no-store",
+    },
+  });
+}
