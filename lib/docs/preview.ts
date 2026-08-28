@@ -23,18 +23,12 @@ function clean(value: string): string {
 
 function metaTags(html: string): string[] {
   const tags: string[] = [];
-  const lower = html.toLowerCase();
-  let cursor = 0;
-  while (cursor < html.length) {
-    const start = lower.indexOf("<meta", cursor);
-    if (start === -1) break;
-    const boundary = html[start + 5];
-    if (boundary && !/[\s/>]/.test(boundary)) {
-      cursor = start + 5;
-      continue;
-    }
+  const startTag = /<meta(?=[\s/>])/gi;
+  let match: RegExpExecArray | null;
+  while ((match = startTag.exec(html)) !== null) {
+    const start = match.index;
     let quote = "";
-    let end = start + 5;
+    let end = startTag.lastIndex;
     for (; end < html.length; end++) {
       const char = html[end];
       if (quote) {
@@ -46,7 +40,7 @@ function metaTags(html: string): string[] {
         break;
       }
     }
-    cursor = end + 1;
+    startTag.lastIndex = end + 1;
   }
   return tags;
 }

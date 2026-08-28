@@ -16,6 +16,12 @@ describe("document link previews", () => {
     );
   });
 
+  it("finds metadata after Unicode characters whose lowercase form changes length", () => {
+    expect(extractPreviewDescription(`İ<META NAME="description" CONTENT="Unicode-safe">`)).toBe(
+      "Unicode-safe"
+    );
+  });
+
   it("falls back through Open Graph and Twitter descriptions", () => {
     expect(extractPreviewDescription(`<meta property="og:description" content="Open Graph copy">`)).toBe(
       "Open Graph copy"
