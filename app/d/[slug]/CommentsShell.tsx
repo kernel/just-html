@@ -7,6 +7,7 @@ import type { Section } from "@/lib/docs/sections";
 import { fragmentFor, parseHash } from "@/lib/docs/deeplink";
 import { readMinutesFor, readTimeLevel, readTimeTitle } from "@/lib/docs/reading-time";
 import { buildInlineEdits, type TextChange } from "@/lib/docs/inline-edit";
+import { startVersionPolling } from "@/lib/docs/version-polling";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
 // architecture", "CHOSEN: variant B"). The google-docs-style comment rail. The
@@ -285,37 +286,11 @@ export default function CommentsShell(props: Props) {
 
   useEffect(() => {
     if (updateAvailable) return;
-    let checking = false;
-    let controller: AbortController | null = null;
-
-    const checkVersion = async () => {
-      if (checking || document.hidden) return;
-      checking = true;
-      controller = new AbortController();
-      const timeout = window.setTimeout(() => controller?.abort(), 15_000);
-      try {
-        const r = await fetch(`/d/${encodeURIComponent(slug)}/version${tokenQuery}`, {
-          cache: "no-store",
-          credentials: "same-origin",
-          signal: controller.signal,
-        });
-        if (!r.ok) return;
-        const version = Number(await r.text());
-        if (Number.isInteger(version) && version > versionRef.current) setUpdateAvailable(true);
-      } catch {
-        return;
-      } finally {
-        window.clearTimeout(timeout);
-        controller = null;
-        checking = false;
-      }
-    };
-
-    const interval = window.setInterval(() => void checkVersion(), 30_000);
-    return () => {
-      window.clearInterval(interval);
-      controller?.abort();
-    };
+    return startVersionPolling({
+      url: `/d/${encodeURIComponent(slug)}/version${tokenQuery}`,
+      currentVersion: () => versionRef.current,
+      onUpdate: () => setUpdateAvailable(true),
+    });
   }, [slug, tokenQuery, updateAvailable]);
 
   // The anchors we ask the overlay to paint (anchored, non-orphaned roots that

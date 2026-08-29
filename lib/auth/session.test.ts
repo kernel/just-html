@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ query: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({ query: mocks.query }));
 
-import { getSessionReadOnly } from "@/lib/auth/session";
+import { getSession, getSessionReadOnly } from "@/lib/auth/session";
 
 function request() {
   return new Request("https://justhtml.sh/d/test/version", {
@@ -12,8 +12,9 @@ function request() {
   });
 }
 
-describe("getSessionReadOnly", () => {
+describe("session lookup", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     mocks.query.mockResolvedValue({
       rows: [
         {
@@ -26,7 +27,7 @@ describe("getSessionReadOnly", () => {
     });
   });
 
-  it("validates expiry and revocation without renewing the session", async () => {
+  it("validates expiry and revocation without renewing a read-only session", async () => {
     await expect(getSessionReadOnly(request())).resolves.toEqual({
       id: 1,
       email: "viewer@example.com",
@@ -36,5 +37,12 @@ describe("getSessionReadOnly", () => {
     expect(mocks.query).toHaveBeenCalledOnce();
     expect(mocks.query.mock.calls[0][0]).toContain("revoked_at IS NULL AND expires_at > now()");
     expect(mocks.query.mock.calls[0][0]).not.toContain("UPDATE sessions");
+  });
+
+  it("preserves sliding expiry for normal session lookup", async () => {
+    await getSession(request());
+
+    expect(mocks.query).toHaveBeenCalledTimes(2);
+    expect(mocks.query.mock.calls[1][0]).toContain("UPDATE sessions");
   });
 });

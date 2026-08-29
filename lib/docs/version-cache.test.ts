@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   query: vi.fn(),
@@ -23,6 +23,10 @@ describe("document version cache", () => {
     mocks.query.mockResolvedValue({ rows: [doc] });
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("caches the minimal document row by slug", async () => {
     await expect(findVersionBySlug("quiet-moon-12345")).resolves.toEqual(doc);
 
@@ -42,5 +46,20 @@ describe("document version cache", () => {
     invalidateDocVersion("quiet-moon-12345");
 
     expect(mocks.revalidateTag).toHaveBeenCalledWith("doc-version:quiet-moon-12345");
+  });
+
+  it("reports invalidation failures", () => {
+    const error = new Error("cache unavailable");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.revalidateTag.mockImplementationOnce(() => {
+      throw error;
+    });
+
+    invalidateDocVersion("quiet-moon-12345");
+
+    expect(consoleError).toHaveBeenCalledWith("Failed to invalidate document version cache", {
+      slug: "quiet-moon-12345",
+      error,
+    });
   });
 });

@@ -27,7 +27,7 @@ export function findVersionBySlug(slug: string): Promise<DocVersion | null> {
 export function invalidateDocVersion(slug: string): void {
   try {
     revalidateTag(versionTag(slug));
-  } catch {
-    return;
+  } catch (error) {
+    console.error("Failed to invalidate document version cache", { slug, error });
   }
 }

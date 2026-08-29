@@ -170,6 +170,11 @@ starting with `/d/`: a fixed 60-second window, 300 requests per IP, then 429.
 Keeping this limit at the edge prevents abusive requests from reaching a function
 or adding Postgres counter writes before the document lookup.
 
+Run `npm run firewall:configure` with an authenticated Vercel CLI or
+`VERCEL_TOKEN` to create the rule, repair configuration drift, and publish it.
+`VERCEL_PROJECT` and `VERCEL_SCOPE` override the `justhtml` and `onkernel`
+defaults.
+
 ## Surfaces
 
 Agent / discovery (plain text or JSON, zero JS):
