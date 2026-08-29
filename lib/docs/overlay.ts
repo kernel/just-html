@@ -405,7 +405,8 @@ export const OVERLAY_SCRIPT = String.raw`
     // darkest (3+). .jh-focus intensifies the focused anchor's segments; .jh-dim
     // fades non-focused overlapping highlights when a focus is active.
     st.textContent =
-      "span[data-jh-seg]{cursor:pointer;transition:background .12s,opacity .12s,box-shadow .12s}"
+      "table{display:block;max-width:100%;overflow-x:auto}"
+      + "span[data-jh-seg]{cursor:pointer;transition:background .12s,opacity .12s,box-shadow .12s}"
       + "span[data-jh-seg].d1{background:#fff3bf;border-bottom:1px solid #f1d96b}"
       + "span[data-jh-seg].d2{background:#ffe08a;border-bottom:1px solid #e8c44e}"
       + "span[data-jh-seg].d3{background:#ffc94d;border-bottom:1px solid #e0a92e}"
