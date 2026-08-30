@@ -6,10 +6,12 @@ import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { isOwner } from "@/lib/docs/grants";
 import { checkLimits } from "@/lib/auth/ratelimit";
+import { parseAnchor, type TextAnchor } from "@/lib/docs/anchor";
 import {
   findComment,
   commentView,
   editCommentBody,
+  reanchorComment,
   setResolved,
   softDeleteComment,
   resolveCommentPrincipal,
@@ -23,8 +25,10 @@ export const dynamic = "force-dynamic";
 type Ctx = { params: Promise<{ slug: string; id: string }> };
 
 // /api/v1/docs/:slug/comments/:id
-//   PATCH  — edit body (author only) and/or resolve|unresolve (anyone who can
-//            comment). birthday.md "Permission matrix".
+//   PATCH  — edit body (author only), re-anchor/detach (author own, doc owner
+//            any; the manual fix for an orphaned thread), and/or
+//            resolve|unresolve (anyone who can comment). birthday.md
+//            "Permission matrix".
 //   DELETE — soft-delete (author own, owner any).
 //
 // Auth: API key OR session, same as POST /comments.
@@ -73,9 +77,10 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
   const b = parsed.obj;
 
   const hasBody = b.body !== undefined;
+  const hasAnchor = b.anchor !== undefined;
   const hasResolved = b.resolved !== undefined;
-  if (!hasBody && !hasResolved) {
-    return apiError(400, "invalid_request", "Provide 'body' (edit) and/or 'resolved' (resolve/unresolve).");
+  if (!hasBody && !hasAnchor && !hasResolved) {
+    return apiError(400, "invalid_request", "Provide 'body' (edit), 'anchor' (re-anchor/detach), and/or 'resolved' (resolve/unresolve).");
   }
 
   // Edit body: AUTHOR ONLY. The author 403 precedes field validation (ordering
@@ -96,6 +101,27 @@ export async function PATCH(req: Request, ctx: Ctx): Promise<Response> {
       });
     }
     await editCommentBody(doc.id, commentId, body);
+  }
+
+  // Re-anchor / detach: AUTHOR (own) OR DOC OWNER (any) — same shape as
+  // delete. The owner can repair orphaned threads on their document regardless
+  // of who authored them. A new quote re-resolves against the current doc text
+  // (un-orphaning on success); null detaches to a doc-level comment. Replies
+  // carry no anchor, same rule as POST /comments.
+  if (hasAnchor) {
+    if (!isAuthor && !cap.isOwner) {
+      return apiError(403, "forbidden", "Only the comment's author or the document owner can re-anchor it.");
+    }
+    if (comment.parent_id !== null) {
+      return apiError(400, "invalid_request", "A reply cannot carry its own anchor; omit 'anchor' on replies.");
+    }
+    let anchor: TextAnchor | null = null;
+    if (b.anchor !== null) {
+      const parsed = parseAnchor(b.anchor);
+      if ("error" in parsed) return apiError(400, "invalid_request", parsed.error);
+      anchor = parsed.anchor;
+    }
+    await reanchorComment(doc, commentId, anchor);
   }
 
   // Resolve / unresolve: ANYONE WHO CAN COMMENT.
