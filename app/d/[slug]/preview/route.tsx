@@ -2,32 +2,13 @@ import { ImageResponse } from "next/og";
 import { findBySlug } from "@/lib/docs/store";
 import { canView } from "@/lib/docs/access";
 import { documentPreview } from "@/lib/docs/preview";
-import { clientIp } from "@/lib/auth/request";
-import { checkLimits } from "@/lib/auth/ratelimit";
-import { RL_VIEWER_PER_MIN } from "@/lib/docs/config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ slug: string }> };
 
-const VIEWER_PER_HOUR = RL_VIEWER_PER_MIN * 60;
-
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
-  const ip = clientIp(req);
-  const tripped = await checkLimits([
-    ip ? { key: `viewer:ip:${ip}`, limit: VIEWER_PER_HOUR, window: "hour" } : null,
-  ]);
-  if (tripped) {
-    return new Response("Too many requests.", {
-      status: 429,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Retry-After": String(tripped.retryAfter),
-      },
-    });
-  }
-
   const { slug } = await ctx.params;
   const viewtoken = new URL(req.url).searchParams.get("viewtoken");
   const doc = await findBySlug(slug);

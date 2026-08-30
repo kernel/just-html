@@ -9,6 +9,7 @@
     "lint": "next lint",
     "migrate": "node --env-file=.env scripts/migrate.mjs",
     "migrate:status": "node --env-file=.env scripts/migrate.mjs status",
+    "firewall:configure": "scripts/configure-viewer-firewall.sh",
     "gen:skill": "tsx scripts/gen-skill.ts",
     "gen:spec": "tsx scripts/gen-spec.ts",
     "spec:check": "tsx scripts/spec-check.ts",

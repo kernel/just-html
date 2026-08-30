@@ -7,6 +7,7 @@ import type { Section } from "@/lib/docs/sections";
 import { fragmentFor, parseHash } from "@/lib/docs/deeplink";
 import { readMinutesFor, readTimeLevel, readTimeTitle } from "@/lib/docs/reading-time";
 import { buildInlineEdits, type TextChange } from "@/lib/docs/inline-edit";
+import { startVersionPolling } from "@/lib/docs/version-polling";
 
 // CommentsShell — the THIRD React surface (birthday.md "Production
 // architecture", "CHOSEN: variant B"). The google-docs-style comment rail. The
@@ -266,6 +267,7 @@ export default function CommentsShell(props: Props) {
   // the new version on each save.
   const [editing, setEditing] = useState(false);
   const [editStatus, setEditStatus] = useState<string | null>(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
   const versionRef = useRef(props.version);
   const saveInlineEditRef = useRef<(changes: TextChange[]) => void>(() => {});
   const statusTimer = useRef<number | null>(null);
@@ -281,6 +283,15 @@ export default function CommentsShell(props: Props) {
 
   const apiBase = `/api/v1/docs/${encodeURIComponent(slug)}`;
   const tokenQuery = viewtoken ? `?viewtoken=${encodeURIComponent(viewtoken)}` : "";
+
+  useEffect(() => {
+    if (updateAvailable) return;
+    return startVersionPolling({
+      url: `/d/${encodeURIComponent(slug)}/version${tokenQuery}`,
+      currentVersion: () => versionRef.current,
+      onUpdate: () => setUpdateAvailable(true),
+    });
+  }, [slug, tokenQuery, updateAvailable]);
 
   // The anchors we ask the overlay to paint (anchored, non-orphaned roots that
   // are visible under the resolved toggle).
@@ -732,10 +743,12 @@ export default function CommentsShell(props: Props) {
       // the rendered document never disagrees with the stored bytes.
       postToOverlay({ type: "jh:editResult", ok: r.ok });
       if (!r.ok) {
+        if (r.status === 409) setUpdateAvailable(true);
         showEditStatus(editErrorMessage(r.status, body), 6000);
         return;
       }
       if (typeof body?.version === "number") versionRef.current = body.version;
+      setUpdateAvailable(false);
       showEditStatus("saved", 2000);
       // The write re-anchored comments in the same transaction; pull the result.
       await reload();
@@ -937,7 +950,22 @@ export default function CommentsShell(props: Props) {
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: 700 }}>
           {title}
         </span>
-        <span style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}>
+        <span
+          className={`jh-bar-actions${updateAvailable ? " jh-has-update" : ""}`}
+          style={{ flexShrink: 0, paddingLeft: "1.25rem", display: "flex", gap: "1.25rem", alignItems: "center", color: "var(--jh-bar-muted, #666)" }}
+        >
+          {updateAvailable ? (
+            <span role="status">
+              <button
+                type="button"
+                aria-label="Updated. Refresh document"
+                onClick={() => window.location.reload()}
+                style={{ ...commentBtnStyle(true), fontWeight: 700 }}
+              >
+                <span className="jh-update-prefix">updated · </span>refresh
+              </button>
+            </span>
+          ) : null}
           {readMinutes != null && readMinutes > 0 ? (
             <span className="jh-readtime" data-level={readTimeLevel(readMinutes)} title={readTimeTitle(readMinutes)}>
               {readMinutes} min read
@@ -1015,8 +1043,8 @@ export default function CommentsShell(props: Props) {
           >
             💬 {commentCount}
           </button>
-          <a href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "var(--jh-bar-muted, #666)" }}>history</a>
-          <span>made with <a href="/" style={{ color: "var(--jh-bar-muted, #666)" }}>justhtml.sh</a></span>
+          <a className="jh-history" href={`/d/${encodeURIComponent(slug)}/history${tokenQuery}`} style={{ color: "var(--jh-bar-muted, #666)" }}>history</a>
+          <span className="jh-brand">made with <a href="/" style={{ color: "var(--jh-bar-muted, #666)" }}>justhtml.sh</a></span>
         </span>
       </div>
 
@@ -1753,6 +1781,10 @@ const RAIL_CSS = `
   .jh-scrim { display: block; }
   /* The bar is already tight at this width; the read time is the first thing to go. */
   .jh-readtime { display: none; }
+  .jh-bar-actions { gap: 12px !important; padding-left: 12px !important; }
+  .jh-bar-actions.jh-has-update .jh-history,
+  .jh-bar-actions.jh-has-update .jh-brand,
+  .jh-bar-actions.jh-has-update .jh-update-prefix { display: none; }
 }
 `;
 

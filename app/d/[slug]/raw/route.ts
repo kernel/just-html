@@ -2,9 +2,6 @@ import { findBySlug } from "@/lib/docs/store";
 import { canViewSession } from "@/lib/docs/access";
 import { verifyViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
-import { clientIp } from "@/lib/auth/request";
-import { checkLimits } from "@/lib/auth/ratelimit";
-import { RL_VIEWER_PER_MIN } from "@/lib/docs/config";
 import { OVERLAY_SCRIPT } from "@/lib/docs/overlay";
 
 export const dynamic = "force-dynamic";
@@ -26,11 +23,6 @@ type Ctx = { params: Promise<{ slug: string }> };
 //
 // Directly linkable for zero-chrome viewing; same token rules as /d/:slug.
 //
-// Viewer rate limit: per-IP (the sandbox + token model is the real protection;
-// this just caps scraping). The per-minute cap is mapped onto the hourly counter
-// bucket (×60) since the rate_limits table buckets hourly — see lib/docs/api.ts.
-const VIEWER_PER_HOUR = RL_VIEWER_PER_MIN * 60;
-
 function deny(status: number, msg: string): Response {
   return new Response(msg, {
     status,
@@ -39,20 +31,6 @@ function deny(status: number, msg: string): Response {
 }
 
 export async function GET(req: Request, ctx: Ctx): Promise<Response> {
-  const ip = clientIp(req);
-  const tripped = await checkLimits([
-    ip ? { key: `viewer:ip:${ip}`, limit: VIEWER_PER_HOUR, window: "hour" } : null,
-  ]);
-  if (tripped) {
-    return new Response("Too many requests.", {
-      status: 429,
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Retry-After": String(tripped.retryAfter),
-      },
-    });
-  }
-
   const { slug } = await ctx.params;
   const url = new URL(req.url);
   const viewtoken = url.searchParams.get("viewtoken");
