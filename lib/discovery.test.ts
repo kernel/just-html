@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
@@ -7,6 +8,9 @@ import { GET as getSkillIndex } from "@/app/.well-known/agent-skills/index.json/
 import { GET as getSkill } from "@/app/.well-known/agent-skills/just-html/SKILL.md/route";
 import { GET as getIntegrations } from "@/app/.well-known/integrations.json/route";
 import { GET as getOpenApi } from "@/app/openapi.json/route";
+import { GET as getLlms } from "@/app/llms.txt/route";
+import { MAX_STORAGE_BYTES_PER_USER } from "@/lib/docs/config";
+import { LLMS_BODY, SKILL_MARKDOWN } from "@/lib/skill-content";
 
 const basis = z
   .object({
@@ -125,6 +129,18 @@ describe("integration discovery", () => {
       expect.objectContaining({ url: "https://justhtml.sh" })
     );
     expect(document.components.securitySchemes).toHaveProperty("bearerApiKey");
+  });
+
+  it("serves quota recovery guidance in llms.txt and the published skill", async () => {
+    const response = getLlms();
+    const body = await response.text();
+    expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(body).toBe(LLMS_BODY);
+    expect(body).toContain('"limit_value":' + MAX_STORAGE_BYTES_PER_USER);
+    expect(body).toContain("scope=owned&limit=500");
+    expect(body).toContain("Ask the user which specific docs to delete. Never delete automatically");
+    expect(await getSkill().text()).toBe(SKILL_MARKDOWN);
+    expect(readFileSync("skills/just-html/SKILL.md", "utf8")).toBe(SKILL_MARKDOWN);
   });
 
   it("publishes an Agent Skills index with a matching artifact digest", async () => {

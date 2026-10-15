@@ -260,11 +260,55 @@ Resource quotas (per user):
   Max HTML size per doc       2 MB        request rejected 413 payload_too_large
   Docs per user               500         soft-deleted don't count; 403 quota_exceeded
   Versions retained per doc   100         oldest snapshots pruned beyond this
-  Total storage per user      100 MB      current html + retained snapshots; 403
+  Total storage per user      100 MiB     current html + retained snapshots; 403
   Grants per doc              50          403 quota_exceeded
   Comment body size           10 KB       413 payload_too_large
   Comments per doc            1,000       403 quota_exceeded
   API keys per user           10
+
+### Recovering from a storage or document-count quota
+
+A 403 with { "error":"quota_exceeded", "limit":"storage",
+"limit_value":104857600, "current":... } means the write would exceed the
+account's 100 MiB storage quota (current and limit_value are bytes).
+limit:"doc_count" means the 500-document cap. This is not an authentication or
+rate-limit failure: do not
+re-register, repeatedly retry the write, or switch hosts without asking the user.
+Keep the unpublished HTML locally while resolving the quota.
+
+1. Find cleanup candidates among OWNED docs, not shared docs or bookmarks:
+     curl -s 'https://justhtml.sh/api/v1/docs?scope=owned&limit=500' -H "Authorization: Bearer $JUSTHTML_API_KEY"
+   The default limit is only 100; 500 covers the full document quota. Results
+   arrive newest-created first. Sort locally by updated_at ascending to find
+   older docs; inspect titles and, where needed, GET /docs/:slug for context.
+   Look for superseded drafts, duplicate exports, temporary previews, or old
+   one-off reports. Age alone does not mean unused: updated_at measures edits,
+   not readership. Do not assume a shared or long-lived reference is disposable.
+
+2. Estimate the space each likely candidate would release. GET /docs/:slug
+   returns current html; GET /docs/:slug/versions returns versions[].bytes.
+   Add the UTF-8 byte length of current html to the sum of ALL retained snapshot
+   bytes (including the current version's snapshot). Both count toward quota.
+   The listing has no storage-size field. Shrinking HTML can add a snapshot,
+   so it is not a reliable way to reclaim space; there is no version-delete API.
+
+3. Offer 3-5 candidates (or fewer if fewer are suitable) as suggestions, with
+   title, URL/slug, last-updated date, estimated reclaimable MiB, and why each
+   looks safe to remove. Label estimates; never invent usage or readership data.
+   Ask the user which specific docs to delete. Never delete automatically, in
+   bulk, or solely because a doc is old. If no safe candidates emerge, say so
+   and ask whether the user prefers keeping everything or another hosting option.
+
+4. Only after explicit approval for the specific docs, offer to export any
+   content/history they want to keep and complete any requested export before
+   DELETE /docs/:slug for approved docs only. Deletion is soft but removes
+   viewer access, including existing share links; the doc's current HTML and
+   retained snapshots stop counting toward quota. Do not promise an API restore
+   operation.
+
+5. Retry the original publish/update once after cleanup. If it still hits the
+   quota, report that and suggest another small set for approval, not an
+   automatic deletion loop. Return the published URL when the write succeeds.
 
 API rate limits (per API key) -> 429 with Retry-After + { error: "rate_limited" }:
   Doc creates                 60 / hour
