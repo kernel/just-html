@@ -490,12 +490,14 @@ registry.registerPath({
   },
 });
 
-// PATCH /api/v1/docs/{slug}/comments/{id} — edit body / resolve toggle
+// PATCH /api/v1/docs/{slug}/comments/{id} — edit body / re-anchor / resolve toggle
 registry.registerPath({
   method: "patch",
   path: "/api/v1/docs/{slug}/comments/{id}",
   tags: ["collaboration"],
-  summary: "Edit body (author) and/or resolve/unresolve (anyone who can comment)",
+  summary: "Edit body (author), re-anchor/detach (author or doc owner), and/or resolve/unresolve (anyone who can comment)",
+  description:
+    "anchor re-anchors the comment to a new quote (re-resolved against the current text; un-orphans on success) or, when null, detaches it to a doc-level comment — the manual fix for an orphaned thread whose quoted text was rewritten. The comment's author or the document owner; root comments only.",
   operationId: "updateComment",
   security: keyOrSessionSecurity,
   request: {
@@ -510,7 +512,7 @@ registry.registerPath({
     400: { description: "Invalid request body or parameters", content: jsonError },
     401: { description: "Missing/invalid credential", content: jsonError },
     403: {
-      description: "Editing another author's body, or resolving without comment rights",
+      description: "Editing another author's body, re-anchoring without being the author or doc owner, or resolving without comment rights",
       content: jsonError,
     },
     404: {
