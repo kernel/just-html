@@ -3,6 +3,7 @@ import { canViewSession } from "@/lib/docs/access";
 import { verifyViewCap } from "@/lib/docs/viewcap";
 import { getSession } from "@/lib/auth/session";
 import { OVERLAY_SCRIPT } from "@/lib/docs/overlay";
+import { fontFallbackStyle } from "@/lib/docs/font-fallback";
 
 export const dynamic = "force-dynamic";
 
@@ -65,12 +66,16 @@ export async function GET(req: Request, ctx: Ctx): Promise<Response> {
     if (!(await canViewSession(doc, session, viewtoken))) return deny(404, "Not found.");
   }
 
-  // Inject the comment overlay only for the shell-embedded variant. We append the
-  // script before </body> (or at the end if there's no body tag), leaving the
-  // user's HTML otherwise untouched. The CSP sandbox already permits scripts.
+  // Inject the comment overlay — and, for docs that set no font of their own,
+  // the site's default sans face (lib/docs/font-fallback.ts) — only for the
+  // shell-embedded variant. We append before </body> (or at the end if there's
+  // no body tag), leaving the user's HTML otherwise untouched. The CSP sandbox
+  // already permits scripts. The font decision must be made on the pristine
+  // bytes: the overlay script itself mentions font-family.
   let html = doc.html;
   if (wantOverlay) {
-    const tag = `<script data-jh-overlay="1">${OVERLAY_SCRIPT}</script>`;
+    const fontTag = fontFallbackStyle(html);
+    const tag = `${fontTag}<script data-jh-overlay="1">${OVERLAY_SCRIPT}</script>`;
     const idx = html.toLowerCase().lastIndexOf("</body>");
     html = idx === -1 ? html + tag : html.slice(0, idx) + tag + html.slice(idx);
   }
