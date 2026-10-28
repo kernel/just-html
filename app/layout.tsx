@@ -7,7 +7,8 @@ import type { ReactNode } from "react";
 // not add a React runtime to the man-page pages (homepage, /auth.md, /llms.txt,
 // /raw, the JSON discovery docs, the form POSTs). It exists solely so the two
 // designated React surfaces have a document shell. Styling is kept consistent with
-// the man-page brand: monospace, always light mode (httpbingo.org vibe).
+// the man-page brand: the system sans reading face (SANS in lib/page.ts),
+// always light mode.
 export const metadata = {
   title: "justhtml.sh",
 };
@@ -23,7 +24,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             __html: `:root{color-scheme:light}
 *{box-sizing:border-box}
 html,body{margin:0}
-body{font-family:ui-monospace,"SF Mono",Menlo,Consolas,"Courier New",monospace;color:#111;background:#fff}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;color:#111;background:#fff}
 a{color:#0000ee}`,
           }}
         />

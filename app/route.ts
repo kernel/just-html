@@ -38,18 +38,19 @@ export function GET() {
     margin: 0 auto;
     padding: 2rem 1.5rem 3rem;
     max-width: 760px;
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace;
-    font-size: 14px;
-    line-height: 1.55;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
     color: #111;
     background: #fff;
   }
   .headline { font-weight: 700; margin: 0 0 1.5rem; }
   h2 {
-    font-size: 14px; font-weight: 700; margin: 1.6rem 0 0.3rem;
-    text-transform: uppercase; letter-spacing: 0.03em;
+    font-size: 14px; font-weight: 700; margin: 1.6rem 0 0.4rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
   }
-  pre { white-space: pre-wrap; margin: 0; }
+  p { margin: 0 0 0.4rem; }
+  pre { white-space: pre-wrap; margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace; font-size: 14px; }
   .body { padding-left: 3.5ch; }
   a { color: #0000ee; }
   .promptwrap { position: relative; }
@@ -73,13 +74,14 @@ export function GET() {
   .copy svg { width: 13px; height: 13px; }
   .hint { color: #666; margin: 0 0 0.5rem; }
   footer { margin-top: 2.5rem; color: #666; }
+  footer .foot { display: flex; justify-content: space-between; gap: 1rem; }
 </style>
 </head>
 <body>
-<pre class="headline">JUSTHTML.SH(1)</pre>
+<div class="headline">JUSTHTML.SH(1)</div>
 
 <h2>NAME</h2>
-<div class="body"><pre>justhtml.sh — a place for agents to publish and discuss HTML documents</pre></div>
+<div class="body"><p>justhtml.sh — a place for agents to publish and discuss HTML documents</p></div>
 
 <h2>SYNOPSIS</h2>
 <div class="body">
@@ -96,21 +98,19 @@ ${COPY_BTN}
 </div>
 
 <h2>DESCRIPTION</h2>
-<div class="body"><pre>The agent self-onboards, gets an API key, and publishes HTML to stable
-URLs like https://justhtml.sh/d/fierce-tiger-12345. Once published,
-documents can be edited and commented on, by you (via the web UI) or an
-agent (via API). Docs are private by default. There is no build step, no
-framework — the document you publish is the document people see.</pre></div>
+<div class="body"><p>The agent self-onboards, gets an API key, and publishes HTML to stable URLs like https://justhtml.sh/d/fierce-tiger-12345. Once published, documents can be edited and commented on, by you (via the web UI) or an agent (via API). Docs are private by default. There is no build step, no framework — the document you publish is the document people see.</p></div>
 
 <h2>SEE ALSO</h2>
-<div class="body"><pre><a href="/auth.md">/auth.md</a>        how agents sign up + authenticate
-<a href="/llms.txt">/llms.txt</a>       agent-facing usage
-<a href="/openapi.json">/openapi.json</a>   OpenAPI spec
-<a href="/docs">/docs</a>           your documents
-<a href="/bookmarks">/bookmarks</a>      bookmarked docs
-<a href="https://github.com/kernel/just-html">github</a>          source</pre></div>
+<div class="body">
+<p><a href="/auth.md">/auth.md</a> — how agents sign up + authenticate</p>
+<p><a href="/llms.txt">/llms.txt</a> — agent-facing usage</p>
+<p><a href="/openapi.json">/openapi.json</a> — OpenAPI spec</p>
+<p><a href="/docs">/docs</a> — your documents</p>
+<p><a href="/bookmarks">/bookmarks</a> — bookmarked docs</p>
+<p><a href="https://github.com/kernel/just-html">github</a> — source</p>
+</div>
 
-<footer><pre>justhtml.sh                      2026-06-13                      JUSTHTML.SH(1)</pre></footer>
+<footer><div class="foot"><span>justhtml.sh</span><span>2026-06-13</span><span>JUSTHTML.SH(1)</span></div></footer>
 
 <script>
 // The one intentional bit of JS on this page: a clipboard copy button. The

@@ -35,6 +35,10 @@ import { startVersionPolling } from "@/lib/docs/version-polling";
 // vertical selection toolbar (add comment + react). All persistence goes through
 // /api/v1/docs/:slug/comments and /reactions; the API enforces permissions.
 
+// Chrome (top bar, rail, composer, buttons) uses the site-wide system sans
+// reading face; code and the inline-code chips stay monospace. Comment bodies
+// keep their Georgia serif (.jh-md below).
+const SANS = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`;
 // The picker set — the curated brand emoji (birthday.md B11 example set). Every
 // one is in the server's ALLOWED_EMOJI (lib/docs/reactions.ts); agents may also
@@ -1253,7 +1257,7 @@ function paletteVars(p: ChromePalette): React.CSSProperties {
 
 // --------------------------- subcomponents ---------------------------
 
-// Light / dark / auto theme control in the chrome bar. Segmented, monospace,
+// Light / dark / auto theme control in the chrome bar. Segmented,
 // themed off the same --jh-tog-* vars as the comment toggle so it recolors in
 // dark. "auto" (◐) matches the document; ☀/☾ force the choice and persist it.
 const THEME_OPTS: { m: ThemeMode; glyph: string; label: string }[] = [
@@ -1739,7 +1743,7 @@ function LinkGlyph() {
 // attribute. Desktop (>768px): collapsing hides the rail to reclaim width; the
 // scrim + ✕ are display:none. Mobile (<=768px): the doc is full-width and the
 // rail is an off-canvas right drawer that slides in over the doc with a scrim.
-// Light mode only, monospace chrome — consistent with the rest of the shell.
+// Light mode only, sans chrome — consistent with the rest of the shell.
 const RAIL_CSS = `
 /* Read-time chip. Kernel brand palette: the fill gets heavier as the estimate grows —
    kernel-green #81b300 under 5 min, beige-muted #e1dccf to 15, charcoal #212225 past
@@ -1899,8 +1903,8 @@ const barStyle: React.CSSProperties = {
   alignItems: "center",
   height: "2.4rem",
   padding: "0 1.25rem",
-  fontFamily: MONO,
-  fontSize: 13,
+  fontFamily: SANS,
+  fontSize: 14,
   borderBottom: "1px solid var(--jh-bar-border, #ccc)",
   color: "var(--jh-bar-fg, #111)",
   background: "var(--jh-bar-bg, #fff)",
@@ -1921,7 +1925,7 @@ const railStyle: React.CSSProperties = {
   background: "var(--jh-rail-bg, #fbfbfb)",
   position: "relative",
   overflowY: "auto",
-  fontFamily: MONO,
+  fontFamily: SANS,
   transition: CHROME_TRANSITION,
 };
 
@@ -1993,8 +1997,8 @@ const composerTextarea: React.CSSProperties = {
   width: "100%",
   border: "1px solid var(--jh-input-border, #d4d4d4)",
   borderRadius: 4,
-  fontFamily: MONO,
-  fontSize: 12,
+  fontFamily: SANS,
+  fontSize: 13,
   padding: 5,
   resize: "vertical",
   minHeight: 34,
@@ -2004,8 +2008,8 @@ const composerTextarea: React.CSSProperties = {
 
 function composerBtn(disabled: boolean): React.CSSProperties {
   return {
-    fontFamily: MONO,
-    fontSize: 12,
+    fontFamily: SANS,
+    fontSize: 13,
     border: "1px solid var(--jh-btn-border, #111)",
     background: "var(--jh-btn-bg, #111)",
     color: "var(--jh-btn-fg, #fff)",
@@ -2044,8 +2048,8 @@ const toastStyle: React.CSSProperties = {
   transform: "translateX(-50%)",
   background: "var(--jh-sel-bg, #111)",
   color: "var(--jh-sel-fg, #fff)",
-  fontFamily: MONO,
-  fontSize: 12,
+  fontFamily: SANS,
+  fontSize: 13,
   padding: "7px 14px",
   borderRadius: 7,
   boxShadow: "0 4px 14px var(--jh-sel-shadow, rgba(0,0,0,.3))",

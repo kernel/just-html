@@ -42,14 +42,14 @@ export function bookmarkRow(m: RowModel): string {
   const label = m.title && m.title.trim() ? m.title : m.slug;
 
   if (revoked) {
-    return `<div class="row revoked"><pre><span class="title">${esc(label)}</span>  <span class="tail">revoked · ${esc(fmtDate(m.bookmarkedAt))}</span></pre>${removeForm(m.docId)}</div>`;
+    return `<div class="row revoked"><div class="main"><span class="title">${esc(label)}</span> <span class="tail">revoked · ${esc(fmtDate(m.bookmarkedAt))}</span></div>${removeForm(m.docId)}</div>`;
   }
 
   const href = m.token
     ? `/d/${encodeURIComponent(m.slug)}?viewtoken=${encodeURIComponent(m.token)}`
     : `/d/${encodeURIComponent(m.slug)}`;
   const vis = m.isPublic ? "public" : "private";
-  return `<div class="row"><pre><a class="title" href="${esc(href)}">${esc(label)}</a>  <span class="tail">${esc(m.access)} ${vis} · ${esc(fmtDate(m.bookmarkedAt))}</span></pre>${removeForm(m.docId)}</div>`;
+  return `<div class="row"><div class="main"><a class="title" href="${esc(href)}">${esc(label)}</a> <span class="tail">${esc(m.access)} ${vis} · ${esc(fmtDate(m.bookmarkedAt))}</span></div>${removeForm(m.docId)}</div>`;
 }
 
 // Inputs for re-resolving a bookmarked doc's access at read time, reduced to

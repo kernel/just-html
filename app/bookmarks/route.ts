@@ -19,12 +19,12 @@ export const dynamic = "force-dynamic";
 
 const LIST_LIMIT = 500;
 
-// Rows lay out as a flex line: the man-page `<pre>` (title + dimmed tail) and a
+// Rows lay out as a flex line: the row's main text (title + dimmed tail) and a
 // quiet inline `remove` form sitting on the same baseline.
 const ROW_STYLE = `
 <style>
   .row { display: flex; align-items: baseline; gap: 0.75rem; padding: 0.1rem 0; }
-  .row pre { min-width: 0; }
+  .row .main { min-width: 0; }
   .row a.title { font-weight: 700; }
   .row .tail { color: #888; }
   .row.revoked .title { color: #999; }
@@ -69,7 +69,7 @@ async function bookmarkAccess(
 
 function emptySection(heading: string, copy: string): string {
   return `<h2>${heading}</h2>
-<div class="body"><pre>${copy}</pre></div>`;
+<div class="body"><p>${copy}</p></div>`;
 }
 
 function section(heading: string, rows: string[]): string {
@@ -94,7 +94,8 @@ export async function GET(req: Request): Promise<Response> {
     else shared.push(bookmark);
   }
 
-  const intro = `<div class="body"><pre>Signed in as <code>${esc(email)}</code>.\n\nBookmarks track current access. If a doc's access is later revoked it stays\nlisted with a revoked label and no link — use remove to drop it.</pre></div>`;
+  const intro = `<div class="body"><p>Signed in as <code>${esc(email)}</code>.</p>
+<p>Bookmarks track current access. If a doc's access is later revoked it stays listed with a revoked label and no link — use remove to drop it.</p></div>`;
 
   // Revoked rows show the title snapshotted at bookmark time (bookmark_title),
   // never the doc's current title, which the viewer can no longer see.
@@ -136,13 +137,13 @@ export async function GET(req: Request): Promise<Response> {
       ? section("YOUR DOCUMENTS", ownedRows)
       : emptySection(
           "YOUR DOCUMENTS",
-          "You haven't bookmarked any of your own documents yet. Use the bookmark\nbutton on a doc to save it here."
+          "You haven't bookmarked any of your own documents yet. Use the bookmark button on a doc to save it here."
         ),
     shared.length
       ? section("SHARED WITH YOU", sharedRows)
       : emptySection(
           "SHARED WITH YOU",
-          "Nothing shared with you is bookmarked yet. Use the bookmark button on a\ndoc to save it here."
+          "Nothing shared with you is bookmarked yet. Use the bookmark button on a doc to save it here."
         ),
   ].join("\n");
 

@@ -107,14 +107,13 @@ function docRow(opts: {
   const vis = opts.isPublic ? "public" : "private";
   // Comment count: a compact `Nc` suffix (variant C), only when there are any.
   const comments = opts.commentCount > 0 ? ` · ${opts.commentCount}c` : "";
-  return `<div class="row"><pre><a class="title" href="${esc(href)}">${esc(label)}</a>  <span class="tail">${esc(opts.access)} ${vis} · ${esc(fmtDate(opts.updatedAt))}${comments}</span></pre></div>`;
+  return `<div class="row"><a class="title" href="${esc(href)}">${esc(label)}</a> <span class="tail">${esc(opts.access)} ${vis} · ${esc(fmtDate(opts.updatedAt))}${comments}</span></div>`;
 }
 
 function ownedSection(owned: DocListRow[]): string {
   if (owned.length === 0) {
     return `<h2>YOUR DOCUMENTS</h2>
-<div class="body"><pre>You don't own any documents yet. Your agent publishes them via the
-API (POST /api/v1/docs) using the key it holds — see <a href="/llms.txt">/llms.txt</a>.</pre></div>`;
+<div class="body"><p>You don't own any documents yet. Your agent publishes them via the API (POST /api/v1/docs) using the key it holds — see <a href="/llms.txt">/llms.txt</a>.</p></div>`;
   }
   const rows = owned.map((d) =>
     docRow({
@@ -135,8 +134,7 @@ ${rows.join("\n")}
 function sharedSection(shared: SharedDocRow[]): string {
   if (shared.length === 0) {
     return `<h2>SHARED WITH YOU</h2>
-<div class="body"><pre>Nothing is shared with you yet. When someone grants your email (or
-your email's domain) access to a doc, it shows up here.</pre></div>`;
+<div class="body"><p>Nothing is shared with you yet. When someone grants your email (or your email's domain) access to a doc, it shows up here.</p></div>`;
   }
   const rows = shared.map((d) =>
     docRow({
@@ -205,7 +203,7 @@ export async function GET(req: Request): Promise<Response> {
   const sections: string[] = [];
   sections.push(VARIANT_C_STYLE);
   sections.push(
-    `<div class="body session"><pre>Signed in as <code>${esc(email)}</code>. See <a href="/bookmarks">bookmarks</a>.</pre><form method="POST" action="/logout"><button type="submit">log out</button></form></div>`
+    `<div class="body session"><p>Signed in as <code>${esc(email)}</code>. See <a href="/bookmarks">bookmarks</a>.</p><form method="POST" action="/logout"><button type="submit">log out</button></form></div>`
   );
   if (hasAccount) {
     sections.push(ownedSection(owned));

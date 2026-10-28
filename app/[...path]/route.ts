@@ -21,11 +21,13 @@ const PAGE = manPage({
   title: "404 — justhtml.sh",
   bodyHtml: `
 <h2>NOT FOUND</h2>
-<div class="body"><pre>404 — there is nothing at this path.</pre></div>
+<div class="body"><p>404 — there is nothing at this path.</p></div>
 
 <h2>SEE ALSO</h2>
-<div class="body"><pre><a href="/">/</a>              what justhtml.sh is
-<a href="/api/health">/api/health</a>    service + database health</pre></div>
+<div class="body">
+<p><a href="/">/</a> — what justhtml.sh is</p>
+<p><a href="/api/health">/api/health</a> — service + database health</p>
+</div>
 `,
 });
 

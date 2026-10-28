@@ -23,21 +23,20 @@ export function signingInPage(token: string, next: string): string {
     title: "justhtml.sh — signing you in",
     bodyHtml: `
 <h2>SIGNING YOU IN</h2>
-<div class="body"><pre>Signing you in…</pre></div>
+<div class="body"><p>Signing you in…</p></div>
 
 <form id="verifyform" method="POST" action="/login/verify">
 <input type="hidden" name="token" value="${esc(token)}">
 <input type="hidden" name="next" value="${esc(next)}">
 <noscript>
-<div class="body"><pre>Click the button to finish signing in on this device.
-<button type="submit">sign in</button></pre></div>
+<div class="body"><p>Click the button to finish signing in on this device.</p>
+<p><button type="submit">sign in</button></p></div>
 </noscript>
 </form>
 <script>document.getElementById('verifyform').submit();</script>
 
 <noscript>
-<div class="body"><pre>This link is single-use. If it's expired or already used you'll
-be asked to <a href="/login">request a new one</a>.</pre></div>
+<div class="body"><p>This link is single-use. If it's expired or already used you'll be asked to <a href="/login">request a new one</a>.</p></div>
 </noscript>
 `,
   });
@@ -57,14 +56,12 @@ export function confirmSignInPage(token: string, next: string): string {
     title: "justhtml.sh — confirm sign-in",
     bodyHtml: `
 <h2>ALMOST THERE</h2>
-<div class="body"><pre>Tap the button to finish signing in on this device. This link is
-single-use — if it's expired or already used you'll be asked to
-<a href="/login">request a new one</a>.</pre></div>
+<div class="body"><p>Tap the button to finish signing in on this device. This link is single-use — if it's expired or already used you'll be asked to <a href="/login">request a new one</a>.</p></div>
 
 <form method="POST" action="/login/verify">
 <input type="hidden" name="token" value="${esc(token)}">
 <input type="hidden" name="next" value="${esc(next)}">
-<div class="body"><pre><button type="submit">sign in</button></pre></div>
+<div class="body"><p><button type="submit">sign in</button></p></div>
 </form>
 `,
   });
@@ -86,14 +83,14 @@ export function deadLinkPage(next?: string): string {
     title: "justhtml.sh — link expired",
     bodyHtml: `
 <h2>LINK EXPIRED OR USED</h2>
-<div class="body"><pre>This login link is expired or already used.
-
-Request a new one at <a href="${esc(requestHref)}">justhtml.sh/login</a>${
+<div class="body">
+<p>This login link is expired or already used.</p>
+<p>Request a new one at <a href="${esc(requestHref)}">justhtml.sh/login</a>${
       dest
-        ? ` — signing in again
-will take you straight to where this link was headed.`
+        ? ` — signing in again will take you straight to where this link was headed.`
         : "."
-    }</pre></div>
+    }</p>
+</div>
 `,
   });
 }

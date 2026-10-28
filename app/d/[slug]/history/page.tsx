@@ -68,7 +68,7 @@ export default async function HistoryPage({ params, searchParams }: Props) {
         margin: "0 auto",
         maxWidth: 1100,
         padding: "1.5rem 1.25rem 4rem",
-        fontFamily: `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`,
+        fontFamily: `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`,
       }}
     >
       <HistoryClient

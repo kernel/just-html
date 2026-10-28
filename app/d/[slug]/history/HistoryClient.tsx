@@ -28,6 +28,9 @@ type Props = {
   versions: VersionMeta[]; // newest first
 };
 
+// Chrome (headers, version list, buttons) uses the site-wide system sans reading
+// face; the diff pane is code and stays monospace.
+const SANS = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
 const MONO = `ui-monospace, "SF Mono", Menlo, Consolas, "Courier New", monospace`;
 
 function fmtBytes(n: number): string {
@@ -56,7 +59,7 @@ export default function HistoryClient({ slug, title, currentVersion, versions }:
   const sel = versions.find((v) => v.version === selected);
 
   return (
-    <div style={{ fontFamily: MONO, fontSize: 13, lineHeight: 1.55 }}>
+    <div style={{ fontFamily: SANS, fontSize: 14, lineHeight: 1.6 }}>
       <div
         style={{
           display: "flex",
@@ -142,11 +145,13 @@ export default function HistoryClient({ slug, title, currentVersion, versions }:
           </div>
 
           {sel && sel.patch !== undefined ? (
-            <PatchDiff
-              key={`${sel.version}-${split ? "split" : "unified"}`}
-              patch={sel.patch}
-              options={{ diffStyle: split ? "split" : "unified", themeType: "light" }}
-            />
+            <div style={{ fontFamily: MONO, fontSize: 13, lineHeight: 1.55 }}>
+              <PatchDiff
+                key={`${sel.version}-${split ? "split" : "unified"}`}
+                patch={sel.patch}
+                options={{ diffStyle: split ? "split" : "unified", themeType: "light" }}
+              />
+            </div>
           ) : (
             <p style={{ opacity: 0.6 }}>
               No diff to show. This is the oldest retained snapshot.

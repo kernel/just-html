@@ -19,18 +19,14 @@ const EXPIRY_MIN = LOGIN_TOKEN_TTL_MIN;
 // claim ceremony — ONE flow"). We avoid the earlier "this never creates an
 // account" phrasing the founder found confusing; we just say what it does.
 function introCopy(): string {
-  return `Enter your email and we'll send a single-use link that signs you
-in on this device. No password.
-
-Sign-up is agent-only: an account is created when your agent signs
-you up via <a href="/auth.md">/auth.md</a>. Use this to get back to docs you own or
-that were shared with you.`;
+  return `<p>Enter your email and we'll send a single-use link that signs you in on this device. No password.</p>
+<p>Sign-up is agent-only: an account is created when your agent signs you up via <a href="/auth.md">/auth.md</a>. Use this to get back to docs you own or that were shared with you.</p>`;
 }
 
 // Variant A chrome with the LOCKED /login spacing fix: a clear vertical gap
 // between the email input and the "send login link" button (birthday.md:
-// "add vertical space between the email input and the … button"). The blank
-// <pre> line inside the form supplies that gap in the monospace column.
+// "add vertical space between the email input and the … button"), supplied by
+// the submit row's top margin.
 function loginForm(next: string, opts: { error?: string } = {}): string {
   const errBlock = opts.error
     ? `<p class="err">${esc(opts.error)}</p>\n`
@@ -39,16 +35,14 @@ function loginForm(next: string, opts: { error?: string } = {}): string {
     title: "justhtml.sh — login",
     bodyHtml: `
 <h2>SIGN IN</h2>
-<div class="body"><pre>${introCopy()}</pre></div>
+<div class="body">${introCopy()}</div>
 
 <h2>EMAIL</h2>
 <div class="body">
 ${errBlock}<form method="POST" action="/login">
-<pre>email: <input type="email" name="email" required autofocus inputmode="email" autocomplete="email" placeholder="you@example.com"></pre>
+<p>email: <input type="email" name="email" required autofocus inputmode="email" autocomplete="email" placeholder="you@example.com"></p>
 <input type="hidden" name="next" value="${esc(next)}">
-<pre>
-
-       <button type="submit">send login link</button></pre>
+<p style="margin-top:1.2rem"><button type="submit">send login link</button></p>
 </form>
 </div>
 `,
@@ -62,24 +56,17 @@ ${errBlock}<form method="POST" action="/login">
 function dashboardPage(email: string, hasAccount: boolean): string {
   const body = hasAccount
     ? `<h2>SIGNED IN</h2>
-<div class="body"><pre>You're signed in as <code>${esc(email)}</code>, and you have a justhtml.sh
-account. See <a href="/docs">your documents</a> — owned and shared with you.
-
-Your agent publishes and manages docs with the key it received when
-it signed you up. Private docs you own (and any shared with your
-email) render right in the browser while you're signed in.
-
-See <a href="/llms.txt">/llms.txt</a> and <a href="/api/spec.yaml">/api/spec.yaml</a> for the full API.</pre></div>`
+<div class="body">
+<p>You're signed in as <code>${esc(email)}</code>, and you have a justhtml.sh account. See <a href="/docs">your documents</a> — owned and shared with you.</p>
+<p>Your agent publishes and manages docs with the key it received when it signed you up. Private docs you own (and any shared with your email) render right in the browser while you're signed in.</p>
+<p>See <a href="/llms.txt">/llms.txt</a> and <a href="/api/spec.yaml">/api/spec.yaml</a> for the full API.</p>
+</div>`
     : `<h2>NO ACCOUNT YET</h2>
-<div class="body"><pre>You're signed in as <code>${esc(email)}</code>, but you don't have a
-justhtml.sh account yet.
-
-Sign-up is agent-only — tell your agent to sign up at
-<a href="/auth.md">justhtml.sh/auth.md</a>. It registers with this email; we email you a
-6-digit code; you read the code back to your agent. You'll end up
-with an account and your agent will hold the API key.
-
-Anything shared with your email shows up under <a href="/docs">your documents</a>.</pre></div>`;
+<div class="body">
+<p>You're signed in as <code>${esc(email)}</code>, but you don't have a justhtml.sh account yet.</p>
+<p>Sign-up is agent-only — tell your agent to sign up at <a href="/auth.md">justhtml.sh/auth.md</a>. It registers with this email; we email you a 6-digit code; you read the code back to your agent. You'll end up with an account and your agent will hold the API key.</p>
+<p>Anything shared with your email shows up under <a href="/docs">your documents</a>.</p>
+</div>`;
   return manPage({
     title: "justhtml.sh — account",
     bodyHtml: body,
@@ -91,13 +78,11 @@ function checkEmailPage(): string {
     title: "justhtml.sh — check your email",
     bodyHtml: `
 <h2>CHECK YOUR EMAIL</h2>
-<div class="body"><pre>If that address can sign in, a login link is on its way.
-
-The link is single-use and expires in ${EXPIRY_MIN} minutes. Click it on
-this device to sign in.
-
-Didn't get it? It may be filtered, or the address may be one we
-don't send to. You can <a href="/login">request another</a>.</pre></div>
+<div class="body">
+<p>If that address can sign in, a login link is on its way.</p>
+<p>The link is single-use and expires in ${EXPIRY_MIN} minutes. Click it on this device to sign in.</p>
+<p>Didn't get it? It may be filtered, or the address may be one we don't send to. You can <a href="/login">request another</a>.</p>
+</div>
 `,
   });
 }
@@ -153,7 +138,7 @@ export async function POST(req: Request): Promise<Response> {
       manPage({
         title: "justhtml.sh — slow down",
         bodyHtml: `<h2>TOO MANY REQUESTS</h2>
-<div class="body"><pre>Too many login links requested. Try again in about ${mins} minute(s).</pre></div>`,
+<div class="body"><p>Too many login links requested. Try again in about ${mins} minute(s).</p></div>`,
       }),
       { status: 429, headers: { "Retry-After": String(tripped.retryAfter) } }
     );
@@ -183,7 +168,7 @@ export async function POST(req: Request): Promise<Response> {
       manPage({
         title: "justhtml.sh — email failed",
         bodyHtml: `<h2>COULDN'T SEND</h2>
-<div class="body"><pre>We couldn't send the login email just now. Please <a href="/login">try again</a>.</pre></div>`,
+<div class="body"><p>We couldn't send the login email just now. Please <a href="/login">try again</a>.</p></div>`,
       }),
       { status: 500 }
     );

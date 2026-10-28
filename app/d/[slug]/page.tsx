@@ -33,7 +33,7 @@ export const dynamic = "force-dynamic";
 //
 // Token rules identical to /raw: owner session → email/domain grant → view token
 // → public; otherwise the "private or does not exist" notice (no existence
-// oracle). The root layout provides <html>/<body> + the monospace brand; these
+// oracle). The root layout provides <html>/<body> + the sans reading face; these
 // components render body content only.
 
 type Props = {
