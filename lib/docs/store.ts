@@ -95,7 +95,7 @@ export function granteeView(doc: DocRow, includeHtml: boolean, role: string) {
  * `role`. Two near-identical shapes coexist by design; don't conflate them.
  */
 export function listItemView(
-  doc: DocRow & { comment_count?: number | string },
+  doc: DocRow & { comment_count?: number | string; storage_bytes?: number | string },
   access: "owner" | "editor" | "commenter" | "viewer"
 ) {
   return {
@@ -109,6 +109,9 @@ export function listItemView(
     // comment_count; the /docs dashboard rows surface it too). Defaults to 0 when
     // the row didn't carry the aggregate.
     comment_count: Number(doc.comment_count ?? 0),
+    // The bytes this document costs the account, so a listing can be sorted by
+    // what would actually be reclaimed.
+    storage_bytes: Number(doc.storage_bytes ?? 0),
     created_at: doc.created_at,
     updated_at: doc.updated_at,
     // Owned docs carry the view_token (the owner's shareable capability); shared
@@ -577,7 +580,13 @@ export async function findBySlug(slug: string): Promise<DocRow | null> {
  * dashboard rows and GET /api/v1/docs items, birthday.md B11). comment_count is
  * the number of non-deleted comments + replies on the doc.
  */
-export type DocListRow = DocRow & { comment_count: number };
+export type DocListRow = DocRow & {
+  comment_count: number;
+  // Current html plus every retained snapshot for this doc, the same bytes that
+  // count against the storage quota. Without it a caller cannot tell which
+  // documents are holding the space and has to fetch each one to find out.
+  storage_bytes: number;
+};
 
 /** Correlated live-comment count, reused by both listing queries. */
 const COMMENT_COUNT_SUBQUERY = `
@@ -587,7 +596,11 @@ const COMMENT_COUNT_SUBQUERY = `
 /** List a user's live docs, newest first (with comment_count). */
 export async function listDocs(ownerId: number, limit: number): Promise<DocListRow[]> {
   const { rows } = await query<DocListRow>(
-    `SELECT d.*, ${COMMENT_COUNT_SUBQUERY}
+    `SELECT d.*, ${COMMENT_COUNT_SUBQUERY},
+       (octet_length(d.html) + COALESCE((
+          SELECT sum(octet_length(v.html)) FROM doc_versions v
+          WHERE v.doc_id = d.id
+       ), 0))::bigint AS storage_bytes
      FROM documents d
      WHERE d.owner_id = $1 AND d.deleted_at IS NULL
      ORDER BY d.created_at DESC LIMIT $2`,

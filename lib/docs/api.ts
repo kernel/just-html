@@ -73,18 +73,38 @@ export function consumerDomainRejected(domain: string): Response {
   );
 }
 
-/** 403 quota_exceeded — count or storage cap hit. */
+/**
+ * A count cap is 403 quota_exceeded: the account is not allowed another document
+ * or grant. Storage is 413 storage_quota_exceeded: nothing is forbidden, the
+ * request is too large for the space left. The storage case carries the numbers
+ * (in use, cap, headroom) and names the one thing that reliably reclaims space,
+ * because a caller reading "403" goes looking for a permissions problem and
+ * retries a write that cannot succeed.
+ */
 export function quotaExceeded(
   kind: "doc_count" | "storage" | "grants",
   limit: number,
   current: number
 ): Response {
+  if (kind === "storage") {
+    const headroom = Math.max(0, limit - current);
+    return apiError(
+      413,
+      "storage_quota_exceeded",
+      `This write would take the account past its storage limit. ${current} bytes in use against a ${limit}-byte cap, so ${headroom} bytes of headroom. Retained version history is almost always what fills this quota, and there is no version-delete API: publishing the current HTML as a new document resets that document's history to one snapshot.`,
+      {
+        limit: kind,
+        limit_value: limit,
+        current,
+        headroom,
+        suggestions: ["new_document", "delete_documents", "reduce_html"],
+      }
+    );
+  }
   const msg =
     kind === "doc_count"
       ? "You have reached the maximum number of documents."
-      : kind === "grants"
-        ? "This document has reached the maximum number of grants. Revoke an existing grant before adding another."
-        : "You have reached your total storage limit.";
+      : "This document has reached the maximum number of grants. Revoke an existing grant before adding another.";
   return apiError(403, "quota_exceeded", msg, { limit: kind, limit_value: limit, current });
 }
 

@@ -260,7 +260,7 @@ Resource quotas (per user):
   Max HTML size per doc       2 MB        request rejected 413 payload_too_large
   Docs per user               500         soft-deleted don't count; 403 quota_exceeded
   Versions retained per doc   100         oldest snapshots pruned beyond this
-  Total storage per user      100 MiB     current html + retained snapshots; 403
+  Total storage per user      100 MiB     current html + retained snapshots; 413 storage_quota_exceeded
   Grants per doc              50          403 quota_exceeded
   Comment body size           10 KB       413 payload_too_large
   Comments per doc            1,000       403 quota_exceeded
@@ -268,9 +268,12 @@ Resource quotas (per user):
 
 ### Recovering from a storage or document-count quota
 
-A 403 with { "error":"quota_exceeded", "limit":"storage",
-"limit_value":104857600, "current":... } means the write would exceed the
-account's 100 MiB storage quota (current and limit_value are bytes).
+A 413 with { "error":"storage_quota_exceeded", "limit":"storage",
+"limit_value":104857600, "current":..., "headroom":... } means the write would
+exceed the account's 100 MiB storage quota. All three are bytes: current is in
+use now, limit_value is the cap, headroom is what is left. A 403
+quota_exceeded with limit:"doc_count" is the 500-document cap, which is a
+different problem with a different fix.
 limit:"doc_count" means the 500-document cap. This is not an authentication or
 rate-limit failure: do not
 re-register, repeatedly retry the write, or switch hosts without asking the user.
@@ -289,8 +292,11 @@ Keep the unpublished HTML locally while resolving the quota.
    returns current html; GET /docs/:slug/versions returns versions[].bytes.
    Add the UTF-8 byte length of current html to the sum of ALL retained snapshot
    bytes (including the current version's snapshot). Both count toward quota.
-   The listing has no storage-size field. Shrinking HTML can add a snapshot,
-   so it is not a reliable way to reclaim space; there is no version-delete API.
+   The listing carries storage_bytes per document, so candidates sort by what
+   they would actually reclaim rather than by guesswork. Shrinking HTML can add
+   a snapshot, so it is not a reliable way to reclaim space; there is no
+   version-delete API. Publishing the current HTML as a new document is the only
+   way to drop a document's history, and it starts that document at version 1.
 
 3. Offer 3-5 candidates (or fewer if fewer are suitable) as suggestions, with
    title, URL/slug, last-updated date, estimated reclaimable MiB, and why each
